@@ -4,8 +4,8 @@
  * the files: it is in plan.json and the digest), the digest and the status. The engine host and the
  * main process pass it on field by field; the screen lists the files, shows the summary under the
  * label of the plan being approved (the model's description, not the goal), marks the files the
- * check finds denied, and keeps the apply button off: carrying out a run plan is not this app's yet
- * (the main process refuses it too).
+ * check finds denied. U-226 (U-218): the apply button comes on once the check answered, as for a
+ * plan of moves; carrying the plan out is the app's run (u226-run-plan-apply.test.ts).
  */
 
 import assert from "node:assert/strict";
@@ -105,13 +105,13 @@ test("U-206: a run plan's check names its kind; its indexes are the plan's files
   assert.deepEqual(toPlanCheckReply(applyCheck, RUN_ID, DIGEST, 2, "changes"), { ok: false, code: "host_error" }, "an apply plan's check for a run plan's view");
 });
 
-test("U-206: a run plan's approval keeps its kind and file count (the main process's refusal of its apply is smoke's runPlan)", () => {
+test("U-206: a run plan's approval keeps its kind and file count (its apply dialog names their number)", () => {
   const approvals = new PlanApprovals((size) => new Uint8Array(size).fill(7), () => 0);
   const token = approvals.issue({ workspace: HANDLE, profile: null, workflowRef: null, planRunId: RUN_ID, digest: DIGEST, moves: 0, discards: 0, planKind: "changes", files: 2 });
   assert.deepEqual({ planKind: approvals.get(token)?.planKind, files: approvals.get(token)?.files }, { planKind: "changes", files: 2 });
 });
 
-test("U-206: the plan screen lists the files, shows the summary as the approved plan's description, marks denied files, and keeps apply off", async () => {
+test("U-206: the plan screen lists the files, shows the summary as the approved plan's description, marks denied files, then offers apply", async () => {
   const restore = installFakeDom();
   try {
     const view = toPlanView(planValue(changesOutput(), shown, rows));
@@ -140,14 +140,15 @@ test("U-206: the plan screen lists the files, shows the summary as the approved 
       assert.equal(byId("plan-summary")?.getAttribute("data-plan-kind"), "changes");
       assert.ok(byId("plan-agent-words")?.textContent.startsWith(texts["plan.runSummaryLabel"]), "the approved plan's description, not the goal");
       assert.equal(byId("plan-agent-words")?.getAttribute("data-approved"), "true");
-      assert.equal(byId("plan-apply")?.hasAttribute("disabled"), true, "apply stays off");
-      assert.equal(byId("plan-run-apply-unavailable")?.textContent, texts["plan.runApplyUnavailable"]);
+      // U-226: on once the check answered (it holds the lock a moment), as for a plan of moves.
+      assert.equal(byId("plan-apply")?.hasAttribute("disabled"), false, "apply on after the check");
+      assert.equal(byId("plan-run-apply-unavailable"), undefined, "no longer said to be unavailable");
       assert.equal(byId("plan-check")?.getAttribute("data-check"), "problems");
       assert.equal(items[1]?.getAttribute("data-problem"), "denied");
       assert.ok(items[1]?.textContent.includes(texts["plancheck.runProblem.denied"]));
       assert.ok(byId("plan-check-problems")?.textContent.startsWith(texts["plancheck.deniedFiles"].split("{count}")[0] ?? "-"));
     }
-    assert.equal(calls.includes("applyPlan"), false, "nothing tries to carry it out");
+    assert.equal(calls.includes("applyPlan"), false, "nothing is applied until the button is pressed");
   } finally {
     restore();
   }

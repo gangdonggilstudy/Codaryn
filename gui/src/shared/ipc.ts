@@ -770,7 +770,8 @@ export interface RunResultView {
     readonly durationMs: number | null;
   };
   readonly notices: readonly string[];
-  readonly plan: { readonly digest: string; readonly actions: number | null } | null;
+  /** U-226 (U-221): `kind` "changes" for a run plan, whose `actions` is its number of files. */
+  readonly plan: { readonly digest: string; readonly actions: number | null; readonly kind?: "changes" } | null;
   readonly review: { readonly checklist: readonly string[] } | null;
   readonly protectedChanged: number | null;
   /** GU-5: "apply" for an apply run (DR-2), with its plan run, its done actions and the unsafe moves its check found. */
@@ -784,6 +785,13 @@ export interface RunResultView {
   readonly masking?: MaskingView | null;
   /** U-124: how the run's permission questions ended (counts), or null/absent when none was asked. */
   readonly confirmations?: ConfirmationsView | null;
+  /**
+   * U-226 (U-218): a run that carried out a run plan (kind "run" with `planRunId`): its writes
+   * refused because the approved plan does not name the file (path_not_writable). Absent otherwise.
+   */
+  readonly deniedNotPlanned?: number;
+  /** U-226 (R-109, U-193): the run's (or apply's) workspace lock could not be released at its end. */
+  readonly lockLeft?: true;
 }
 
 /** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
@@ -837,7 +845,9 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
   let planView: RunResultView["plan"] = null;
   if (plan !== null) {
     if (!isObj(plan) || typeof plan["digest"] !== "string" || !DIGEST.test(plan["digest"]) || !numOrNull(plan["actions"])) return fail;
-    planView = { digest: plan["digest"], actions: plan["actions"] as number | null };
+    // U-226 (U-221): a run plan's kind (its actions are its files); absent for a plan of moves.
+    if (plan["kind"] !== undefined && plan["kind"] !== "changes") return fail;
+    planView = { digest: plan["digest"], actions: plan["actions"] as number | null, ...(plan["kind"] === "changes" ? { kind: "changes" as const } : {}) };
   }
   let reviewView: RunResultView["review"] = null;
   if (review !== null) {
@@ -849,6 +859,11 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
   const unsafeMoves = result["unsafeMoves"] ?? null;
   const applied = kind === "apply" ? toPlanActions(result["applied"], 10_000) : [];
   if (applied === null || !(planRunId === null || isRunId(planRunId)) || !numOrNull(unsafeMoves)) return fail;
+  // U-226: only a run that carried out a plan has the count of its writes outside the plan.
+  const deniedNotPlanned = result["deniedNotPlanned"];
+  if (deniedNotPlanned !== undefined && (!count(deniedNotPlanned) || kind !== "run" || planRunId === null)) return fail;
+  const lockLeft = result["lockLeft"];
+  if (lockLeft !== undefined && lockLeft !== true) return fail;
   const finalMessage = toFinalMessage(result["finalMessage"]);
   if (finalMessage === "bad") return fail;
   return {
@@ -880,6 +895,8 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       masking: maskingOf(result["masking"]),
       // U-124: how the run's permission questions ended, counts only; anything else gives no lines.
       confirmations: confirmationsOf(result["confirmations"]),
+      ...(deniedNotPlanned === undefined ? {} : { deniedNotPlanned }),
+      ...(lockLeft === true ? { lockLeft } : {}),
     },
   };
 }
@@ -1532,6 +1549,8 @@ export interface PlanApplyView {
   readonly applyRunId: string;
   /** The apply run's reason, for "unfinished"; null otherwise or when it has none. */
   readonly reason: string | null;
+  /** U-226 (U-221): a run plan carried out by a run (not an apply run); the CLI's carried words. */
+  readonly carried?: true;
 }
 
 /** GU-4 (3.8): one row of the run list. A damaged run has its id only. */
@@ -1552,6 +1571,11 @@ export type RunListItem =
       /** U-61 (U-16): for a plan run an apply claimed, what became of that apply; null otherwise. */
       readonly planApply?: PlanApplyView | null;
       /**
+       * U-244 (the CLI's runs.apply_of, runs.carried_plan): the plan run this run applied (an apply run) or
+       * carried out (a run that carried out a changes plan); null or absent for any other run.
+       */
+      readonly planRunId?: string | null;
+      /**
        * R21b-L-1: the task form the run was started with, when this app started it (the main process
        * remembers it). Null: unknown (started elsewhere), so a plan of it is shown but not applied here.
        */
@@ -1570,10 +1594,11 @@ const revertedMark = (value: unknown): { at: string; status: "complete" | "parti
 /** U-61: a row's plan apply state as the engine host gives it: null when absent, "bad" when it does not fit. */
 function planApplyOf(value: unknown): PlanApplyView | null | "bad" {
   if (value === undefined || value === null) return null;
-  if (!isObj(value) || !hasOnlyKeys(value, ["state", "applyRunId", "reason"])) return "bad";
-  const { state, applyRunId, reason } = value;
+  if (!isObj(value) || !hasOnlyKeys(value, ["state", "applyRunId", "reason", "carried"])) return "bad";
+  const { state, applyRunId, reason, carried } = value;
   if (typeof state !== "string" || !(PLAN_APPLY_STATES as readonly string[]).includes(state) || !isRunId(applyRunId) || !(reason === null || (typeof reason === "string" && WORD.test(reason)))) return "bad";
-  return { state: state as PlanApplyView["state"], applyRunId, reason };
+  if (carried !== undefined && carried !== true) return "bad";
+  return { state: state as PlanApplyView["state"], applyRunId, reason, ...(carried === true ? { carried } : {}) };
 }
 
 /** The engine host's run list, checked field by field. */
@@ -1598,7 +1623,9 @@ export function toRunsReply(value: unknown): RunsReply {
     if (!(changes === null || count(changes)) || reverted === undefined || typeof revertRecordDamaged !== "boolean") return fail;
     const planApply = planApplyOf(run["planApply"]);
     if (planApply === "bad") return fail;
-    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply });
+    const planRunId = run["planRunId"] ?? null;
+    if (!(planRunId === null || isRunId(planRunId)) || planRunId === run["runId"]) return fail;
+    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply, planRunId });
   }
   return { ok: true, runs: items, omitted };
 }

@@ -21,6 +21,9 @@
 | `n12` | 쓰기 허용 경로 `writablePaths`(U-194, U-182·U-186·U-183, Codex V-6): 네 원천(설정, 프로필, 작업 종류 정의, task)이 함께 다른 목록을 둘 때의 교집합, 한 원천만 좁힐 때와 빈 목록, 원천별 잘못된 목록의 실행 전 거부, Windows 대소문자와 잘못된 쓰기 경로(`invalid_path`), 간편 형식(가짜 API)과 모델에게 가는 거부 힌트, 설정·프로필·정의 목록의 doctor 경고, 적용의 설정 목록, 같은 입력의 CLI와 앱 결정 일치 |
 | `n13` | 잠금 풀기(U-194, U-176): 실행이 잠금을 풀 때 다른 프로세스가 잠금 파일을 지우기 공유 없이 쥐면, 잠깐(0.1초)은 다시 시도로 `done`이고 다음 실행이 시작된다. 오래(4초)는 기록은 완전하지만 CLI가 `internal_error`(70)로 끝나고, 남은 잠금은 죽은 잠금으로 doctor가 알리고 다음 실행이 거둔다. Windows 전용(PowerShell이 쥠) |
 | `n14` | 앱 계층의 텍스트 편집(U-199, U-172): GUI 엔진 호스트가 만드는 앱(`createNodeAppEnvironment`)과 실제 설정 파일, 환경의 키·가릴 값, 옆에서 도는 실제 CLI 실행으로 `readWorkspaceText`·`writeWorkspaceText`를 본다. 가릴 값·키 값·키 모양이 든 파일은 읽기 전용, 설정·task의 보호 경로, BOM·CRLF 바이트 보존과 섞인 줄 끝, 실행이 쥔 잠금 동안의 저장 거부와 끝난 뒤의 저장(실행 기록 그대로), 실행이 바꾼 파일의 conflict, 새 글의 키 모양·가릴 값·CR 거부, 줄 끝·BOM을 붙여 센 크기 상한 |
+| `n15` | 계획 실행(U-217, 묶음 B-4: U-187·U-191·U-195·U-198, Codex V-11·V-14): 작업 종류의 `plan: "run"`을 실제 CLI와 대본 모델로 본다. 끝에서 끝까지(run → plan JSON·글 → 다이제스트 앞 12자로 apply → 결과·runs·두 report·changes → 두 번째 apply 거부 → revert로 처음 바이트), task의 goal을 바꿔도 수행 실행은 계획 실행의 goal을 받음. 승인 없이는 바뀌지 않음(계획 실행의 쓰기, 다이제스트 없음·틀림, 기록 없는 실행 id, 기록 없는 작업 공간). 승인 목록 밖 쓰기의 거부와 끝 요약의 전용 줄·새 계획 안내. 승인 뒤 파일 수정·삭제·생성 자리 선점·길 위의 정션으로 모델 요청 전 `plan_stale`(계획은 쓰이지 않음). 계획 실행의 goal을 읽을 수 없으면 `invalid_run_record`. 승인 뒤 좁힌 `writablePaths`(task·설정)는 모델 전 `plan_stale`, 목록이 허용해도 계획 밖이면 거부. 사용자 파일은 `.codaryn` 밖 전체의 SHA-256, 모델 요청은 모든 실행의 journal로 센다 |
+| `n16` | 개인정보 자료 카나리 틀의 자기 시험(U-232, 묶음 A의 A-8을 위해). 아래 "개인정보 자료 카나리 틀" 절 |
+| `n17` | 조립한 개인정보 실행(U-236; U-208 `query_table`, U-203 읽기 제외). 아래 "개인정보 자료 카나리 틀" 절의 "조립한 실행" |
 | `o00`~`o05` | OpenAI 모의 API |
 | `c01` | GUI 계약 층(U-112): 같은 대본을 CLI와 앱 계층(GUI 엔진 호스트의 길)으로 돌려 결과와 기록 비교 |
 
@@ -278,6 +281,100 @@
   - 규칙 셋(`store`, `strict`, 출력 되돌림)을 빌드 산출물에서 하나씩 빼면 `o00`이 실패함을 확인했다.
 - 키 변수와 키 모양은 제공자 계약(SP-1)의 상수를 쓴다: `OPENAI_API_KEY_ENV`, `API_KEY_ENVS`, `API_KEY_PATTERN_SOURCES`, `API_KEY_MASK_PATTERN_SOURCES`.
   - 가짜 서버가 지키는 사실 값(`max_output_tokens` 최소 16, 주소의 `/v1`)은 계약과 따로 둔다. 두 쪽이 맞는지는 `o00`이 확인한다.
+
+## 개인정보 자료 카나리 틀 (`n16`, U-232)
+
+묶음 A(읽기 제외 `unreadablePaths`, `query_table`, `analyze-private`)의 통합 카나리 시험(A-8, 제안 `docs/reviews/2026-11-13-p1-bundle-proposal.md` 3.1 "보장을 어떻게 시험하나")이 쓸 틀이다. 지금 main에는 그 기능이 없다. 그래서 `n16`은 틀 자신을 시험한다. 읽기 제외가 없는 실행에서 모델이 비공개 폴더를 그대로 읽게 하고, 틀이 새어 나간 표지를 실제로 찾아내는지 본다.
+
+**표 자료**: `tests/fixtures/private-tables.ts`
+- 표지는 실행 때 무작위로 만든다.
+  - ASCII 글자·숫자 9자와 한글 음절 3자, 첫 글자는 영문자다.
+  - 소스에 적힌 값이 없다. 서로의 일부가 아니다. JSON·CSV·TSV가 이스케이프하거나 따옴표로 싸는 문자는 없다.
+- 표는 16행이다. 열은 `person`, `contact`, `memo`, `region`, `team`, `amount`, `age`다.
+  - `person`·`contact`·`memo`: 칸마다 그 행만의 표지
+  - `region`: 6·5·4·1행 묶음. `team`: 7·5·3·1행 묶음. 키도 표지다.
+  - 두 열로 묶으면 5행 묶음 하나(가장 큰 지역 × 가장 큰 팀)이고, 나머지는 더 작다.
+  - `amount`·`age`: 행마다 다른 정수
+- k = 5(`DEFAULT_MIN_GROUP_SIZE`)
+  - 6·5행 묶음의 키는 그 한 열로 묶는 질의가 보인다. 양성 대조다.
+  - 4·3·1행 묶음의 키는 어떤 질의도 보이지 않는다. 두 열 묶음은 어느 한 열의 묶음보다 크지 않기 때문이다.
+- `writePrivateWorkspace(sb, { dir, k })`가 읽기 제외 폴더(기본 `private`)에 쓰는 것
+  - `people.csv`, `people.tsv`, `people.jsonl`: 표마다 다른 표지
+  - `notes.txt`: 줄마다 표지
+  - 이름이 표지인 파일 하나와 폴더 하나(R-4: 이름도 숨긴다)
+  - 그리고 표지 없는 `public/guide.md`
+- 돌려주는 것
+  - `rowMarkers`: 행·줄의 표지
+  - `nameMarkers`
+  - `smallKeys`: k 미만 묶음의 키
+  - `largeKeys`: 양성 대조
+- 오라클 `groupsOf`·`shownKeysOf`·`neverShownKeysOf`는 `src/tabular`와 따로 계산한다. `n16`은 제품의 표 읽기(`queryTable`)가 세 형식 모두에서 이 오라클과 같은지, 계약의 `shownGroups`(k=5)가 같은 키를 보이고 숨기는지 확인한다.
+
+**찾는 도우미**: `tests/support/private-canary.ts`
+- `canarySources({ workspace, runs, anthropic, openai, scripted })`가 경로마다 붙인 출처를 모은다.
+  - `model`: Codaryn이 모델에게 보낸 것.
+    - 가짜 API의 요청마다 system, 도구 정의, 모델 자신의 것이 아닌 메시지·항목이다.
+      - Anthropic: role이 user인 메시지(도구 결과 포함)
+      - OpenAI: 모델의 메시지·function_call·reasoning이 아닌 입력 항목
+    - 대본 모델이면 journal의 `model_request` 기록이다.
+    - 모델의 앞선 차례는 대화로 매 요청에 되돌아온다. 그래서 그것은 뺀다. 대본이 도구 인자에 넣은 표지(예: `search_files`의 `text`)가 새어 나간 행으로 잡히지 않게 하기 위해서다. 본문 전체가 필요하면 `modelEchoSources`를 쓴다.
+  - `records`: `.codaryn` 아래 모든 파일(변경 스냅숏은 계약상 원본 사본이라 뺀다), JSON은 풀어서도.
+  - `output`: CLI 프로세스마다 stdout·stderr(stdout은 풀어서도). `report` 같은 다른 명령의 출력도 `runs`에 이름을 붙여 넣는다.
+- `findCanary(sources, canary, { fragments })`가 찾는 꼴
+  - 그대로 쓴 꼴, `leak.ts`의 변형(JSON 이스케이프 1~3번, Base64, URL, hex)
+  - 한글을 `\uXXXX`로 쓴 JSON(한 번, 두 번): CLI의 stdout JSON이 한글을 그렇게 쓴다(`n16`에서 확인)
+  - `fragments`를 주면 그 길이의 조각도 찾는다. 상한에 잘린 표지다.
+- 결과를 다루는 함수
+  - `leaksOf`: 행·이름·작은 키
+  - `foundIn(findings, channel, list)`
+  - `describeFindings`: 단언 메시지용
+
+**A-8에서 쓸 때**
+- 읽기 제외 폴더에 `writePrivateWorkspace`로 쓰고, 모든 길을 부르는 대본을 둔다.
+- 그 뒤 단언한다.
+  - `leaksOf(findCanary(canarySources(...), canary))`가 `model` 경로에서 비어야 한다.
+  - `largeKeys`는 `query_table` 결과가 간 `model` 경로에서 찾아져야 한다(양성 대조).
+  - `records`와 `output`을 어디까지 깨끗해야 한다고 볼지는 A-8이 정한다. 제안 3.2는 "사람에게 보이는 것은 막지 않는다"이고, 모델의 답(`finalMessage`)에 든 것은 사람에게 보인다.
+- 대본이 표지를 인자에 쓰면, 그 표지는 `records`(journal의 모델 응답)와 `modelEchoSources`에 나온다. `model` 경로에는 나오지 않는다.
+- 틀 자신의 변이 확인(U-232, 빌드한 `dist`의 도우미만 고침): 다음을 넣으면 각각 맞는 사례가 실패했다.
+  - `\uXXXX` 꼴을 뺌
+  - 모델의 앞선 차례를 `model`에 넣음
+  - journal의 `model_request`를 읽지 않음
+
+**U-236에서 바꾼 것**
+- 고침: `model_request`의 `newMessages`에는 모델 자신의 차례도 든다(role assistant: 그 글과 도구 호출 인자). U-232는 그것을 `model`에 넣었다. 이제는 가짜 API 본문과 같은 규칙으로 뺀다. `n16`의 대본 사례가 확인한다. 이 고침을 되돌리면 `n16`과 `n17`이 실패한다.
+- 표에 `bonus` 열을 더했다.
+  - 12행에만 수가 있다.
+  - 그래서 k행 이상인데 기여 칸이 k 미만인 묶음이 생긴다. 지역 6행 묶음은 2칸, 팀 7행·5행 묶음은 각 4칸이다(U-208, Codex V-19).
+- `amount`는 등차가 아니다. 그래서 묶음의 평균이 한 행의 값과 같아지지 않는다.
+- 오라클 `groupsOf`는 열마다 칸 수(`cells`)를 준다.
+- `numberFactsOf`는 허용하는 수와 금지하는 수를 준다. 금지하는 수는 행의 수, 그리고 기여 칸이 k 미만인 합·평균이다.
+- `writePrivateWorkspace({ markedDirUnder })`: 읽기 제외 폴더의 이름도 표지가 된다.
+- 도우미를 더했다: `recordedToolResults`, `numbersIn`, `factsAmong`(상대 오차 1e-9).
+
+**조립한 실행 (`n17`, U-236)**
+- 실행을 CLI처럼 조립한다(`src/cli/assemble.ts`).
+  - 작업 공간과 잠금, 디스크에 journal·result.json을 쓰는 기록기
+  - 가림 관문, 정책 관문, 도구·검증기 실행기, 대본 제공자
+- 다른 점은 하나다. 읽기 제외와 k를 관문과 도구 실행기에 직접 준다. 지금 CLI 파서는 그것을 실행에 넣지 않는다(A-6). na-core의 U-210이 오면 같은 대본을 실제 CLI로 잇는다.
+- 작업 공간: 틀의 세 표와 파일이 `data/<표지>` 아래 있다. 이 폴더가 읽기 제외이고, 그 이름도 표지다. 옆에 `data/readme.md`를 둔다.
+- 대본 모델이 부르는 것
+  - 표마다 `query_table` 다섯 번: describe, 전체, 지역별, 팀별, 둘 다. 연산은 `person` 개수와 `amount`·`bonus`의 개수·합·평균이다.
+  - 거부되어야 하는 `min`, 글 열의 합
+  - 일반 읽기 도구 모두: 폴더 안의 `read_file`·`search_files`·`inspect_files`·`write_file`, 루트와 부모에서의 목록, 이름 찾기(`people`), 글 찾기(`10`: 모든 행의 금액에 있다)
+- 단언
+  - 모델로 간 것과 기록 어디에도 행의 표지와 k 미만 묶음의 키가 없다.
+  - 도구 결과의 어떤 수도 행의 `amount`·`bonus`나 기여 칸 k 미만의 합·평균이 아니다.
+  - 일반 읽기 도구의 결과가 폴더 이름, 표 이름(`people.`), 그 아래 이름을 내지 않는다. 루트와 부모 목록은 `withheld`이고 옆 파일은 보인다.
+  - 다섯 호출(폴더 안의 읽기 셋, 쓰기, 폴더 안 inspect)이 `unreadable_path`로 거부되고, 표 바이트는 그대로다.
+  - 양성 대조: 모든 질의의 묶음이 오라클대로다(보인 묶음, 행 수, 값, 칸 k 미만이면 null과 `fewCells`, `suppressedGroups`). 허용된 합·평균이 모두 있고, k 이상 묶음의 키와 열 이름이 모델로 간다.
+  - 실제 CLI의 `report`, `report --json`, `runs` 출력에도 행의 표지와 작은 키가 없다.
+- k 5(기본)와 k 6(실행이 올린 k)으로 한 번씩 돈다.
+- 변이 확인(빌드한 `dist`만 고침): 다음 넷이 각각 두 사례를 모두 실패시켰다.
+  - k 검사를 뺌 → 작은 키가 모델로 감
+  - 기여 칸 규칙을 뺌 → 2·4칸 bonus 합·평균
+  - 목록 거르기를 뺌 → 글 찾기로 행 표지
+  - 관문의 읽기 제외를 뺌 → 거부 목록
 
 ## 진단 (Z-1)
 

@@ -1353,12 +1353,72 @@ startGui({
         await js(`document.querySelector('[data-plan="${runId}"]')?.click(); true`);
         const shown = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
         const screen = (await js(
-          "({ files: [...document.querySelectorAll('#plan-files li')].map((li) => [li.getAttribute('data-change'), li.textContent.split(': ').pop()]), kind: document.getElementById('plan-summary')?.getAttribute('data-plan-kind') ?? null, approved: document.getElementById('plan-agent-words')?.getAttribute('data-approved') ?? null, words: document.getElementById('plan-agent-words-text')?.textContent ?? null, moves: document.getElementById('plan-actions') !== null, applyOff: document.getElementById('plan-apply')?.hasAttribute('disabled') ?? null, why: document.getElementById('plan-run-apply-unavailable') !== null, check: document.getElementById('plan-check') !== null })",
+          "({ files: [...document.querySelectorAll('#plan-files li')].map((li) => [li.getAttribute('data-change'), li.textContent.split(': ').pop()]), kind: document.getElementById('plan-summary')?.getAttribute('data-plan-kind') ?? null, approved: document.getElementById('plan-agent-words')?.getAttribute('data-approved') ?? null, words: document.getElementById('plan-agent-words-text')?.textContent ?? null, moves: document.getElementById('plan-actions') !== null, unknown: document.getElementById('plan-form-unknown') !== null, apply: document.getElementById('plan-apply') !== null, check: document.getElementById('plan-check') !== null })",
         )) as Record<string, unknown>;
         const viaApi = (await js(
-          `window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(runId)}, null, null).then(async (r) => { if (!r.ok) return { plan: r.code }; const apply = await window.codaryn.applyPlan(r.approval, false); const consent = await window.codaryn.applyPlan(r.approval, true); const checked = await window.codaryn.checkPlan(r.approval); return { planKind: r.view.planKind ?? null, fileCount: (r.view.files ?? []).length, digest: r.view.digest, approval: typeof r.approval, apply: apply.ok ? 'started' : apply.code, consent: consent.ok ? 'started' : consent.code, checked: checked.ok ? 'checked' : checked.code }; })`,
+          `window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(runId)}, null, null).then(async (r) => { if (!r.ok) return { plan: r.code }; const apply = await window.codaryn.applyPlan(r.approval, false); const consent = await window.codaryn.applyPlan(r.approval, true); const checked = await window.codaryn.checkPlan(r.approval); return { planKind: r.view.planKind ?? null, fileCount: (r.view.files ?? []).length, digest: r.view.digest, approval: typeof r.approval, applied: apply.ok ? 'started' : apply.code, consent: consent.ok ? 'started' : consent.code, checked: checked.ok ? 'checked' : checked.code }; })`,
         )) as Record<string, unknown>;
-        return { shown, ...screen, ...viaApi, dialogs: dialogs.length - asked };
+        return { shown, ...screen, ...viaApi, dialogs: dialogs.slice(asked) };
+      })();
+
+      // U-226 (U-218, DR-69 B-3): a run plan applied from the window. A plan run with the task type
+      // "rewrite" (plan "run"; its model names planned.md), its plan checked and applied after the main
+      // process's run plan dialog; the run that carries it out writes planned.md and is refused
+      // unplanned.md. A second token of the same plan, taken before the apply (as another window could
+      // hold one), is refused afterwards as already applied; the plan screen says which run applied it.
+      results["runPlanApply"] = await (async () => {
+        const before = await resultId();
+        await taskWith("rewrite", "planned.md를 만드는 계획을 세운다");
+        const planRunId = await newResult(before, 90_000, "U-226 plan run");
+        if (!isRunIdValue(planRunId)) return { planRun: planRunId };
+        const planReason = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
+        await js("document.getElementById('run-view-plan')?.click(); true");
+        const shown = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+        const check = await planCheckReady();
+        const spare = await js(`window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(planRunId)}, null, 'rewrite').then((r) => (r.ok ? r.approval : null))`);
+        const asked = dialogs.length;
+        await js("document.getElementById('plan-apply')?.click(); true");
+        const carryId = await newResult(planRunId, 90_000, "U-226 carry run");
+        const result = (await js(
+          "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), notices: [...document.querySelectorAll('#run-notices li')].map((li) => li.textContent), carried: document.getElementById('run-carried-plan')?.textContent ?? null, refused: document.getElementById('run-denied-not-planned')?.textContent ?? null, hint: document.getElementById('run-denied-not-planned-hint') !== null }; })()",
+        )) as { status: string | null; reason: string | null; notices: string[]; carried: string | null; refused: string | null; hint: boolean } | null;
+        const again = typeof spare === "string" ? await js(`window.codaryn.applyPlan(${JSON.stringify(spare)}, false).then((r) => (r.ok ? 'started' : r.code))`) : "no spare token";
+        await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+        // U-226 (U-221): the plan run's row names the run that carried its plan out, in the carried words.
+        const row = (await js(
+          `(() => { const mark = document.querySelector('[data-plan="${planRunId}"]')?.parentElement?.querySelector('.plan-apply'); return mark ? { carried: mark.getAttribute('data-plan-carried'), text: mark.textContent } : null; })()`,
+        )) as { carried: string | null; text: string | null } | null;
+        // U-244: the carrying run's own row names the plan run it carried out; apply rows name theirs.
+        const planOf = (await js(
+          `(() => { const carry = document.querySelector('[data-run="${String(carryId)}"] [data-plan-of-kind="carried"]'); return { carried: carry ? carry.getAttribute('data-plan-of') : null, applies: document.querySelectorAll('[data-plan-of-kind="apply"]').length }; })()`,
+        )) as { carried: string | null; applies: number };
+        await js(`document.querySelector('[data-plan="${planRunId}"]')?.click(); true`);
+        const after = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+        const appliedBy = await js("document.getElementById('plan-applied')?.textContent ?? null");
+        const appliedCarried = await js("document.getElementById('plan-applied')?.getAttribute('data-carried') ?? null");
+        const planned = join(SECOND, "planned.md");
+        return {
+          planReason,
+          shown,
+          check,
+          carried: isRunIdValue(carryId) && carryId !== planRunId,
+          status: result?.status ?? null,
+          reason: result?.reason ?? null,
+          namesPlan: typeof result?.carried === "string" && result.carried.includes(planRunId),
+          refused: Number(/\d+/.exec(result?.refused ?? "")?.[0] ?? "-1"),
+          hint: result?.hint ?? null,
+          planned: existsSync(planned) ? readFileSync(planned, "utf8") : null,
+          unplanned: existsSync(join(SECOND, "unplanned.md")),
+          again,
+          after,
+          appliedByCarry: typeof appliedBy === "string" && isRunIdValue(carryId) && appliedBy.includes(carryId),
+          appliedCarried,
+          rowCarried: row !== null && row.carried === "true" && typeof row.text === "string" && isRunIdValue(carryId) && row.text.includes(carryId),
+          carryRowNamesPlan: planOf.carried === planRunId,
+          applyRowsNamePlans: planOf.applies >= 1,
+          dialogs: dialogs.slice(asked),
+        };
       })();
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),

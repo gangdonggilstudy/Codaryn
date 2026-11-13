@@ -73,6 +73,35 @@ export type WriteTextOutcome =
       readonly currentHash?: ContentHash | null;
     };
 
+/**
+ * U-213 (ne-verify's measurement of read refusals, P5): how a read or a listing that saw the folders
+ * on its path change may try again (src/workspace/guard.ts). Both are optional; a caller that gives
+ * neither gets the tries and waits alone (a listing is still limited in time, see `list`).
+ * - `signal`: aborted, the waits between tries end at once and no try more starts (a run cancelled).
+ * - `retryUntil`: a time of `performance.now()` at or after which no try after the first starts, so
+ *   a search's listing and its many reads share one time limit.
+ */
+export interface GuardedCallOptions {
+  readonly signal?: AbortSignal;
+  readonly retryUntil?: number;
+}
+
+/**
+ * U-242: Workspace.list's options, GuardedCallOptions and `leaveOut`, through which search_files
+ * keeps a run's unreadable paths out of its listing (U-203, Codex V-13): one listing, the
+ * workspace's, with or without them.
+ */
+export interface ListOptions extends GuardedCallOptions {
+  /**
+   * Asked once for each entry the listing meets, with its root-relative path and whether it is a
+   * link (neither a folder nor a file: a link, a junction, another special entry), before the entry
+   * is kept. True leaves it out: it is not listed, not counted toward MAX_SEARCH_ENTRIES, and a
+   * folder is not read, so what it leaves out changes neither `entries`, `truncated` nor the outcome.
+   * A throw ends the listing as io_error. Absent: nothing is left out, as without options.
+   */
+  readonly leaveOut?: (entry: { readonly relative: string; readonly link: boolean }) => boolean | Promise<boolean>;
+}
+
 export interface Workspace {
   /** Real absolute path of the workspace root. */
   readonly root: string;
@@ -81,10 +110,14 @@ export interface Workspace {
   resolve(path: string, access: PathAccess): Promise<ResolvePathOutcome>;
 
   /** Reads a UTF-8 text file up to MAX_READ_BYTES. */
-  readText(path: ResolvedPath): Promise<ReadTextOutcome>;
+  readText(path: ResolvedPath, options?: GuardedCallOptions): Promise<ReadTextOutcome>;
 
-  /** Lists a directory recursively up to MAX_SEARCH_ENTRIES, skipping the state directory. */
-  list(dir: ResolvedPath): Promise<ListOutcome>;
+  /**
+   * Lists a directory recursively up to MAX_SEARCH_ENTRIES, skipping the state directory. U-213: its
+   * tries again are limited in time too, by `retryUntil` or else 2 s from the call. U-242: what
+   * `options.leaveOut` answers true for is left out before it is counted (ListOptions).
+   */
+  list(dir: ResolvedPath, options?: ListOptions): Promise<ListOutcome>;
 
   /**
    * Compares the current hash with `expectedHash` and replaces the file atomically.

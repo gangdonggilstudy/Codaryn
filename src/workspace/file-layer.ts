@@ -49,6 +49,12 @@ export interface DirEntry {
   readonly name: string;
   /** False for links, including links and junctions that point to a directory. */
   isDirectory(): boolean;
+  /**
+   * U-242: true for a plain file, false for a link (to a file too) or another special entry.
+   * Optional for layers that do not tell; then every entry that is not a folder counts as a link
+   * where ListOptions.leaveOut asks.
+   */
+  isFile?(): boolean;
 }
 
 export interface FileLayer {

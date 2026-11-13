@@ -6,6 +6,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  effectiveMinGroupSize,
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_COMMAND_OUTPUT_BYTES,
   MAX_SEARCH_ENTRIES,
@@ -41,11 +42,13 @@ import type {
 import { compilePathSet } from "../policy/path-set.js";
 import { takeJudged } from "../workspace/judged.js";
 import { createCommandRunner } from "./command-runner.js";
+import { retryDeadline } from "../workspace/guard.js";
 import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
 import { createPlannedFileProbe as plannedFileProbeFor, inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
-import { listVisible } from "./visible-list.js";
+import { leaveOutUnreadable } from "./hidden-entries.js";
+import { queryTableTool } from "./query-table.js";
 
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { CountingPlanExecutor, PlanExecutorDeps } from "./plan-executor.js";
@@ -125,6 +128,13 @@ export interface ToolRunnerOptions {
    * empty: nothing is left out, as before (Codex V-13b L-1).
    */
   readonly unreadablePaths?: readonly string[];
+  /**
+   * U-208 (bundle A, A-5): the run's k, ResolvedTaskSpec.minGroupSize, for query_table on a table
+   * under the unreadable paths. Absent: DEFAULT_MIN_GROUP_SIZE. Never below 5 (effectiveMinGroupSize).
+   */
+  readonly minGroupSize?: number;
+  /** For tests: a smaller table size limit for query_table than MAX_QUERY_TABLE_BYTES. */
+  readonly maxTableBytes?: number;
 }
 
 /**
@@ -271,10 +281,10 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     return resolved;
   }
 
-  async function readFile(args: ReadFileArgs): Promise<RawToolOutcome> {
+  async function readFile(args: ReadFileArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");
     if (!resolved.ok) return resolved;
-    const read = await workspace.readText(resolved.path);
+    const read = await workspace.readText(resolved.path, { signal });
     if (!read.ok) return fail(read.code, `cannot read file: ${read.code}`);
     const text: string = read.snapshot.text;
     const hadBom = text.startsWith(BOM);
@@ -298,14 +308,20 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   async function searchFiles(args: SearchFilesArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");
     if (!resolved.ok) return resolved;
+    // U-213: the listing and every read below share one time limit for their tries again.
+    const retryUntil = retryDeadline();
     // U-203 (R-3, R-4): what is under an unreadable path is left out, names included. `withheld`
     // follows the entries alone (one lies in this folder), never what exists there.
     const hidden = unreadable === null ? null : await unreadable.snapshot(workspace);
     const withheld = hidden !== null && hidden.within(resolved.path.relative);
     // U-203 (Codex V-13 M-1, M-2): with unreadable paths the listing leaves them out before it counts
-    // or enters them, and hides a link whose real path is under them (visible-list.ts), so the
-    // result, its `truncated` and its errors do not depend on what exists there.
-    const listed = hidden === null ? await workspace.list(resolved.path) : await listVisible(workspace, resolved.path, hidden);
+    // or enters them, and hides a link whose real path is under them, so the result, its `truncated`
+    // and its errors do not depend on what exists there. U-242: one listing, the workspace's, with
+    // `leaveOut` (hidden-entries.ts). U-213: it takes the run's signal and the search's time limit.
+    const listed =
+      hidden === null
+        ? await workspace.list(resolved.path, { signal, retryUntil })
+        : await workspace.list(resolved.path, { signal, retryUntil, leaveOut: leaveOutUnreadable(workspace, hidden) });
     if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
 
     // Matching works on masked text only: the path names and the file contents a model would
@@ -327,7 +343,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         if (!file.ok) continue;
         // U-203: a link that leads under an unreadable path is not read either.
         if (hidden !== null && hidden.covers(file.path.relative)) continue;
-        const read = await workspace.readText(file.path);
+        const read = await workspace.readText(file.path, { signal, retryUntil });
         if (!read.ok) {
           // U-189 (Codex V-10b): a file that could not be read (io_error: the read saw its folders change on
           // every try, or another I/O failure) may hold the text: the result is not complete, and says so.
@@ -381,13 +397,13 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     return createHash("sha256").update(maskedPartsEncoding(maskedParts(masked.text)), "utf8").digest("hex") as ContentHash;
   }
 
-  async function writeFile(args: WriteFileArgs): Promise<RawToolOutcome> {
+  async function writeFile(args: WriteFileArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "write");
     if (!resolved.ok) return resolved;
 
     // 1. Local snapshot of the current file (raw, never leaves this function except to the
     //    change recorder, which keeps it in the state directory).
-    const read = await workspace.readText(resolved.path);
+    const read = await workspace.readText(resolved.path, { signal });
     let original: RawText | null;
     let currentText: string | null;
     let currentHash: string | null;
@@ -541,11 +557,11 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         if (signal.aborted) return fail("cancelled", "cancelled before start");
         switch (call.name) {
           case "read_file":
-            return await readFile(call.args);
+            return await readFile(call.args, signal);
           case "search_files":
             return await searchFiles(call.args, signal);
           case "write_file":
-            return await writeFile(call.args);
+            return await writeFile(call.args, signal);
           case "run_command":
             return await runCommand(call.args, signal);
         }
@@ -565,6 +581,17 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
             return await proposePlan(workflowDeps, call.args, signal);
           case "propose_changes":
             return await proposeChanges(workflowDeps, call.args, signal);
+          case "query_table":
+            return await queryTableTool(
+              {
+                workspace,
+                ...(unreadable === null ? {} : { unreadable }),
+                minGroupSize: effectiveMinGroupSize(options.minGroupSize, []),
+                ...(options.maxTableBytes === undefined ? {} : { maxTableBytes: options.maxTableBytes }),
+              },
+              call.args,
+              signal,
+            );
         }
       } catch {
         // No error detail: it could carry raw file text or paths.

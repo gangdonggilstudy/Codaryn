@@ -62,7 +62,7 @@ import {
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
 import type { PathSet, PathSetSnapshot } from "../policy/path-set.js";
 import { nodeFileLayer } from "../workspace/file-layer.js";
-import { FolderWatch, retried, sameChain, walkChain } from "../workspace/guard.js";
+import { FolderWatch, retried, retryDeadline, sameChain, walkChain } from "../workspace/guard.js";
 import { takeJudged } from "../workspace/judged.js";
 
 /**
@@ -202,7 +202,8 @@ export async function inspectFiles(
     return fail(isMissing(error) ? "not_found" : "io_error", "cannot read directory");
   }
   // U-189 (P-1, Codex V-10): names, sizes, times and hashes come only from folders that stayed the
-  // ones checked (guard.ts); a change seen is tried again, still seen it is io_error.
+  // ones checked (guard.ts); a change seen is tried again, still seen it is io_error. U-213: the tries
+  // are limited in time too (a large tree), and the run's signal ends the waits between them.
   const outcome = await retried(async () => {
     const first = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
     if (!first.ok) return first.code === "changed" ? "changed" : fail(first.code === "not_found" ? "not_found" : "io_error", "cannot read directory");
@@ -213,7 +214,8 @@ export async function inspectFiles(
     const second = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
     if (!second.ok || !sameChain(first.seen, second.seen) || !(await watch.unchanged())) return "changed";
     return result;
-  });
+  }, { signal, until: retryDeadline() });
+  if (outcome === "changed" && signal.aborted) return fail("cancelled", "inspect_files cancelled");
   return outcome === "changed" ? fail("io_error", "the folders changed while they were read; nothing was given") : outcome;
 }
 

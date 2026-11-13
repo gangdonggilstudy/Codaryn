@@ -201,6 +201,8 @@ export interface RunNotes {
   deniedNotWritable?: number;
   /** U-195 (Codex V-14 L-1, U-198): such writes in a run that carries out a plan (outside its files); absent is 0. */
   deniedNotPlanned?: number;
+  /** U-220 (U-176, U-201): the run's workspace lock could not be released at its end (finish said so). */
+  lockLeft?: boolean;
   /** DR-51 (U-38): the typed --workspace of the quick form, after the run's masking (toShownWorkspace); absent when it gives none. */
   workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
@@ -353,10 +355,17 @@ const notWritableHint = (count: number): string =>
   `Writes denied because the file is not in writablePaths: ${count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.`;
 
 /** G-A: what each workflow problem means, after the field position (never a value). */
+/** U-228: what a workflow problem means after its field (doctor tells plan_tool_missing with it). */
+export function workflowProblemText(problem: WorkflowProblem): string {
+  return WORKFLOW_PROBLEM_TEXT[problem];
+}
+
 const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
   unknown_workflow: "names no built-in workflow and no workflows entry of the config file",
   tool_not_allowed: "names a tool the workflow definition does not offer (tools only narrow)",
   plan_weakened: 'cannot be "none" under a workflow with plan "apply"',
+  // U-224 (p4g; one line in this file for the contract's new problem).
+  plan_tool_missing: 'leaves out the plan tool of the plan mode: "apply" needs propose_plan and "run" needs propose_changes among the tools',
   commands_not_allowed: "must be empty: the workflow allows no command",
   review_without_checklist: 'is required with completion "human_review"',
   checklist_without_review: 'is only allowed with completion "human_review"',
@@ -495,6 +504,8 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     // U-195 (Codex V-14 L-1, U-198): the writes refused as not writable, by why; not when none.
     ...(notes.deniedNotPlanned === undefined ? {} : { deniedNotPlanned: notes.deniedNotPlanned }),
     ...(notes.deniedNotWritable === undefined ? {} : { deniedNotWritable: notes.deniedNotWritable }),
+    // U-220 (U-201): the run's lock could not be released at its end; not when it was.
+    ...(notes.lockLeft === true ? { lockLeft: true } : {}),
     policySource: args.input.kind === "task" ? "task" : "config",
   };
 }
@@ -768,7 +779,9 @@ export async function prepareTask(
       positionDiagnostic(file, { code: "invalid_value", field: resolved.field }),
     );
     // U-37: a task type neither built in nor in the config's workflows.
-    return resolved.problem === "unknown_workflow" ? withHint(workflowError, "task_type_not_found") : workflowError;
+    if (resolved.problem === "unknown_workflow") return withHint(workflowError, "task_type_not_found");
+    // U-228 (U-224): which plan tool each plan mode needs, in the chosen language.
+    return resolved.problem === "plan_tool_missing" ? withHint(workflowError, "plan_tool_missing") : workflowError;
   }
   // DR-41 (PM after 27afb01): where a definition applies its rules are not loosened. A task file's
   // own policy is merged with them here (resolveWorkflow above counted its own command rules first,
@@ -1078,8 +1091,10 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
       }
       result = defaultDisplay === null ? hinted : withNotice(hinted, privacy, defaultConfigNotice(defaultDisplay));
     } finally {
-      // Releases the workspace lock even when the run threw.
-      await assembled.finish(result);
+      // Releases the workspace lock even when the run threw. U-220: a lock it could not release is
+      // told in the end summary (lock.release_failed); the run's result and exit code stay.
+      const finished: unknown = await assembled.finish(result);
+      if (typeof finished === "object" && finished !== null && (finished as { readonly lockLeft?: unknown }).lockLeft === true) notes.lockLeft = true;
     }
     // N-5: the end summary on stderr, after the lock is released.
     if (write !== undefined && human !== undefined) {

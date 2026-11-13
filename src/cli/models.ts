@@ -371,7 +371,12 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     const failed = cliError("model_list_failed", `the model list request failed (${listed.kind}): ${message}${hint}; nothing was written`);
     // U-55 (AXM-9): retryable by the listing's failure; left out when it cannot be told. A thrown
     // listing (above) has no failure to judge by, so it says the category only.
-    const facts = cliErrorFacts("model_list_failed", { kind: listed.kind, ...(listed.httpStatus === undefined ? {} : { httpStatus: listed.httpStatus }) });
+    // U-82 (review R-75 M1): the listing's own verdict goes first (a refused connection: true).
+    const facts = cliErrorFacts("model_list_failed", {
+      kind: listed.kind,
+      ...(listed.httpStatus === undefined ? {} : { httpStatus: listed.httpStatus }),
+      ...(listed.retryable === undefined ? {} : { retryable: listed.retryable }),
+    });
     return { ...failed, output: { ...failed.output, ...facts } };
   }
   const models: ModelsListEntry[] = listed.models.map((model, index) => ({ number: index + 1, ...model }));

@@ -70,6 +70,8 @@ export interface InitEnvironment {
   readonly env: SettingsEnvironment;
   readonly cwd: string;
   readonly platform?: NodeJS.Platform;
+  /** U-115 (UXM-9): stdout is a terminal; then the text adds the way to try without a key. */
+  readonly stdoutIsTerminal?: boolean;
   /** N-1: `findDefaultConfigLocation` in the real CLI. Null: there is none. */
   readonly defaultConfig: DefaultConfigLocation | null;
   /** N-1: a default location exists but is a network or device path. */
@@ -162,8 +164,11 @@ export function initConfigText(choices: {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-/** The stdout text of init without `--json`. Built from catalog messages only. */
-export function renderInit(output: InitOutput, messages: MessageCatalog, platform: NodeJS.Platform): string {
+/**
+ * The stdout text of init without `--json`. Built from catalog messages only. U-115 (UXM-9): with
+ * `terminal` (stdout is a terminal) and the key not set, the way to try without a key ends it.
+ */
+export function renderInit(output: InitOutput, messages: MessageCatalog, platform: NodeJS.Platform, options: { readonly terminal?: boolean } = {}): string {
   const lines: string[] = [];
   if (output.status === "declined") {
     lines.push(messages.format("init.declined"));
@@ -178,6 +183,7 @@ export function renderInit(output: InitOutput, messages: MessageCatalog, platfor
   if (!output.keySet) lines.push(messages.format(platform === "win32" ? "init.key_hint_windows" : "init.key_hint_posix", { keyEnv }));
   if (output.overriddenBy !== null) lines.push(messages.format("init.overridden_by_env"));
   lines.push(messages.format("init.next"));
+  if (options.terminal === true && !output.keySet) lines.push(messages.format("first_use.try_without_key"));
   return `${lines.join("\n")}\n`;
 }
 
@@ -263,7 +269,7 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
   });
   const finish = (status: InitStatus): CommandOutcome => {
     const result = output(status);
-    return args.json ? { output: result, exitCode: result.exitCode } : { text: renderInit(result, messages, platform), exitCode: result.exitCode };
+    return args.json ? { output: result, exitCode: result.exitCode } : { text: renderInit(result, messages, platform, { terminal: io.stdoutIsTerminal === true }), exitCode: result.exitCode };
   };
   const question = async (text: string): Promise<string | null> => (ask === undefined ? null : ask(`${text} `));
   const tell = (text: string): void => {

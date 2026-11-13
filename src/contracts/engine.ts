@@ -557,6 +557,9 @@ export interface CliErrorOutput {
  *   config file has no profile of that name), task_type_not_found (the task type named by
  *   `workflowRef` or `--workflow` is neither built in nor in the config's `workflows`; invalid_task
  *   when the task file names it).
+ * - invalid_config: config_missing (U-115, UXM-9): the quick form or the one-line run found no config
+ *   file at all (no --config, no CODARYN_CONFIG, and none at the default location), so its settings
+ *   were missing; the person has not made one yet (codaryn init).
  * - key_in_file: key_in_goal, key_in_task, key_in_config (where a key value was found);
  *   key_field_in_task or key_field_in_config when its place is a SchemaFieldPath.
  * Each has a listed `error.hint.<hint>` without parameters; DETAILED_CLI_ERROR_HINTS are apart.
@@ -579,6 +582,7 @@ export const CLI_ERROR_HINTS = [
   "key_in_goal",
   "key_in_task",
   "key_in_config",
+  "config_missing",
 ] as const;
 export type CliErrorHint = (typeof CLI_ERROR_HINTS)[number];
 /**

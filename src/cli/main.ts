@@ -124,15 +124,27 @@ function humanFor(configLanguage: MessageLanguage | null): { readonly output: Hu
  * N-5, N-22, N-25: what happened, how to fix it and the code. The renderer adds the doctor hint
  * itself (N-22); the lock hint is added indented, once (N-D 4.4, `explainedErrorText`).
  */
-function explainError(output: CliErrorOutput, human: { readonly output: HumanOutput; readonly messages: MessageCatalog }): void {
+function explainError(output: CliErrorOutput, human: { readonly output: HumanOutput; readonly messages: MessageCatalog }, tryWithoutKey = false): void {
   let text = "";
   try {
     text = explainedErrorText(output, human);
   } catch {
     text = "";
   }
+  // U-115 (UXM-9): at a terminal, a run stopped for its provider settings also shows the way to
+  // try the flow without a key.
+  if (tryWithoutKey && text.length > 0) {
+    try {
+      text = `${text.endsWith("\n") ? text : `${text}\n`}  ${human.messages.format("first_use.try_without_key")}\n`;
+    } catch {
+      // The error text stays as it is.
+    }
+  }
   writeHuman(text);
 }
+
+/** U-115: whether this command was a run (the default branch of dispatch). */
+let ranRun = false;
 
 async function install(): Promise<InstallInfo | null> {
   try {
@@ -165,7 +177,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
   const asked = helpRequest(argv, { stdoutIsTerminal: process.stdout.isTTY === true });
   if (asked !== null) {
     if (asked.kind === "version") return plain({ text: versionText(info?.version ?? null), exitCode: 0 });
-    return plain({ text: helpText(asked.command, humanFor(null).messages), exitCode: 0 });
+    // U-115 (UXM-9): at a terminal the general help is the short one.
+    return plain({ text: helpText(asked.command, humanFor(null).messages, { terminal: process.stdout.isTTY === true }), exitCode: 0 });
   }
   const human = humanFor(null);
   // N-23: before `--run latest` acts, say which run it chose.
@@ -260,6 +273,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           argv,
           env: process.env,
           cwd: process.cwd(),
+          // U-115 (UXM-9): at a terminal the text adds the way to try without a key.
+          stdoutIsTerminal: process.stdout.isTTY === true,
           defaultConfig,
           defaultConfigRefused: defaultRefused,
           messages: human.messages,
@@ -318,9 +333,12 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           osLocale: runtimeLocale(),
           // N-20: where the language came from, for the `language` check.
           explainLanguage: explainMessageLanguage,
+          // U-115 (UXM-9): at a terminal the text ends with what to do next.
+          stdoutIsTerminal: process.stdout.isTTY === true,
         }),
       );
     default: {
+      ranRun = true;
       const outcome = await runCli({
         argv,
         env: process.env,
@@ -364,7 +382,7 @@ const outcome = await runGuardedCommand(async () => {
 });
 if ("output" in outcome && outcome.output.kind === "error") {
   try {
-    explainError(outcome.output, humanFor(configLanguage));
+    explainError(outcome.output, humanFor(configLanguage), ranRun && outcome.output.code === "provider_not_configured" && process.stderr.isTTY === true);
   } catch {
     // Human output is best effort.
   }

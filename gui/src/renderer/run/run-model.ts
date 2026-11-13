@@ -69,6 +69,8 @@ export class RunModel {
   gap = false;
   done: RunDonePayload | null = null;
   startError: string | null = null;
+  /** U-212: the CLI's hint id that came with the start error (error.hint.<hint>), or null. */
+  startHint: string | null = null;
   /** The last request of this session (GUI-D11: memory only). */
   last: RunRequest | null = null;
   /** GU-5: the approval token of the plan the last apply came from (to be asked for the DR-21 consent). */
@@ -115,6 +117,7 @@ export class RunModel {
     this.gap = false;
     this.done = null;
     this.startError = null;
+    this.startHint = null;
     this.forgetEarly();
     this.changed();
     return true;
@@ -147,10 +150,11 @@ export class RunModel {
     this.changed();
   }
 
-  failedToStart(code: string): void {
+  failedToStart(code: string, hint?: string): void {
     if (this.phase !== "starting") return;
     this.phase = "idle";
     this.startError = code;
+    this.startHint = hint ?? null;
     this.forgetEarly();
     this.changed();
   }

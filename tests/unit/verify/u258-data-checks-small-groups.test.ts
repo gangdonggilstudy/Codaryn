@@ -89,6 +89,7 @@ before(async () => {
     "data/bonus-empty.csv": "region,bonus\nharbor,\nharbor,\nharbor,\nharbor,\nharbor,\nharbor,\nmeadow,4.25\nmeadow,5.25\nmeadow,6.25\nmeadow,7.25\nmeadow,8.25\n",
     "data/bonus-few.csv": "region,bonus\nharbor,1.5\nharbor,\nharbor,\nharbor,\nharbor,\nharbor,\nmeadow,4.25\nmeadow,\nmeadow,\nmeadow,\nmeadow,\n",
     "data/small.csv": "region,amount\nharbor,1.25\nmeadow,2.25\nsummit,3.25\n",
+    "data/small-bad.csv": "region,amount\nharbor,1.25\nmeadow,n/a\nsummit,3.25\n",
     "out/bonus.csv": "region,sum\nharbor,999\nmeadow,31.25\n",
     "out/bonus-count.csv": "region,sum\nharbor,3\nmeadow,5\n",
     "out/three.csv": "k\n1\n2\n3\n",
@@ -269,6 +270,8 @@ test("U-258 (PM): a group whose value comes from fewer than k cells is left out,
 test("U-258 (PM): the whole of a table under k rows or of fewer than k cells is not compared", async () => {
   const small = await noteOf(rule("sum", "data/small.csv", "out/total.csv", "amount", false));
   assert.deepEqual(small, { state: "undecided", note: `${NOT_GIVEN}; ${UNREADABLE_SOURCE_NOTE}` });
+  // Under k rows, a cell that is not a number is not told either.
+  assert.deepEqual(await noteOf(rule("sum", "data/small-bad.csv", "out/total.csv", "amount", false)), { state: "undecided", note: `${NOT_GIVEN}; ${UNREADABLE_SOURCE_NOTE}` });
   const few = await noteOf(rule("sum", "data/bonus-few.csv", "out/total.csv", "bonus", false));
   assert.deepEqual(few, { state: "undecided", note: `${NOT_GIVEN}; ${UNREADABLE_SOURCE_NOTE}` });
   const empty = await noteOf(rule("count", "data/bonus-empty.csv", "out/total.csv", "bonus", false));

@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 import type { DataChecksVerifierConfig, DataRule, RawVerifierResult, TableRef, Workspace } from "../../../src/contracts/index.js";
-import { UNREADABLE_SOURCE_NOTE, UNREADABLE_TARGET_NOTE, runDataChecksVerifier } from "../../../src/verify/data-checks.js";
+import { UNREADABLE_SOURCE_NOTE, UNREADABLE_TARGET_NOTE, notComparedLimit, runDataChecksVerifier } from "../../../src/verify/data-checks.js";
 import type { DataChecksOptions } from "../../../src/verify/data-checks.js";
 import { createVerifierRunner } from "../../../src/verify/index.js";
 import type { CommandRunner } from "../../../src/verify/index.js";
@@ -100,6 +100,11 @@ function rulesOn(source: string): DataRule[] {
 
 /** The verdict words of each evidence line ("held", "not held", "undecided"). */
 const verdicts = (result: RawVerifierResult): string[] => result.evidence.split("\n").map((line) => line.slice(0, line.indexOf(":")));
+/**
+ * U-258 (PM): over an unreadable source the max of the whole table (rule 3 of rulesOn) is not compared,
+ * as query_table does not give it; every other verdict of rulesOn stays.
+ */
+const hiddenVerdicts = (plain: RawVerifierResult): string[] => verdicts(plain).map((verdict, index) => (index === 3 ? "undecided" : verdict));
 
 /**
  * The numbers the evidence of before took from the source: recomputed values with a decimal point
@@ -142,10 +147,10 @@ test("U-223: a source under unreadable paths keeps every verdict and gives no nu
     const plain = await run(rules);
     const hidden = await run(rules, { unreadablePaths });
     const label = `${source} under ${JSON.stringify(unreadablePaths)}`;
-    assert.deepEqual(verdicts(hidden), verdicts(plain), label);
+    assert.deepEqual(verdicts(hidden), hiddenVerdicts(plain), label);
     assert.equal(hidden.outcome, plain.outcome, label);
     assert.deepEqual(hidden.checked, plain.checked, label);
-    assert.deepEqual(hidden.limits, plain.limits, label);
+    assert.deepEqual(hidden.limits, [...plain.limits, notComparedLimit(1, rules.length)], label);
     const numbers = sourceNumbers(plain);
     assert.ok(numbers.length >= 6, `${label}: the plain evidence shows the source's numbers (${numbers.join(", ")})`);
     for (const number of numbers) assert.equal(hidden.evidence.includes(number), false, `${label}: ${number} is in ${hidden.evidence}`);
@@ -187,7 +192,7 @@ test("U-223: a value that is not a usable list covers everything, as at the gate
   const plain = await run(rules);
   for (const value of ["data", [""], ["../outside"], [5]] as unknown[]) {
     const hidden = await run(rules, { unreadablePaths: value as readonly string[] });
-    assert.deepEqual(verdicts(hidden), verdicts(plain), JSON.stringify(value));
+    assert.deepEqual(verdicts(hidden), hiddenVerdicts(plain), JSON.stringify(value));
     assert.equal(hidden.evidence.includes("recomputed"), false, JSON.stringify(value));
     assert.ok(hidden.evidence.includes(UNREADABLE_SOURCE_NOTE), JSON.stringify(value));
   }

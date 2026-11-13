@@ -43,6 +43,14 @@ export interface ReportDeps {
   readonly openSettings?: () => void;
 }
 
+/**
+ * U-294 (R-113 L-2): the reasons a call is denied for, in the order the summary says what to do about them:
+ * a command (allowed commands, the task file's policy.commands), a write outside the files the task may
+ * write (writablePaths, or a new plan for a run that carried one out), a path kept from the agent
+ * (unreadablePaths, on purpose), a protected path (protectedPaths, on purpose), and paths no rule opens.
+ */
+const DENIAL_KINDS = ["command", "notWritable", "unreadable", "protected", "fixed"] as const;
+
 /** U-271 (3.7): what the summary tab may do with the other tabs (set once they are drawn). */
 type TabMoves = { goTab: (id: string) => void; logFilter: RunFilter };
 
@@ -94,6 +102,12 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
           );
         }
         box.append(el("p", t.format("report.deniedHow"), { class: "notice" }));
+        // U-294 (R-113 L-2): what to do differs by the reason, as the CLI's end summary says it (summary.denied_hint,
+        // denied_not_writable_hint, denied_unreadable_hint). The report gives no count by reason, so each line
+        // starts with the reason the records' line names; the records list each denial with its reason.
+        const kinds = el("ul", undefined, { id: "report-denied-kinds" });
+        for (const kind of DENIAL_KINDS) kinds.append(el("li", t.format(`report.deniedKind.${kind}`), { "data-denial": kind }));
+        box.append(kinds);
         const openSettings = deps.openSettings;
         if (openSettings !== undefined) box.append(button(t.format("report.deniedSettings"), () => openSettings(), { id: "report-denied-settings" }));
         parts.push(box);

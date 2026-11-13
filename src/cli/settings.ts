@@ -27,7 +27,7 @@ import type {
   ProviderSettings,
   ResolvedApiSettings,
 } from "../contracts/index.js";
-import { normalizeApiBaseUrlStrict } from "./security/index.js";
+import { normalizeApiBaseUrlStrict } from "../app/input/security/index.js";
 
 export type SettingsEnvironment = Readonly<Record<string, string | undefined>>;
 

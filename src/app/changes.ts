@@ -43,7 +43,7 @@ import type { ChangeNow, ChangesApplyRun, ContentHash, ListRuns, MaskedText, Pri
 import { RevertRunError, hasRecordsChangedMark, inspectRun, listRuns, readRunOriginals } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
-import { RUN_ID_PATTERN } from "../cli/args.js";
+import { RUN_ID_PATTERN } from "../contracts/index.js";
 import { appError } from "./errors.js";
 import type { AppCallOutcome, ChangedFileUnavailable, ChangedFileView, ChangesOutput } from "./types.js";
 

@@ -31,7 +31,7 @@ import type {
   ProviderSettings,
   WorkflowDefinition,
 } from "../contracts/index.js";
-import { checkLocalPathSyntax, checkTimerMs, normalizeApiBaseUrlStrict } from "./security/index.js";
+import { checkLocalPathSyntax, checkTimerMs, normalizeApiBaseUrlStrict } from "../app/input/security/index.js";
 import {
   InputError,
   fail,

@@ -25,6 +25,7 @@ import {
   WORKFLOW_ID_PATTERN_SOURCE,
 } from "../contracts/index.js";
 import type { CliErrorHint, DetailedCliErrorHint } from "../contracts/index.js";
+import { RUN_ID_PATTERN } from "../contracts/index.js";
 
 /**
  * A parse failure. U-37 (UXM-2, DR-57): `hint` names its reason for the human error (CliErrorOutput.hint);
@@ -120,8 +121,9 @@ type DoctorOption = (typeof DOCTOR_OPTIONS)[number];
 const JSON_SWITCH = ["--json"] as const;
 type JsonSwitch = (typeof JSON_SWITCH)[number];
 
-/** Same rule as the run directory names the store accepts. */
-export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+// U-280 (CLI migration C-3a): RUN_ID_PATTERN is the contracts' now (the store's run directory rule);
+// re-exported here for the tests that import it from this module.
+export { RUN_ID_PATTERN };
 
 const RUN_ID_MESSAGE = `--run must be a run id (1-128 characters of letters, digits, '.', '_' and '-') or "${LATEST_RUN_ALIAS}"`;
 /** U-37: a `--run` that is neither a run id nor `latest`. */

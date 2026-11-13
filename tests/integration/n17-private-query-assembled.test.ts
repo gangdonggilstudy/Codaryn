@@ -212,8 +212,10 @@ async function privateRun(t: TestContext, k: number): Promise<void> {
   assert.equal(readFileSync(path.join(sb.workspace, ...(canary.tables[0] as PrivateTableFile).path.split("/")), "utf8"), plan.csvBytes, "the table is as it was");
   assert.equal(resultOf("min").errorCode, "invalid_table");
   assert.match(resultOf("min").content, /op_not_allowed/);
-  assert.equal(resultOf("textsum").errorCode, "invalid_table");
-  assert.match(resultOf("textsum").content, /not_number/);
+  // U-277 (Codex V-28b): a table under unreadable paths has no not_number; a column of text summed
+  // is null in fewCells, as an empty column is.
+  assert.equal(resultOf("textsum").ok, true, resultOf("textsum").content);
+  assert.deepEqual((resultOf("textsum").payload as { groups: { values: unknown[]; fewCells?: number[] }[] }).groups.map((group) => [group.values, group.fewCells]), [[[null], [0]]]);
 
   // 1. No row and no small key in what went to the model, nor in the records.
   const sources = canarySources({ workspace: sb.workspace, scripted: true });

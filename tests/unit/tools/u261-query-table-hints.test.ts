@@ -4,8 +4,8 @@
  * unreadablePaths for max was told to look at the columns). Now each message ends with its problem's
  * own hint (QUERY_TABLE_PROBLEM_HINTS) and the engine adds none. The hints are model-bound fixed texts
  * (FIXED_MODEL_TEXTS) with no number in them, and under unreadablePaths a message names no data row
- * and no line (nothing of a single row reaches the model, DR-70): a not_number names the operation
- * and its column and says the column holds a cell that is not a number. A general table keeps them.
+ * and no line (nothing of a single row reaches the model, DR-70), and there is no not_number (U-277,
+ * Codex V-28b). A general table keeps them.
  */
 
 import assert from "node:assert/strict";
@@ -31,6 +31,8 @@ before(async () => {
   for (const dir of ["private", "data"]) fs.mkdirSync(path.join(root, dir), { recursive: true });
   for (const dir of ["private", "data"]) {
     fs.writeFileSync(path.join(root, dir, "bad-number.csv"), "g,v\nx,1\nx,1\nx,1\nx,1\nx,word\n");
+    // U-277 (Codex V-28b): k (5) such cells are no not_number under unreadablePaths either.
+    fs.writeFileSync(path.join(root, dir, "bad-numbers.csv"), "g,v\nx,1\nx,word\nx,word\nx,word\nx,word\nx,word\n");
     fs.writeFileSync(path.join(root, dir, "bad-quote.csv"), 'g,v\nx,1\nx,"open\n');
     fs.writeFileSync(path.join(root, dir, "people.csv"), "g,v\nx,1\nx,2\nx,3\nx,4\nx,5\n");
   }
@@ -78,13 +80,16 @@ describe("U-261: query_table's hints, one for each problem", () => {
   });
 
   test("under unreadablePaths no data row and no line; a general table names them", async () => {
-    const privateNumber = messageOf(await query({ path: "private/bad-number.csv", operations: [{ op: "sum", column: "v" }] }));
-    assert.equal(privateNumber, `table rejected: not_number at operations[0] (column "v" holds a cell that is not a number). ${QUERY_TABLE_PROBLEM_HINTS.not_number}`);
+    // U-277 (Codex V-28b): no not_number there; a cell that is not a number is left out (u277's test).
+    for (const table of ["private/bad-number.csv", "private/bad-numbers.csv"]) {
+      const outcome = await query({ path: table, operations: [{ op: "sum", column: "v" }] });
+      assert.ok(outcome.ok, JSON.stringify(outcome));
+    }
     const privateQuote = messageOf(await query({ path: "private/bad-quote.csv", operations: [{ op: "count", column: "v" }] }));
     assert.equal(privateQuote, `table rejected: not_table at (unterminated_quote). ${QUERY_TABLE_PROBLEM_HINTS.not_table}`);
     const describeQuote = messageOf(await query({ path: "private/bad-quote.csv", describe: true }));
     assert.equal(describeQuote, privateQuote);
-    for (const message of [privateNumber, privateQuote]) assert.doesNotMatch(message.replace(/operations\[\d+\]/g, ""), /[0-9]/, message);
+    assert.doesNotMatch(privateQuote, /[0-9]/, privateQuote);
     assert.match(messageOf(await query({ path: "data/bad-number.csv", operations: [{ op: "sum", column: "v" }] })), /^table rejected: not_number at data row 5, operations\[0\]\. /);
     assert.match(messageOf(await query({ path: "data/bad-quote.csv", operations: [{ op: "count", column: "v" }] })), /^table rejected: not_table at line 3 \(unterminated_quote\)\. /);
   });

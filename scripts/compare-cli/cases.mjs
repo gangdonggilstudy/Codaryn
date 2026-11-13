@@ -435,6 +435,39 @@ export const CASES = [
     setup: documentSetup(DOCUMENT_STEPS),
     steps: [{ args: ["frobnicate"] }, { args: ["run", "--task", "missing.json"] }, { args: ["report", "--workspace", "work", "--run", NO_RUN] }],
   },
+  // U-280 (the CLI migration's C-3a: the security checks, text cleaning, the install check, run ids and
+  // the model-text format move to src/app/input/): the pre-run input checks they make, in text and
+  // JSON. A key field in the task file, a key value in the config file (built at run time), a variables
+  // file with a byte order mark, a task file inside the workspace, a secret from a variables file
+  // masked in a run, and doctor on the key field and the variables file.
+  {
+    name: "input-checks",
+    setup: (dir) => {
+      documentSetup(DOCUMENT_STEPS, {}, {
+        "keyfield-task.json": task({ model: { provider: "scripted", scriptPath: "./script.json", apiKey: "placeholder" } }),
+        "keyvalue-config.json": { schemaVersion: 1, note: ["sk", "ant", "api03", "FAKE".repeat(20)].join("-") },
+        "bom.env": "\uFEFFCMP_NAME=1\n",
+        "secret.env": `CMP_SECRET=${FAKE_SECRET}\n`,
+        "secret-task.json": task({ privacy: { secretEnv: ["CMP_SECRET"] } }),
+        "work/inner-task.json": task({ workspaceRoot: "." }),
+      })(dir);
+    },
+    steps: [
+      { args: ["run", "--task", "keyfield-task.json"] },
+      { args: ["run", "--task", "task.json", "--config", "keyvalue-config.json"] },
+      { args: ["run", "--task", "task.json", "--vars-file", "bom.env"] },
+      { args: ["run", "--task", "work/inner-task.json"] },
+      { args: ["run", "--task", "secret-task.json", "--vars-file", "secret.env"] },
+      { args: ["doctor", "--task", "keyfield-task.json"] },
+      { args: ["doctor", "--task", "task.json", "--vars-file", "bom.env", "--json"] },
+    ],
+  },
+  {
+    name: "input-checks-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS, {}, { "keyfield-task.json": task({ model: { provider: "scripted", scriptPath: "./script.json", apiKey: "placeholder" } }), "bom.env": "\uFEFFCMP_NAME=1\n" }),
+    steps: [{ args: ["run", "--task", "keyfield-task.json"] }, { args: ["run", "--task", "task.json", "--vars-file", "bom.env"] }, { args: ["doctor", "--task", "keyfield-task.json"] }],
+  },
   // U-135: terminal cases (imitated: see the tool).
   {
     name: "terminal-first-page",

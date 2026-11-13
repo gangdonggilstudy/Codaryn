@@ -82,7 +82,7 @@ import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
-import { hideKeys } from "./text-safety.js";
+import { hideKeys } from "../app/input/text-safety.js";
 
 const realpathNative = promisify(realpathCallback.native);
 

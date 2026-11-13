@@ -472,8 +472,27 @@ export type RunListEntry =
        * no time (the JSON has `at`).
        */
       readonly review?: { readonly verdict: ReviewVerdict; readonly at: string };
+      /**
+       * U-155 (AXM-8): where the run is (RUN_PHASES), so a machine can tell a run still going from
+       * one that stopped without a result; `status: null` says both. Absent in lists built before
+       * U-155 or by a store that does not look at the lock: read as unknown, never as finished.
+       */
+      readonly phase?: RunPhase;
     }
   | { readonly state: "damaged"; readonly runId: RunId };
+
+/**
+ * U-155 (AXM-8, ax-midpoint-review): RunListEntry.phase, by what the store finds for the run:
+ * - running: no result.json, and the workspace lock names this run with a holder that is alive (the
+ *   store's own lock check, as `run` and `revert` judge a lock: its pid and processStartedAt, N-25 (b));
+ * - finished: result.json is there (`status` and `reason` are set);
+ * - no_result: no result.json, and the lock does not name this run or its holder is gone: the run
+ *   stopped without writing a result (killed, crashed) and is not going on.
+ * Only additions: `status: null` keeps its meaning, and `--run latest` keeps `run_in_progress` when
+ * the only runs are still going (U-22). A checked entry only; a damaged one has no phase.
+ */
+export const RUN_PHASES = ["running", "finished", "no_result"] as const;
+export type RunPhase = (typeof RUN_PHASES)[number];
 
 /**
  * U-16 (UXM-4): what `changes` says of an apply run, whose moves and discards are its plan's

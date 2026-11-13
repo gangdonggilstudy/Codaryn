@@ -21,7 +21,7 @@
  */
 
 import type { PlanActionKind, PlanMode } from "./plan.js";
-import type { CommandRule, Limits, PolicyConfig, ResolvedTaskSpec } from "./task.js";
+import type { CommandRule, ConfirmableCommandRule, ConfirmablePolicyConfig, Limits, PolicyConfig, ResolvedTaskSpec } from "./task.js";
 import { TOOL_NAMES } from "./tool.js";
 import type { AnyToolName } from "./tool.js";
 import type { MaskedText } from "./text.js";
@@ -139,17 +139,23 @@ function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | 
  *   kinds both list stay); when it does not state them it leaves the definition's as they are, so a
  *   general policy that only adds a protected path does not take organize's move and discard away.
  * - restorePathTokens: true only when both allow it. network, destructive: "deny".
+ * - U-74: a configured rule's `confirm: true` stays on every rule its intersection gives, so a
+ *   definition never turns a question into a plain allow. A definition's rules cannot ask.
  */
-export function mergeWorkflowPolicy(definition: PolicyConfig | undefined, configured: PolicyConfig | undefined): PolicyConfig | undefined {
+export function mergeWorkflowPolicy(
+  definition: PolicyConfig | undefined,
+  configured: ConfirmablePolicyConfig | undefined,
+): ConfirmablePolicyConfig | undefined {
   if (definition === undefined) return configured;
   if (configured === undefined) return definition;
   const protectedPaths = [...new Set([...(definition.protectedPaths ?? []), ...(configured.protectedPaths ?? [])])];
-  const commands: CommandRule[] = [];
+  const commands: ConfirmableCommandRule[] = [];
   const seen = new Set<string>();
   for (const own of definition.commands) {
     for (const given of configured.commands) {
-      const both = commandRuleIntersection(own, given);
-      if (both === null) continue;
+      const shared = commandRuleIntersection(own, given);
+      if (shared === null) continue;
+      const both: ConfirmableCommandRule = given.confirm === true ? { ...shared, confirm: true } : shared;
       const key = JSON.stringify(both);
       if (seen.has(key)) continue;
       seen.add(key);

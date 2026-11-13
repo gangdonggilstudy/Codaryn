@@ -9,7 +9,8 @@ import type { InputDiagnosticFile, SchemaFieldPath } from "./human.js";
 import type { IntegrityChecker } from "./integrity.js";
 import type { StateGuard } from "./state.js";
 import type { Journal } from "./journal.js";
-import type { ModelProvider } from "./model.js";
+import type { ModelErrorKind, ModelProvider } from "./model.js";
+import { modelErrorRetryable } from "./model.js";
 import type { PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
 import type { ModelProviderName, ResolvedTaskSpec } from "./task.js";
@@ -268,6 +269,101 @@ export const CLI_ERROR_EXIT_CODES = {
 } as const;
 export type CliErrorCode = keyof typeof CLI_ERROR_EXIT_CODES;
 
+/**
+ * U-55 (AXM-9): the kinds of CLI error.
+ * - input: what was given must change (arguments, a task, config or script file, a path, a run id
+ *   that names no plan run, an approval or secrets that do not match).
+ * - state: the workspace or its records are not in the state the command needs (locked, a run in
+ *   progress, a run or plan missing, already applied, changed, not awaiting review).
+ * - environment: the machine or the provider (a key or setting missing, a provider not built in,
+ *   the model listing failing, the config file not writable).
+ * - internal: Codaryn's own failure.
+ */
+export const CLI_ERROR_CATEGORIES = ["input", "state", "environment", "internal"] as const;
+export type CliErrorCategory = (typeof CLI_ERROR_CATEGORIES)[number];
+
+export const CLI_ERROR_CATEGORY: { readonly [C in CliErrorCode]: CliErrorCategory } = {
+  invalid_arguments: "input",
+  invalid_task: "input",
+  invalid_config: "input",
+  key_in_file: "input",
+  invalid_script: "input",
+  secret_env_missing: "environment",
+  workspace_not_found: "input",
+  workspace_is_install_dir: "input",
+  workspace_locked: "state",
+  run_in_progress: "state",
+  provider_not_configured: "environment",
+  provider_not_implemented: "environment",
+  model_list_failed: "environment",
+  config_write_failed: "environment",
+  config_exists: "state",
+  run_not_found: "state",
+  invalid_run_record: "state",
+  plan_run_missing: "state",
+  run_not_plan: "input",
+  plan_not_approved: "input",
+  plan_already_applied: "state",
+  plan_secrets_differ: "input",
+  cleanup_plan_changed: "state",
+  plan_records_changed: "state",
+  run_not_awaiting_review: "state",
+  internal_error: "internal",
+};
+
+/**
+ * U-55: whether the same command may succeed later, unchanged. Only a lock or a run that ends lets
+ * it (workspace_locked, run_in_progress; a dead lock is reclaimed). cleanup_plan_changed needs a new
+ * preview first, so it is false; internal_error is false so a program does not repeat it blindly.
+ * model_list_failed goes by the listing's model error (cliErrorFacts).
+ */
+export const CLI_ERROR_RETRYABLE: { readonly [C in Exclude<CliErrorCode, "model_list_failed">]: boolean } = {
+  invalid_arguments: false,
+  invalid_task: false,
+  invalid_config: false,
+  key_in_file: false,
+  invalid_script: false,
+  secret_env_missing: false,
+  workspace_not_found: false,
+  workspace_is_install_dir: false,
+  workspace_locked: true,
+  run_in_progress: true,
+  provider_not_configured: false,
+  provider_not_implemented: false,
+  config_write_failed: false,
+  config_exists: false,
+  run_not_found: false,
+  invalid_run_record: false,
+  plan_run_missing: false,
+  run_not_plan: false,
+  plan_not_approved: false,
+  plan_already_applied: false,
+  plan_secrets_differ: false,
+  cleanup_plan_changed: false,
+  plan_records_changed: false,
+  run_not_awaiting_review: false,
+  internal_error: false,
+};
+
+/**
+ * U-55: `category` and `retryable` of a CLI error, to spread into its CliErrorOutput. For
+ * model_list_failed, `modelError` is the listing's failure (ListModelsOutcome's kind and
+ * httpStatus); without it, or when modelErrorRetryable cannot tell, `retryable` is left out.
+ */
+export function cliErrorFacts(
+  code: CliErrorCode,
+  modelError?: { readonly kind: ModelErrorKind; readonly httpStatus?: number },
+): { readonly category: CliErrorCategory; readonly retryable?: boolean } {
+  const category = CLI_ERROR_CATEGORY[code];
+  const retryable =
+    code === "model_list_failed"
+      ? modelError === undefined
+        ? undefined
+        : modelErrorRetryable(modelError.kind, modelError.httpStatus)
+      : CLI_ERROR_RETRYABLE[code];
+  return retryable === undefined ? { category } : { category, retryable };
+}
+
 export interface RunUsage {
   readonly modelTurns: number;
   readonly toolCalls: number;
@@ -375,6 +471,24 @@ export interface EngineResult {
    * plan's summary, PlanOutput.summary). Results written before DR-47 do not have it.
    */
   readonly finalMessage?: { readonly text: MaskedText; readonly truncated: boolean };
+  /**
+   * U-55 (AXM-9): the model error that ended the run, for programs that decide whether to try again
+   * without reading the journal. Present only with reason `model_error` when a model error ended
+   * it: a provider failure (the outcome's kind), a malformed response or a plan run that ended
+   * without a plan (`malformed_response`). Absent when reason `model_error` came from masking that
+   * failed, which is no model error, and in results written before U-55. The journal's
+   * `model_error` record keeps the masked message; nothing of the provider's reply is here.
+   */
+  readonly modelError?: RunModelError;
+}
+
+/** U-55: EngineResult.modelError. Kind and turn only, and whether trying again may help. */
+export interface RunModelError {
+  readonly kind: ModelErrorKind;
+  /** The model turn of the failed request (1-based, as the journal's `model_error.turn`). */
+  readonly turn: number;
+  /** modelErrorRetryable. Absent when it cannot be told (an api_error without an HTTP status): unknown, never false. */
+  readonly retryable?: boolean;
 }
 
 /** DR-47: the longest EngineResult.finalMessage text, in characters (code points). */
@@ -388,6 +502,15 @@ export interface CliErrorOutput {
   readonly exitCode: number;
   /** Never contains secret values, keys or file contents. */
   readonly message: string;
+  /**
+   * U-55 (AXM-9, PM Q-3): what kind of problem it is (CLI_ERROR_CATEGORY) and whether the same
+   * command may succeed later unchanged (cliErrorFacts). Every error the CLI and the app layer make
+   * has them; optional in the type only for outputs made before U-55. `retryable` is absent only
+   * when it cannot be told (model_list_failed whose request failed as an api_error without an HTTP
+   * status): unknown, never false. The exit code does not change.
+   */
+  readonly category?: CliErrorCategory;
+  readonly retryable?: boolean;
   /**
    * N-15: where in a config, task or script file the problem is, for `invalid_config`,
    * `invalid_task` and `invalid_script` when it can be said safely. Absent otherwise.

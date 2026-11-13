@@ -368,6 +368,10 @@ export interface ProfileView {
   readonly commands: readonly string[];
   readonly verifiers: number;
   readonly protectedPaths: number;
+  /** U-247 (R-111): the profile has its own policy (it takes the config's place in a quick run, commands too). */
+  readonly hasPolicy?: boolean;
+  /** U-247 (R-111): how many unreadable paths the profile's policy lists (added to the config's). */
+  readonly unreadablePaths?: number;
 }
 
 /**
@@ -393,6 +397,24 @@ export interface SettingsView {
   readonly defaultProvider: string | null;
   /** The contract's API providers, in its order (DR-22: no name is written into the screens). */
   readonly apiProviders: readonly ApiProviderView[];
+  /** U-247 (U-215): the config's unreadable paths and k; null when the app layer gave none. */
+  readonly privateData?: SettingsPrivateDataView | null;
+}
+
+/** U-247 (bundle A, U-215): the config's policy.unreadablePaths (cleaned, file order) and its k. */
+export interface SettingsPrivateDataView {
+  readonly unreadablePaths: readonly string[];
+  /** As configured (null: none), the k a run gets from the config alone (never below min), and the contract's range. */
+  readonly minGroupSize: { readonly configured: number | null; readonly effective: number; readonly min: number; readonly max: number };
+}
+
+/** U-247: privateData as the engine host gives it; undefined when it does not fit. */
+function toPrivateData(value: unknown): SettingsPrivateDataView | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isObj(value) || !textList(value["unreadablePaths"]) || !isObj(value["minGroupSize"])) return undefined;
+  const { configured, effective, min, max } = value["minGroupSize"];
+  if (!count(effective) || !count(min) || !count(max) || min > max || effective < min || effective > max || !(configured === null || count(configured))) return undefined;
+  return { unreadablePaths: value["unreadablePaths"], minGroupSize: { configured: configured as number | null, effective, min, max } };
 }
 
 export interface ApiProviderView {
@@ -488,6 +510,9 @@ function toProfileView(value: unknown): ProfileView | null {
   const { name, workflowRef, limits, commands, verifiers, protectedPaths } = value;
   const provider = value["provider"] ?? null;
   if (!shortText(name) || !(workflowRef === null || shortText(workflowRef)) || !textList(commands) || !count(verifiers) || !count(protectedPaths)) return null;
+  const hasPolicy = value["hasPolicy"] ?? false;
+  const unreadablePaths = value["unreadablePaths"] ?? 0;
+  if (typeof hasPolicy !== "boolean" || !count(unreadablePaths)) return null;
   if (!(provider === null || (typeof provider === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(provider)))) return null;
   if (!Array.isArray(limits) || limits.length > 32) return null;
   const pairs: (readonly [string, number | null])[] = [];
@@ -498,7 +523,7 @@ function toProfileView(value: unknown): ProfileView | null {
     if (!(limit === null || (typeof limit === "number" && Number.isFinite(limit)))) return null;
     pairs.push([key, limit as number | null]);
   }
-  return { name, workflowRef: workflowRef as string | null, provider: provider as string | null, limits: pairs, commands, verifiers, protectedPaths };
+  return { name, workflowRef: workflowRef as string | null, provider: provider as string | null, limits: pairs, commands, verifiers, protectedPaths, hasPolicy, unreadablePaths };
 }
 
 /** The engine host's settings value, checked field by field. `env` is added by the main process. */
@@ -532,6 +557,8 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
     if (checked === null) return fail;
     profileViews.push(checked);
   }
+  const privateData = toPrivateData(view["privateData"]);
+  if (privateData === undefined) return fail;
   return {
     ok: true,
     view: {
@@ -540,6 +567,7 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
       language: language as "ko" | "en" | null,
       profiles: profileViews,
       workflows: { builtin: workflows["builtin"], config: workflows["config"] },
+      privateData,
       keyAvailable,
       providers,
       env,

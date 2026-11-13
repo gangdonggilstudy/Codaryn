@@ -268,6 +268,8 @@ export const EN: { readonly [K in TextId]: string } = {
   "widen.provider_changed": "the provider changed (work goes to another API)",
   "widen.profile_changed": "a profile changed",
   "widen.workflow_changed": "a task type definition changed",
+  "widen.writable_path_added": "a writable path added",
+  "widen.writable_paths_unlimited": "the writable paths limit removed (file tools may write anywhere in the workspace)",
   "widen.other": "another widening",
   "error.bad_number": "Enter a whole number of 1 or more.",
   "error.empty_value": "Enter a value first.",

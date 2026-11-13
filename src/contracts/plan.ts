@@ -321,7 +321,7 @@ export interface PlanRecorder {
    * `files` as given), with savePlan's rules: created exclusively, resolved with the SHA-256 of the
    * bytes written, rejected when the file exists or cannot be written, no hard links needed. The
    * `propose_changes` tool builds every `shown` and the summary's visible parts with the run's own
-   * gateway. Optional until the store has it (B-3): a recorder without it stores no `run` plan, and
+   * gateway, the summary made safe with safeModelText first (V-7 M-1). Optional until the store has it (B-3): a recorder without it stores no `run` plan, and
    * the tool then fails with `io_error`, as without a recorder.
    */
   saveChangesPlan?(plan: { readonly summary: MaskedParts; readonly files: readonly StoredPlannedFile[] }): Promise<ContentHash>;
@@ -478,9 +478,10 @@ export type StoredPlannedFile = ResolvedPlannedFile & { readonly shown: MaskedPa
  * B-1: plan.json of a `run` plan: the same file name, digest rule (the SHA-256 of its bytes) and
  * exclusive write as StoredPlan, under the same DR-5 rule: files, their hashes and the summary,
  * nothing that decides how the later run runs (its policy, limits, verifiers and secrets come from
- * the user's settings and the task at that time). `summary` is the summary as the plan run masked
- * it, as visible parts (MaskedParts: no privacy token, no secret value); the later run masks it
- * again before sending it (B-3). R-99 L-1: the summary under the digest differs from the proposal's
+ * the user's settings and the task at that time). `summary` is the summary as the plan run made it
+ * safe (safeModelText, review V-7 M-1: control and invisible characters left out, registered values
+ * masked, key shapes hidden as HIDDEN_KEY_MARKER), as visible parts (MaskedParts: no privacy token,
+ * no secret value, no key shape); the later run masks it again before sending it (B-3). R-99 L-1: the summary under the digest differs from the proposal's
  * B-2 (paths and hashes only); the PM accepted it as the safer side. Not written or read yet:
  * LoadPlan takes `kind: "plan"` only and answers `invalid_run_record` for this kind; LoadAnyPlan
  * (B-3) reads both.

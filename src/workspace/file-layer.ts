@@ -3,7 +3,8 @@
  * failures (WS-02). Product code always uses `nodeFileLayer`.
  */
 
-import { realpath as realpathCallback } from "node:fs";
+import { constants, realpath as realpathCallback } from "node:fs";
+import type { BigIntStats } from "node:fs";
 import fs from "node:fs/promises";
 import { promisify } from "node:util";
 
@@ -13,6 +14,29 @@ export interface FileStat {
   readonly size: number;
   isFile(): boolean;
   isDirectory(): boolean;
+}
+
+/** U-189: a file system object's identity, its device and file id (64-bit, read as bigint). */
+export interface FileId {
+  readonly dev: bigint;
+  readonly ino: bigint;
+}
+
+/** U-189: an lstat or fstat with the identity; `isSymbolicLink` is true for links and junctions. */
+export interface IdStat {
+  readonly id: FileId;
+  readonly size: bigint;
+  isFile(): boolean;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+}
+
+/** U-189: a file opened for reading: its own identity, and its bytes up to a limit. */
+export interface ReadHandle {
+  stat(): Promise<IdStat>;
+  /** Up to `limit` bytes from the start (one more than a size limit tells a larger file). */
+  read(limit: number): Promise<Uint8Array>;
+  close(): Promise<void>;
 }
 
 export interface DirEntry {
@@ -40,6 +64,25 @@ export interface FileLayer {
   /** Replaces `to` with `from`. */
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
+  /** U-189: `lstat` with the identity (a link in the last segment is not followed). */
+  lstatId(path: string): Promise<IdStat>;
+  /**
+   * U-189: opens a file for reading, not following a link in the last segment where the platform can
+   * (O_NOFOLLOW; Windows has none, the handle's identity tells it instead), and never waiting on a FIFO.
+   */
+  openRead(path: string): Promise<ReadHandle>;
+}
+
+const READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+
+function idStat(stat: BigIntStats): IdStat {
+  return {
+    id: { dev: stat.dev, ino: stat.ino },
+    size: stat.size,
+    isFile: () => stat.isFile(),
+    isDirectory: () => stat.isDirectory(),
+    isSymbolicLink: () => stat.isSymbolicLink(),
+  };
 }
 
 export const nodeFileLayer: FileLayer = {
@@ -68,4 +111,24 @@ export const nodeFileLayer: FileLayer = {
   link: (existing, to) => fs.link(existing, to),
   rename: (from, to) => fs.rename(from, to),
   remove: (path) => fs.unlink(path),
+  lstatId: async (path) => idStat(await fs.lstat(path, { bigint: true })),
+  openRead: async (path) => {
+    const handle = await fs.open(path, READ_FLAGS);
+    return {
+      stat: async () => idStat(await handle.stat({ bigint: true })),
+      read: async (limit) => {
+        const chunks: Buffer[] = [];
+        let total = 0;
+        while (total < limit) {
+          const chunk = Buffer.alloc(Math.min(65_536, limit - total));
+          const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+          if (bytesRead === 0) break;
+          chunks.push(chunk.subarray(0, bytesRead));
+          total += bytesRead;
+        }
+        return Buffer.concat(chunks);
+      },
+      close: () => handle.close(),
+    };
+  },
 };

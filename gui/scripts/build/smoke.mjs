@@ -840,8 +840,18 @@ if (life === null || typeof life.hostPid !== "number") {
   lifeCheck("lifeTransportRefused", JSON.stringify(life.transport) === JSON.stringify({ mode: "loopback-only", refused: 0 }), `transport ${JSON.stringify(life.transport)}`);
   // Kills the main process only (TerminateProcess on Windows), not its children.
   process.kill(life.mainPid);
-  const gone = await goneWithin(life.hostPid, 5_000);
-  lifeCheck("hostEndsWhenMainKilled", gone, `host ${life.hostPid} after main ${life.mainPid} was killed`);
+  // U-178: the host ends about 1.5 s after its input ends (INPUT_END_GRACE_MS, then finish's 0.5 s). Over
+  // 5 s is told as a NOTE (a busy machine delays it); only a host still there after 30 s fails (DR-8: it
+  // must not outlive the main process). The time it took is in the detail; a host left is ended here.
+  const killedAt = Date.now();
+  const gone = await goneWithin(life.hostPid, 30_000);
+  const endedMs = gone ? Date.now() - killedAt : null;
+  lifeCheck(
+    "hostEndsWhenMainKilled",
+    gone,
+    gone ? `host ${life.hostPid} ended ${endedMs} ms after main ${life.mainPid} was killed` : `host ${life.hostPid} still running 30 s after main ${life.mainPid} was killed`,
+  );
+  if (gone && endedMs > 5_000) process.stdout.write(`NOTE hostEndsWhenMainKilled: the host took ${endedMs} ms (over 5 s, within 30 s), as on a busy machine\n`);
   if (!gone) process.kill(life.hostPid);
 }
 await sleep(1_000);

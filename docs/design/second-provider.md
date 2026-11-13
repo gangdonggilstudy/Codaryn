@@ -1,7 +1,7 @@
 # 두 번째 API 제공자 설계 (Codex = OpenAI, DR-22)
 
 - 상태: PM이 OpenAI 쪽 사실을 확인하고([사실 확인 문서](second-provider-facts.md)) 결정 DR-31로 채택했다. 이 문서는 그 사실과 결정에 맞춰 고쳤다. 구현은 9절 순서로 했다. SP-0~SP-6은 main에 병합됐다(병합 `c20c51d`, 2026-11-12). SP-7의 실제 점검 스크립트는 있지만 실제 API로 돌린 기록은 없다(U-101 `c5325b0`). 9절의 상태 칸은 main `6ef6e3a`에서 다시 맞췄다(U-273).
-- 기준: main `b05da45`(범용 작업 묶음 병합 뒤). [코드] 표기는 이 트리에서 확인한 것이다.
+- 기준: main `b05da45`(범용 작업 묶음 병합 뒤). [코드] 표기는 이 트리에서 확인한 것이다. 이행 C-3a(병합 `865616f`)가 `src/cli/security/`와 `src/cli/text-safety.ts`를 `src/app/input/` 아래로 옮겼다. 그 파일의 자리는 지금 것을 적고, 줄 번호는 `b05da45` 때의 옛 자리와 함께 둔다(U-281).
 - 바탕: 제공자 중립 조사(65항목, w3:p9 보고서 `report-provider-neutrality.md`, main `8d17daf` 기준). 줄 번호는 이 문서에서 다시 확인했다.
 - 표기: [코드] 코드를 읽어 확인함, [확인] 사실 확인 문서에서 확인된 OpenAI 쪽 사실, [미확인] 공식 문서에서 찾지 못한 것(추측하지 않는다), [제안] 이 문서의 안. 결정 번호는 SP-Dn이고, PM 결정은 DR-31이다.
 - 관련: [architecture.md](../architecture.md) 6절(모델 어댑터), [privacy.md](../privacy.md), [cli-contract.md](../cli-contract.md), [decisions.md](../decisions.md), [단계 4·5 설계 지시](../work-orders/phase-4-5-design.md) DR-20·DR-22.
@@ -61,8 +61,8 @@ Anthropic에 묶인 것(조사 65항목의 요약, 현재 위치)
 | 키 변수 | `src/contracts/config.ts:15` | `ANTHROPIC_API_KEY_ENV` 하나 |
 | 키 등록(S-2) | `src/cli/run.ts:653` 근처 | 고른 제공자의 키만 등록한다 |
 | 키 해석 | `src/cli/settings.ts:86-91` | `resolveAnthropicSettings`가 그 변수만 읽는다 |
-| 키 모양 | `src/contracts/config.ts:258` | `ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}"`. 쓰는 곳: `src/cli/security/keys.ts:54`, `src/cli/text-safety.ts:80`, `src/i18n/params.ts:39`, `src/model/anthropic/index.ts:189`·`:786`, 커밋 훅 `scripts/check-secrets.mjs:11-12` |
-| 주소 | `src/contracts/config.ts:206` | `DEFAULT_ANTHROPIC_API_BASE_URL`. `src/cli/security/url.ts:30-31`이 `/v1`, `/v1/messages`로 끝나는 주소를 거부한다(제공자가 `/v1/messages`를 붙이므로) |
+| 키 모양 | `src/contracts/config.ts:258` | `ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}"`. 쓰는 곳: `src/app/input/security/keys.ts`(main `b05da45` 때 `src/cli/security/keys.ts:54`), `src/app/input/text-safety.ts`(main `b05da45` 때 `src/cli/text-safety.ts:80`), `src/i18n/params.ts:39`, `src/model/anthropic/index.ts:189`·`:786`, 커밋 훅 `scripts/check-secrets.mjs:11-12` |
+| 주소 | `src/contracts/config.ts:206` | `DEFAULT_ANTHROPIC_API_BASE_URL`. `src/app/input/security/url.ts`(main `b05da45` 때 `src/cli/security/url.ts:30-31`)이 `/v1`, `/v1/messages`로 끝나는 주소를 거부한다(제공자가 `/v1/messages`를 붙이므로) |
 | 설정 | `src/contracts/config.ts:49-63` | `model`, `maxOutputTokens`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`가 최상위에 하나뿐. `CODARYN_MODEL`, `CODARYN_API_BASE_URL`도 하나. 간편 형식은 늘 anthropic(`src/cli/task.ts:703`) |
 | 해석 결과 | `src/contracts/model.ts:88-151` | `ResolvedAnthropicSettings`, `CreateAnthropicProvider`, `AnthropicListSettings`, `ListAnthropicModels` |
 | 출력 상한 | `src/contracts/config.ts:214` | `MAX_OUTPUT_TOKENS_LIMIT = 200_000`(Anthropic 모델 기준) |
@@ -135,7 +135,7 @@ export const API_PROVIDERS: { readonly [P in ApiProviderName]: ApiProviderSpec }
     - 고르지 않은 제공자의 키 값은 `MIN_OTHER_PROVIDER_KEY_LENGTH`(20자) 이상일 때만 등록한다.
     - 이유: 다른 도구를 위해 그 변수에 둔 짧은 자리표시자(`EMPTY`, `ollama`, `x`)가 비밀이 되면 그 낱말이 든 줄을 고칠 수 없고 명령이 시작하지 못한다(재현). 실제 키는 훨씬 길다.
 - 출력 정리: `report`·`runs` 등이 지우는 "현재 키"도 모든 키 변수의 값으로 넓힌다(조사 B6).
-- 인쇄 가능한 필드 이름의 예외(`src/cli/security/keys.ts:49`)는 키 변수 이름 전체로 넓힌다.
+- 인쇄 가능한 필드 이름의 예외(`src/app/input/security/keys.ts`(main `b05da45` 때 `src/cli/security/keys.ts:49`))는 키 변수 이름 전체로 넓힌다.
 - `doctor`의 `api_key` 점검, `init`의 `keySet`, `models`의 키 안내는 고른 제공자의 키 변수를 쓴다.
   - 계약 `InitOutput`·`ModelsOutput`에 `provider`를 싣는다.
 - 문구
@@ -187,7 +187,7 @@ export type ResolvedAnthropicSettings = ResolvedApiSettings & { readonly provide
 ```
 
 - `ModelConfig`의 API 쪽 멤버를 `{ provider: ApiProviderName; model?; maxOutputTokens? }`로 넓힌다.
-- 토큰 한도 필수 규칙(`src/cli/security/limits.ts:102-104`, "maxTotalTokens must be a number for the anthropic provider")은 "API 제공자 실행"으로 바꾼다. 뜻은 같다.
+- 토큰 한도 필수 규칙(`src/app/input/security/limits.ts`(main `b05da45` 때 `src/cli/security/limits.ts:102-104`), "maxTotalTokens must be a number for the anthropic provider")은 "API 제공자 실행"으로 바꾼다. 뜻은 같다.
 - 제공자 생성은 제공자 표에서 공장(factory)을 고른다(`src/cli/provider.ts`, `src/cli/run.ts`). 앱 계층의 교체점도 `providerFactories: { [P in ApiProviderName]?: CreateApiProvider }` 하나로 바꾼다. 옛 이름은 별칭으로 둔다(A-1 몫).
 
 ### 4.6 모델 목록

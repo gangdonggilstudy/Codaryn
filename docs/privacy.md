@@ -38,7 +38,7 @@
 | 보호 줄 | 문서의 가림본에서 토큰이 든 줄. 모델이 바꿀 수 없다(7절) |
 | 스냅샷 | 쓰기 전 원문 파일. 되돌리기용(8절) |
 
-## 3. 가릴 값 등록(`src/cli/run.ts`, `src/cli/security/env.ts`). 구현
+## 3. 가릴 값 등록(`src/cli/run.ts`, `src/app/input/security/env.ts`). 구현
 
 실행 전 단계에서 아래 순서로 모은다. 중복은 하나로 친다.
 

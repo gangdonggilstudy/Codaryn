@@ -41,15 +41,21 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   CLEANUP_BLOCK_CODES,
+  CLEANUP_CONFIRM_FLAGS,
   CLEANUP_EXIT_CODES,
+  CLEANUP_ITEM_FATES,
   CLEANUP_KEPT_REASONS,
   CLEANUP_WARNING_CODES,
   MIN_PLAN_DIGEST_PREFIX,
+  STATE_DISCARDED_WITHOUT_RECORDS,
   cleanupStatusOf,
   needsNotRevertedConfirmation,
 } from "../contracts/index.js";
 import type {
   ApplyCleanup,
+  CleanupConfirmFlag,
+  CleanupItem,
+  CleanupItemFate,
   CleanupItemRef,
   CleanupKeptReason,
   CleanupOutput,
@@ -260,7 +266,8 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
   }
 
   const currentKey = knownKeyValues(io.env);
-  const text = json ? jsonLine(output) : renderCleanup(output, io.messages ?? createMessageCatalog("en"));
+  // U-86: with no selection option the preview offers example commands.
+  const text = json ? jsonLine(output) : renderCleanup(output, io.messages ?? createMessageCatalog("en"), { selected: Object.keys(selection).length > 0 });
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }
 
@@ -269,18 +276,42 @@ export function itemName(item: CleanupItemRef): string {
   return item.target === "leftover" ? `cleanup-${item.leftoverId}` : item.runId;
 }
 
-/** DR-44 (a): run records in the plan that go only with includeNotReverted (NOT_REVERTED_WARNINGS). */
-function notRevertedRuns(plan: CleanupPlan): number {
-  return plan.items.filter((item) => item.target === "run" && needsNotRevertedConfirmation(item.warnings)).length;
+/** U-86: the flag a person types for each confirmation besides --confirm. */
+const CONFIRM_FLAG_ARGUMENT: { readonly [F in CleanupConfirmFlag]: string } = {
+  include_not_reverted: "--include-not-reverted",
+  delete_discarded: "--delete-discarded",
+};
+
+/**
+ * U-86: an item's fate, the store's (CleanupPlan's CLEANUP_ITEM_FATES) or, from a store before U-86,
+ * by its kind as the contract says: a run's records with a NOT_REVERTED_WARNINGS code need
+ * include_not_reverted, a discarded-files folder delete_discarded, anything else nothing.
+ */
+function fateOf(plan: CleanupPlan, index: number, item: CleanupItem): CleanupItemFate {
+  const fates = plan[CLEANUP_ITEM_FATES];
+  const given = fates !== undefined && fates.length === plan.items.length ? fates[index] : undefined;
+  if (given !== undefined) return given;
+  if (item.target === "run" && needsNotRevertedConfirmation(item.warnings)) return { removedWith: ["include_not_reverted"] };
+  if (item.target === "discarded") return { removedWith: ["delete_discarded"] };
+  return { removedWith: [] };
 }
 
-/** DR-44 (a): the head line under cleanup.confirm.runs. */
-export function notRevertedHeadLine(messages: MessageCatalog, count: number): string {
-  return messages.format("cleanup.confirm.not_reverted", { count });
+/** U-86: the preview's groups, in order. An item that needs both flags is in delete_discarded. */
+const GROUPS = ["confirm", "include_not_reverted", "delete_discarded", "kept"] as const;
+type Group = (typeof GROUPS)[number];
+
+function groupOf(fate: CleanupItemFate): Group {
+  if ("keptFor" in fate) return "kept";
+  if (fate.removedWith.includes("delete_discarded")) return "delete_discarded";
+  return fate.removedWith.includes("include_not_reverted") ? "include_not_reverted" : "confirm";
 }
 
-/** The person's text: the catalog's lines (cleanup.*) and the item names and sizes. */
-export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): string {
+/**
+ * The person's text: the catalog's lines (cleanup.*) and the item names and sizes. U-86 (UXM-10):
+ * the preview groups the items by what must be given for each to go; `selected` (default true):
+ * whether a selection option was given, without which it offers example commands.
+ */
+export function renderCleanup(output: CleanupOutput, messages: MessageCatalog, options: { readonly selected?: boolean } = {}): string {
   const out: string[] = [];
   const keptText = (reason: CleanupKeptReason): string =>
     (CLEANUP_KEPT_REASONS as readonly string[]).includes(reason) ? messages.format(`cleanup.kept.${reason}`) : reason;
@@ -310,6 +341,11 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
   const { summary, plan } = output;
   out.push(messages.format("cleanup.summary.runs", { count: summary.runs.count, bytes: summary.runs.bytes }));
   out.push(messages.format("cleanup.summary.discarded", { files: summary.discarded.files, bytes: summary.discarded.bytes }));
+  // U-86 (the rest of UXM-1): discarded files whose run has no records left, when there are any.
+  const recordless = summary[STATE_DISCARDED_WITHOUT_RECORDS];
+  if (recordless !== undefined && recordless.count > 0) {
+    out.push(messages.format("cleanup.summary.discarded_without_records", { count: recordless.count, bytes: recordless.bytes }));
+  }
   out.push(messages.format("cleanup.summary.parked", { files: summary.parked.files, bytes: summary.parked.bytes }));
   // DR-44 (d): when above 0 (a store before DR-44 gives none).
   const leftoverSummary = summary.leftovers as StateSummary["leftovers"] | undefined;
@@ -323,7 +359,8 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
     out.push(messages.format("cleanup.summary.unknown_folders", { count: unknownFolders.count, bytes: unknownFolders.bytes }));
   }
   out.push("");
-  if (plan.items.length === 0 && plan.blocked.length === 0) {
+  const selected = options.selected ?? true;
+  if (selected && plan.items.length === 0 && plan.blocked.length === 0) {
     out.push(messages.format("cleanup.nothing"));
     return `${out.join("\n")}\n`;
   }
@@ -331,56 +368,44 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
     (CLEANUP_WARNING_CODES as readonly string[]).includes(code)
       ? messages.format(`cleanup.warning.${code as (typeof CLEANUP_WARNING_CODES)[number]}`)
       : code;
-  const itemsOf = (target: "run" | "discarded" | "leftover"): void => {
-    for (const item of plan.items.filter((entry) => entry.target === target)) {
-      const warnings = item.warnings.map(warningText);
+  // U-86: each item with its fate, grouped in GROUPS order; items keep the plan's order in a group.
+  const placed = plan.items.map((item, index) => ({ item, fate: fateOf(plan, index, item) }));
+  for (const group of GROUPS) {
+    const members = placed.filter(({ fate }) => groupOf(fate) === group);
+    if (members.length === 0) continue;
+    const files = members.reduce((sum, { item }) => sum + item.size.files, 0);
+    const bytes = members.reduce((sum, { item }) => sum + item.size.bytes, 0);
+    const count = members.length;
+    if (group === "kept") out.push(messages.format("cleanup.group.kept", { count }));
+    else if (group === "delete_discarded") out.push(messages.format("cleanup.group.delete_discarded", { count, files, bytes }));
+    else out.push(messages.format(`cleanup.group.${group}`, { count, bytes }));
+    for (const { item, fate } of members) {
+      // The kind is named: one group can hold an apply run's records and its discarded files.
       const size = messages.format("cleanup.size", { files: item.size.files, bytes: item.size.bytes });
-      out.push(`- ${itemName(item)}: ${size}${warnings.length === 0 ? "" : `; ${warnings.join("; ")}`}`);
+      out.push(`- ${targetName(item.target)} ${itemName(item)}: ${size}`);
+      // One line per warning; a kept item says why it stays (its removal warnings do not apply).
+      if ("keptFor" in fate) out.push(`  ${keptText(fate.keptFor)}`);
+      else for (const code of item.warnings) out.push(`  ${warningText(code)}`);
     }
-  };
-  const notReverted = notRevertedRuns(plan);
-  const runs = plan.items.some((item) => item.target === "run");
-  const discarded = plan.items.some((item) => item.target === "discarded");
-  const leftoverItems = plan.items.filter((item) => item.target === "leftover");
-  if (runs) {
-    out.push(messages.format("cleanup.confirm.runs", { count: plan.totals.runs.count, bytes: plan.totals.runs.bytes }));
-    // DR-44 (a): how many of them were not reverted, or only partly.
-    if (notReverted > 0) out.push(`  ${notRevertedHeadLine(messages, notReverted)}`);
-    itemsOf("run");
-  }
-  if (discarded) {
-    out.push(messages.format("cleanup.confirm.discarded", { files: plan.totals.discarded.files, bytes: plan.totals.discarded.bytes }));
-    itemsOf("discarded");
-  }
-  if (leftoverItems.length > 0) {
-    const size = leftoverItems.reduce((sum, item) => ({ files: sum.files + item.size.files, bytes: sum.bytes + item.size.bytes }), { files: 0, bytes: 0 });
-    out.push(messages.format("cleanup.confirm.leftovers", { count: leftoverItems.length, bytes: size.bytes }));
-    itemsOf("leftover");
   }
   for (const item of plan.blocked) {
     const reason = (CLEANUP_BLOCK_CODES as readonly string[]).includes(item.code) ? messages.format(`cleanup.blocked.${item.code}`) : item.code;
     out.push(`- ${targetName(item.target)} ${item.runId}: ${reason}`);
   }
   if (plan.items.length > 0) {
+    // R-34 I-3, U-34 (G-A), U-86: no text takes the digest; the options to type follow the text on
+    // the same line, one space apart, so they can be copied. --confirm alone when something goes
+    // with it; every flag some item needs (CLEANUP_CONFIRM_FLAGS order) when one does.
     const confirm = `--confirm ${plan.digest.slice(0, MIN_PLAN_DIGEST_PREFIX)}`;
+    const needed = CLEANUP_CONFIRM_FLAGS.filter((flag) => placed.some(({ fate }) => "removedWith" in fate && fate.removedWith.includes(flag)));
     out.push("");
-    // R-34 I-3: name what there is to confirm. U-34 (G-A): no text takes the digest; the options to
-    // type follow the text on the same line, one space apart, then the full stop the line ends with.
-    if (runs) {
-      // R-34b P-3: the offered command never carries --include-not-reverted; that confirmation is
-      // the person's own, told apart with what it loses.
-      out.push(`${messages.format("cleanup.next.confirm_runs")} ${confirm}.`);
-      // U-3: the three kinds the head line names (NOT_REVERTED_WARNINGS), a damaged run among them.
-      if (notReverted > 0) out.push(messages.format("cleanup.next.not_reverted", { count: notReverted }));
-      if (discarded) out.push(messages.format("cleanup.next.discarded"));
-      // U-13 (UXM-1): an apply's records stay while its discarded files do, whatever else is confirmed.
-      const discardedLeft = plan.items.filter((item) => item.target === "run" && item.warnings.includes("discarded_left")).length;
-      if (discardedLeft > 0) out.push(messages.format("cleanup.next.discarded_left", { count: discardedLeft }));
-    } else if (discarded) {
-      out.push(`${messages.format("cleanup.next.confirm_discarded")} ${confirm} --delete-discarded.`);
-    } else {
-      out.push(`${messages.format("cleanup.next.confirm_leftovers")} ${confirm}.`);
-    }
+    if (placed.some(({ fate }) => groupOf(fate) === "confirm")) out.push(`${messages.format("cleanup.command.confirm")} ${confirm}`);
+    if (needed.length > 0) out.push(`${messages.format("cleanup.command.all")} ${[confirm, ...needed.map((flag) => CONFIRM_FLAG_ARGUMENT[flag])].join(" ")}`);
+  }
+  if (!selected) {
+    // U-86: with nothing selected, what to type to select (leftovers, always in a plan, show above).
+    if (plan.items.length > 0 || plan.blocked.length > 0) out.push("");
+    out.push(messages.format("cleanup.no_selection"), `  ${messages.format("cleanup.example.older_than")}`, `  ${messages.format("cleanup.example.reverted")}`);
   }
   return `${out.join("\n")}\n`;
 }

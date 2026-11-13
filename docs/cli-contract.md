@@ -766,6 +766,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ### report (U-5)
 
+- 규칙의 자리: 이행 C-8(U-311)부터 앱의 `readReport`(`src/app/report-read.ts`)이다. 그 안에 작업 공간과 `--run`, 실행 목록의 판정, 기록 변경 표시, 파일 읽기와 필드 검사(`summarizeJournal`, `readResult`, `summarizeApplyJournal`, `readApplyResult`)가 있다. CLI(`src/cli/report.ts`)는 인자를 해석하고 Markdown(`renderReport`, `renderApplyReport`, 고정 문구 `REPORT_FIXED_LIMITS`·`APPLY_REPORT_FIXED_LIMITS`)이나 JSON 줄을 낸다.
 - `codaryn report [--workspace <디렉터리>] --run <runId> [--json]`은 `.codaryn/runs/<runId>/`의 `result.json`과 `journal.jsonl`만 읽어(가림본) 사람이 읽는 Markdown 요약을 stdout에 낸다. `--json`이면 `ReportOutput` 한 줄이다. 아무것도 바꾸지 않고 잠금도 잡지 않는다. `--workspace`가 없으면 현재 폴더를 쓴다(18.14, main `1e54ca9`의 실제 CLI로 확인).
 - 상태(`REPORT_EXIT_CODES`): `complete`(0)는 둘 다 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. `incomplete`는 기록만으로 만들고, 줄바꿈 없는 마지막 줄은 아직 쓰는 중으로 보고 무시한다.
 - 오류(`CliErrorOutput`): `invalid_arguments`, `workspace_not_found`, `run_not_found`(그 실행의 기록이 없음), `invalid_run_record`(읽기·해석 실패, `MAX_REPORT_FILE_BYTES`(256 MiB) 초과, 다른 실행의 파일).

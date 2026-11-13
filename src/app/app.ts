@@ -50,7 +50,7 @@ import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, wri
 import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "./assembly.js";
-import { createCancelSource } from "../cli/cancel.js";
+import { createRunCancelSource } from "./cancel.js";
 import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
@@ -339,13 +339,15 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return ended;
     };
     const cancelSignal: CliEnvironment["cancelSignal"] = (cancelFile) =>
-      createCancelSource({
+      createRunCancelSource({
         cancelFile,
         fileExists: (file) => existsSync(file),
         onSignal: (name, handler) => {
-          cancelHandlers.add(handler);
           // U-293 (C-6a, 6.2): the process's signals too, when the adapter listens to them (AppEnvironment.onSignal, the CLI).
+          // Codex V-31 L-1: kept for handle.cancel only once that registration worked, and taken out
+          // before the adapter's removal is called (cancel.ts tries each removal on its own).
           const off = environment.onSignal?.(name, handler);
+          cancelHandlers.add(handler);
           return () => {
             cancelHandlers.delete(handler);
             off?.();

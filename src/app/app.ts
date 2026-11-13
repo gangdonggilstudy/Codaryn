@@ -2,15 +2,16 @@
  * The app layer (adapter-contract sections 3 to 5): what every adapter calls to run, report,
  * revert, check and compare. It holds no task logic; the engine does.
  *
- * Interim implementation (A-1). The pre-run checks (prepareTask) and the commands still live in
+ * Interim implementation (A-1). A run's life from step 8 on (runCli) and the commands still live in
  * `src/cli`. Rather than copy the security checks (S-1 to S-9, U-1, U-3) and risk two versions
  * drifting apart, the app layer calls the CLI's own, fully injected functions with argument lists
  * built from the request, and receives their output objects unchanged. So `startRun` checks in the
  * same order, with the same codes and messages, as `codaryn run`. This makes `src/app` depend on
  * `src/cli` for now; the CLI migration (docs/reviews/2026-11-13-cli-migration-plan.md) moves that
  * code into `src/app` step by step and turns the dependency around without changing this module's
- * interface. Already here: the input layer (./input/, C-3a and C-3b) and the run's assembly
- * (./assembly.ts, C-4), which the CLI's runs use too; the app's hooks for it are ./assemble.ts (DR-4).
+ * interface. Already here: the input layer (./input/, C-3a and C-3b), the run's steps 1 to 7
+ * (prepareTask, ./prepare.ts, C-5) and the run's assembly (./assembly.ts, C-4), which the CLI's runs
+ * use too; the app's hooks for the assembly are ./assemble.ts (DR-4).
  */
 
 import { existsSync } from "node:fs";
@@ -61,10 +62,11 @@ import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
-import { prepareTask, runCli } from "../cli/run.js";
-import type { CliEnvironment, CliRunOutcome, PrepareEnvironment, RunNotes } from "../cli/run.js";
-import type { RunArgs } from "../cli/args.js";
+import { runCli } from "../cli/run.js";
+import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
+import { prepareTask } from "./prepare.js";
+import type { CliRunOutcome, PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
 import { knownKeyValues } from "./input/settings.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";

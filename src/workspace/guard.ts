@@ -24,6 +24,11 @@
  *   undone, visible on file systems that keep folder change times (FAT and exFAT keep none; there a
  *   swap and its undoing between two walks is not seen). The workspace root's own parent is not
  *   walked: the root itself swapped and swapped back is not seen.
+ * - Not closed either (U-213, found while testing): a folder's change time moves by the system
+ *   clock's tick (on Windows about 15.6 ms by default, 1 ms at the finest). A swap and its undoing
+ *   both within the tick of the folder's last change leave its change time as it was, so they are
+ *   not seen. A swap that is still there is always seen by its identity; only a swap made and undone
+ *   (the "aba" case) is affected, as on FAT and exFAT.
  */
 
 import path from "node:path";

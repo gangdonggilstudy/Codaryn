@@ -484,6 +484,16 @@ export const FIXED_MESSAGES = {
   // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its
   // hint lines come after both).
   "summary.failed": { count: "count" },
+  // U-207 (bundle A, R-3, R-8; drafts for nb-i18n): RunSummaryContext.deniedUnreadable, the calls refused
+  // at a path this task may not read (unreadable_path), right after summary.denied, then once what a
+  // person can do (the files are kept from the agent on purpose; query_table may still aggregate
+  // their tables; to let it read them, take the entry out of unreadablePaths where it was set).
+  "summary.denied_unreadable": { count: "count" },
+  "summary.denied_unreadable_hint": {},
+  // U-207 (DR-70, Q-4; draft for nb-i18n): RunSummaryContext.hiddenGroups, the table results of this
+  // run that left out groups of fewer than k rows (QueryTablePayload.suppressedGroups above 0), and k.
+  // Counts only: never a key, a value or a column.
+  "summary.groups_hidden": { results: "count", k: "count" },
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
   "summary.denied_hint_task": {},
@@ -530,6 +540,9 @@ export const FIXED_MESSAGES = {
   "summary.next_plan": { form: "text", runId: "runId" },
   "summary.next_apply": { form: "text", runId: "runId" },
   "summary.review_checklist": { count: "count" },
+  // U-207 (P-3; draft for nb-i18n): the checklist item analyze-private adds to analyze's two
+  // (PRIVATE_REVIEW_ITEM). The renderer shows this text for an entry equal to that constant.
+  "review.item.no_identifying_values": {},
   "summary.next_review": { form: "text", runId: "runId" },
   "summary.apply_actions": { applied: "count", total: "count" },
   "summary.apply_plan_run": { runId: "runId" },
@@ -602,6 +615,13 @@ export const FIXED_MESSAGES = {
   //   `exitCode` that is an integer other than 0. Not failed calls. Content that does not parse, or
   //   a null exit code without a timeout (a stopped command), gives no line.
   "progress.tool_failed": { tool: "text", code: "denial" },
+  // U-207 (bundle A; drafts for nb-i18n): a query_table result that succeeded, as what was asked only:
+  // `{groupColumns}` how many columns it grouped by (`_whole` for none); the renderer puts the operation
+  // kinds after it in parentheses as codes (QUERY_TABLE_OPS, each once, in the query's order).
+  // describe says only that the shape was asked. No path, column, key or value reaches these lines.
+  "progress.query_table": { groupColumns: "count" },
+  "progress.query_table_whole": {},
+  "progress.query_table_describe": {},
   "progress.command_exited": { exitCode: "count" },
   "progress.command_timed_out": {},
   "progress.file_created": {},
@@ -1180,6 +1200,13 @@ export type MessageFormatArgs<I extends MessageId> = I extends FixedMessageId
     : [params: MessageParamsOf<I>]
   : [params?: NoMessageParams];
 
+/**
+ * U-207 (P-3; draft for p4g's A-6): the review checklist item analyze-private adds to analyze's two,
+ * as its definition records it (EngineResult.review.checklist holds the definition's own text). The
+ * renderer shows `review.item.no_identifying_values` in the chosen language for an entry equal to it.
+ */
+export const PRIVATE_REVIEW_ITEM = "No value in the result table or the report can identify a person.";
+
 /** Every MessageId, fixed and listed, in a stable order. Both catalogs must have each one. */
 export const MESSAGE_IDS: readonly MessageId[] = [
   ...(Object.keys(FIXED_MESSAGES) as FixedMessageId[]),
@@ -1306,6 +1333,20 @@ export interface RunSummaryContext {
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
+  /**
+   * U-207 (bundle A, R-3, R-8; draft for na-core): the denied calls of this run whose code is
+   * `unreadable_path` (`tool_decision` with `allowed: false`). Among deniedToolCalls.
+   * `summary.denied_unreadable` right after `summary.denied`, then `summary.denied_unreadable_hint`,
+   * when above 0. Optional: absent counts as 0, no line.
+   */
+  readonly deniedUnreadable?: number;
+  /**
+   * U-207 (DR-70, Q-4; draft for na-core): the query_table results of this run that left out groups
+   * of fewer than k rows (`tool_result` of query_table, ok, whose payload has suppressedGroups above
+   * 0; queryTableFacts reads it), and the k they applied (the largest when they differ).
+   * `summary.groups_hidden` when `results` is above 0. Counts only. Optional: absent, no line.
+   */
+  readonly hiddenGroups?: { readonly results: number; readonly minGroupSize: number };
   readonly confirmationDenied?: { readonly user: number; readonly default: number; readonly cancelled: number; readonly couldAsk: boolean };
   readonly policyNarrowings?: readonly PolicyNarrowing[];
   readonly policySource: "task" | "config";
@@ -1352,7 +1393,9 @@ export interface HumanOutput {
    * (`progress.state_unchecked`), and not otherwise. U-18: a `tool_result` record is shown only as
    * `progress.tool_failed` (a failed call, by the rule at RunSummaryContext: the renderer remembers
    * the calls whose decision was not allowed) or `progress.command_exited` /
-   * `progress.command_timed_out`; a result that succeeded is not shown.
+   * `progress.command_timed_out`; a result that succeeded is not shown. U-207 (bundle A): except a
+   * query_table result that succeeded: `progress.query_table`, `progress.query_table_whole` or
+   * `progress.query_table_describe`, with the operation kinds and the number of group columns only.
    */
   progressLine(event: JournalEvent): string | null;
   /**

@@ -158,6 +158,8 @@ export interface AppEnvironment {
   - 실제로 자식에 가는 것은 값이 8자 미만인 허용 목록 변수뿐이다(R-4 I-1). 변수 파일이 새로 설정한 8자 이상 값은 비밀로 등록되고(S-4), 실행기는 등록 비밀이 든 변수를 자식 환경에서 뺀다(T-1). 그래서 변수 파일의 긴 `PATH`·`TEMP`는 CLI에서도 앱 계층에서도 자식에 가지 않는다.
   - 같은 프로세스 어댑터에서는 호스트의 환경이 자식에 새지 않는다.
   - 이를 위해 A-1은 조립을 앱 계층에 두었다(`src/app/assemble.ts`). CLI의 `assembleRun`과 순서가 같고 `parentEnv`만 다르다.
+  - U-237(p4g의 R-108 H-2, na-core의 U-210과 함께): 조립은 한 벌이다. 앱의 실행은 CLI의 조립(`createAssemble`)에 앱의 고리(`parentEnv`, `platform`, `onAssembled`)를 주어 만든다. 앱이 따로 두던 사본은 같은 꼴로 두 번 뒤처졌다(U-186 앞의 쓰기 목록, U-210의 읽기 제외와 k). 이제 관문, 도구 실행기, 검증기, 무결성 대상, 수행하는 계획의 관문(`approvedPlan.policyFor`)이 모두 CLI와 같은 한 곳(`runGuards`)에서 실행의 읽기 제외 목록(모든 원천을 합친 것)과 k를 받는다. 풀지 못한 잠금은 CLI의 `finish`가 주는 표시(U-220)를 보고 `onLockLeft`로 알린다(U-193).
+    - 시험 `tests/unit/app/u237-app-unreadable.test.ts`: 앱으로 실행하면 설정 파일의 목록 아래 읽기가 `unreadable_path`로 거부되고, 검색과 `query_table`이 그 아래를 빼며, 모델로 간 것과 기록 어디에도 표지(행, 이름, k보다 작은 묶음의 키)가 없다(`tests/support/private-canary.ts`). task 파일의 목록도 같다.
 
 ## 5. 계약
 

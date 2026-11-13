@@ -10,7 +10,7 @@
  * than k rows. Now the app's assembly is the CLI's (createAssemble with the app's hooks).
  * The workspace is the private canary of tests/fixtures/private-tables.ts; the findings come from
  * tests/support/private-canary.ts (the scripted model's channel and every record). Reproduced first
- * (todo until the app's runs were assembled by the CLI). Temporary folders, scripted model, fake values only.
+ * (e80bdfa, todo until the app's runs were assembled by the CLI). Temporary folders, scripted model, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -26,7 +26,6 @@ import type { PrivateCanary } from "../../fixtures/private-tables.js";
 import { describeFindings, findCanary, leaksOf, recordSources, scriptedModelSources } from "../../support/private-canary.js";
 import { appEnvironment, readJournal, setupRun, taskRequest } from "./support.js";
 
-const TODO = { todo: "R-108 H-2: the app's runs are assembled by the CLI (runGuards)" };
 const TOOLS = ["read_file", "search_files", "query_table", "write_file"];
 /** A whole policy (a config file's policy is one), with the private folder unreadable. */
 const PRIVATE_POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, unreadablePaths: ["private"] };
@@ -58,7 +57,7 @@ const decisions = (journal: readonly JournalRecord[], tool: string): { allowed: 
 const leaks = (work: string, canary: PrivateCanary) => leaksOf(findCanary([...scriptedModelSources(work), ...recordSources(work)], canary));
 
 describe("U-237, R-108 H-2: a run through the app and the run's unreadable paths", () => {
-  test("a list in the config file: the read under it is refused, the search and query_table leave it out, no marker in the records", TODO, async () => {
+  test("a list in the config file: the read under it is refused, the search and query_table leave it out, no marker in the records", async () => {
     const run = await privateRun("config", (canary) => {
       const csv = canary.tables.find((file) => file.format === "csv")!;
       return [
@@ -73,7 +72,7 @@ describe("U-237, R-108 H-2: a run through the app and the run's unreadable paths
     assert.deepEqual(found, [], describeFindings(found));
   });
 
-  test("a list in the task file: the search leaves it out, no marker in the records", TODO, async () => {
+  test("a list in the task file: the search leaves it out, no marker in the records", async () => {
     const run = await privateRun("task", (canary) => [{ toolCalls: [{ name: "search_files", args: { path: ".", text: canary.largeKeys[0] } }] }]);
     const found = leaks(run.work, run.canary);
     assert.deepEqual(found, [], describeFindings(found));

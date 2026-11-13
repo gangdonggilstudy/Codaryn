@@ -11,7 +11,7 @@
  *   the CLI's assembly since U-220, and the release is tried again later (U-211), through the lock's
  *   queue (V-17 H-1).
  * The removal of lock.json fails with EBUSY past the store's retries (injected only there, as U-220's
- * tests do). Reproduced first (todo until the app passed them on). Temporary folders, scripted
+ * tests do). Reproduced first (0d5181d, todo until the app passed them on). Temporary folders, scripted
  * model, fake values only.
  */
 
@@ -28,8 +28,6 @@ import { parseTask } from "../../../src/cli/task.js";
 import type { ModelProvider } from "../../../src/contracts/index.js";
 import { releaseLock } from "../../../src/store/index.js";
 import { WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "./support.js";
-
-const TODO = { todo: "R-106: the app passes the revert's lockLeft on, and the assembly's error stays its own" };
 
 const require = createRequire(import.meta.url);
 const promises: { rm: typeof import("node:fs/promises").rm } = require("node:fs/promises");
@@ -59,7 +57,7 @@ async function takeBack(lockFile: string, workspaceRoot: string): Promise<void> 
 }
 
 describe("U-229, R-106 L-1: a revert whose lock cannot be released", () => {
-  test("the revert's output as always, and lockLeft: true beside it", TODO, async () => {
+  test("the revert's output as always, and lockLeft: true beside it", async () => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const work = path.join(base, "work");
     const lockFile = path.join(work, ".codaryn", "lock.json");
@@ -95,7 +93,7 @@ describe("U-229, R-106 L-1: a revert whose lock cannot be released", () => {
 });
 
 describe("U-229, R-106 I-5: the app's assembly fails after it took the lock, and the release throws", () => {
-  test("the assembly's own error is thrown, and a later try releases the lock", TODO, async () => {
+  test("the assembly's own error is thrown, and a later try releases the lock", async () => {
     const base = await setupRun({}, {}, []);
     const work = path.join(base, "work");
     const lockFile = path.join(work, ".codaryn", "lock.json");

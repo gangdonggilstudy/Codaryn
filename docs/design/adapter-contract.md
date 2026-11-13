@@ -211,6 +211,8 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
   - 사람용 글은 `lock.release_failed`(문구 id 초안, nc-human의 제안 글)다.
   - U-229(nc-human의 U-220 뒤): CLI의 조립 약속(`AssemblyOutcome.finish`)이 바뀌었다. 잠금을 풀지 못하면 `finish`는 던지지 않고 `{ lockLeft: true }`로 끝나고, 아무것도 주지 않으면 풀었다는 뜻이다. 앱의 조립도 그 표시를 준다. 앱의 답(`RunOutcome.lockLeft`)은 그대로이고, 표시는 CLI가 자기 끝 요약을 쓸 때 읽는다(시험 `tests/unit/app/u229-finish-lock-left.test.ts`).
     - 이동 계획의 적용은 CLI의 `runApply`가 잠금을 직접 잡고 푼다. U-220 뒤로는 풀지 못해도 적용 결과가 남지만(전에는 `internal_error`), 잠금이 남았다는 것은 CLI의 끝 요약에만 있고 `runApply`의 답에는 없다. 그래서 앱은 그것을 알지 못하고 `ApplyOutcome`에 `lockLeft`가 없다. CLI가 답에 실어 주면(nc-human에 바람) 앱이 실행처럼 알리고 다시 풀어 본다.
+    - 되돌리기는 다르다. CLI의 답(`RevertCliOutcome.lockLeft`, U-220)에 실리므로 앱이 `revert`의 답에 `lockLeft: true`로 옮긴다(5.5, R-106 L-1). 잠금은 CLI의 것이고 그 id를 앱이 모르므로, 나중의 풀기는 하지 않는다.
+    - R-106 I-5: 앱의 조립이 잠금을 잡은 뒤 실패하고 그 뒤의 풀기마저 던지면, 전에는 풀기의 오류가 조립 자신의 오류를 덮고 나중의 풀기도 없었다. 이제는 조립의 오류를 그대로 던지고(U-220 뒤 CLI의 조립과 같음), 풀기는 그 잠금의 줄을 거쳐 나중에 다시 해 본다(U-211). 시험 `tests/unit/app/u229-r106-lock-left.test.ts`.
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
 
@@ -305,6 +307,7 @@ export interface RunObserver {
 ### 5.5 되돌리기 [구현 A-1]
 
 - `revert({ workspace, runId, dryRun?, unsafeMoveConsent? })` → `RevertOutput` [구현 DR-14, DR-25 `ec1914d`]. CLI의 `runRevert`와 `createRevertCommand`를 `main.ts`와 같은 선택(미리보기, `latest`, 한 실행 판정 N-26·N-27 (a), 잠금 안의 되돌리기 기록)으로 부른다. 앱 계층에 되돌리기 규칙의 사본은 없다.
+- U-229(R-106 L-1, U-220 뒤): 답은 `RevertCallOutcome`이다. 되돌리기를 마쳤는데 잠금을 풀지 못했으면 `output` 옆에 `lockLeft: true`가 붙는다. 출력은 풀었을 때와 같다. 전에는(U-220 앞) 이 경우가 `internal_error`였고, U-220 뒤 U-229 앞에는 아무 말 없이 성공이었다. 잠금은 이 프로세스가 사는 동안 남는다(5.1).
 - DR-25: 하드 링크가 없는 드라이브에서 되돌릴 파일이 `unsafe_move`로 건너뛰어지면, GUI가 사람에게 따로 동의를 받는다. 동의하면 `unsafeMoveConsent: { runId }`로 다시 부른다.
   - 앱 계층은 CLI의 `AdapterRevert`로 `adapter` 경로의 동의만 넘긴다(`revertConsentOf`).
   - 미리보기와 함께, `latest`로, 다른 실행 id로 온 동의는 실행 전에 `invalid_arguments`다.

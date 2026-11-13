@@ -151,7 +151,12 @@ export function createAppAssemble(
         },
       };
     } catch (error) {
-      await releaseOwnLock({ workspaceRoot, runId });
+      // U-229 (R-106 I-5, as the CLI's assembly since U-220): the assembly's own error is the one thrown;
+      // a release that throws after it is tried again later (U-211), through the lock's queue.
+      await releaseOwnLock({ workspaceRoot, runId }).catch(() => {
+        void retryLockRelease({ workspaceRoot, runId }, lockRetry);
+        return false;
+      });
       throw error;
     }
   };

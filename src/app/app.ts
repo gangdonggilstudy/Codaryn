@@ -90,6 +90,7 @@ import { initArguments, suggestionsFor } from "./init.js";
 import { applySettingsChangeIn, proposeSettingsChangeIn } from "./settings-change.js";
 import type {
   AppCallOutcome,
+  RevertCallOutcome,
   AppEnvironment,
   AppError,
   ApplyHandle,
@@ -593,7 +594,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
-  async function revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>> {
+  async function revert(request: RevertRequest): Promise<RevertCallOutcome> {
     // DR-25: only the consent the person gave on screen for this run, as the adapter's consent.
     const consent = revertConsentOf(request);
     if (!consent.ok) return consent;
@@ -601,7 +602,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       // The CLI's revert with the options main.ts gives it (N-7, N-16, N-26, N-27 a): dry run,
       // "latest", the store's judgement of one run, and the revert record written under the lock.
       // As an adapter (AdapterRevert): no terminal question, the consent only from the request.
-      const { output } = await runRevert({
+      const { output, lockLeft } = await runRevert({
         argv: ["revert", "--workspace", request.workspace, "--run", request.runId, ...(request.dryRun === true ? ["--dry-run"] : [])],
         cwd: environment.cwd,
         isDirectory: environment.isDirectory,
@@ -616,7 +617,9 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         }),
         adapter: { unsafeMoveConsent: consent.consent },
       });
-      return output.kind === "revert" ? { ok: true, output } : { ok: false, error: fromCliError(output) };
+      if (output.kind !== "revert") return { ok: false, error: fromCliError(output) };
+      // U-229 (R-106 L-1, after U-220): a lock the revert could not release is told beside its output.
+      return lockLeft === true ? { ok: true, output, lockLeft: true } : { ok: true, output };
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }

@@ -240,6 +240,7 @@ export const KO_MESSAGES: MessageTexts = {
 
   "prompt.yes_no_default_yes": "[Y/n] (Enter: 예)",
   "prompt.yes_no_default_no": "[y/N] (y·예·네: 예, Enter: 아니오)",
+  "prompt.interrupted": "Ctrl+C로 멈췄습니다. 더 바꾼 것은 없습니다.",
   "confirm.question.command": "명령 하나를 이번 호출에만 허용할까요? 답하지 않으면 거부합니다. 보이는 것은 실행 파일 이름과 인자 개수({count}개)뿐이며, 인자 자체는 보이지 않습니다. 실행 파일",
 
   "language.chosen": "메시지 언어 {language}, 정한 곳: {source}",

@@ -45,18 +45,18 @@ function child(feed: (stdin: NodeJS.WritableStream) => void, delayMs: number): P
 describe("U-110: askLine waits for the line and ends at the end of input", () => {
   test("a line typed later: the process waited for it and gives it", async () => {
     const done = await child((stdin) => stdin.end("y\n"), 400);
-    assert.deepEqual([done.out, done.code], ['"y"', 0]);
+    assert.deepEqual([done.out, done.code], ['{"line":"y"}', 0]);
     assert.ok(done.waitedMs >= 400, `it waited (${done.waitedMs} ms)`);
   });
 
-  test("the input ends without a line: null, and the process ends normally", async () => {
+  test("the input ends without a line: none, and the process ends normally", async () => {
     const done = await child((stdin) => stdin.end(), 200);
-    assert.deepEqual([done.out, done.code], ["null", 0]);
+    assert.deepEqual([done.out, done.code], ['{"none":true}', 0]);
   });
 
   test("a last line without Enter is no line: null", async () => {
     const done = await child((stdin) => stdin.end("y"), 200);
-    assert.deepEqual([done.out, done.code], ["null", 0]);
+    assert.deepEqual([done.out, done.code], ['{"none":true}', 0]);
   });
 });
 

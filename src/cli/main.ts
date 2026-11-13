@@ -21,7 +21,7 @@ import { existsSync } from "node:fs";
 import { lstat, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { CODARYN_LANG_ENV } from "../contracts/index.js";
+import { CODARYN_LANG_ENV, RUN_EXIT_CODES } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
 import { createCodarynApp, createNodeAppEnvironment } from "../app/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
@@ -84,13 +84,33 @@ const readText = (file: string): Promise<string> => readFile(file, "utf8");
 // SP-2: every key variable Codaryn knows.
 const currentKey = (): string[] => knownKeyValues(process.env);
 
-/** One line typed at the terminal, or null when the input ends first. `output` shows the question. */
 /**
- * One line from standard input after `question` on `output`; null at the end of input (U-110:
- * Ctrl+D or Ctrl+Z no longer leaves the question waiting) or when `signal` aborts.
+ * One line from standard input after `question` on `output`; null when no line came (the input
+ * ended, also before the question; the question was closed; `signal` aborted). U-110 (review R-88
+ * M2): Ctrl+C at the question, which a terminal gives as a key rather than a signal, runs
+ * `onInterrupt` and then answers null. By default the command stops there: the questions of apply,
+ * revert, models and init come before what they would change (or before more of it).
  */
-function askLine(question: string, output: NodeJS.WritableStream = process.stdout, signal?: AbortSignal): Promise<string | null> {
-  return readLine(question, { input: process.stdin, output }, signal);
+async function askLine(
+  question: string,
+  output: NodeJS.WritableStream = process.stdout,
+  signal?: AbortSignal,
+  onInterrupt: () => void = stopAtInterrupt,
+): Promise<string | null> {
+  const answer = await readLine(question, { input: process.stdin, output }, signal);
+  if ("line" in answer) return answer.line;
+  if ("interrupted" in answer) onInterrupt();
+  return null;
+}
+
+/** R-88 M2: Ctrl+C at the question of a command other than run: one line, then the cancelled exit code. */
+function stopAtInterrupt(): never {
+  try {
+    writeHuman(humanFor(null).messages.format("prompt.interrupted"));
+  } catch {
+    // Human output is best effort.
+  }
+  process.exit(RUN_EXIT_CODES.cancelled);
 }
 
 // A closed stderr (EPIPE) must not end a run: human output is best effort.
@@ -341,7 +361,14 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         // U-110 (B-5): the permission question, on stderr, only when standard input and stderr are
         // terminals; keys hidden and control characters replaced as in other human text.
         ...(process.stdin.isTTY === true && process.stderr.isTTY === true
-          ? { ask: (question: string, signal: AbortSignal) => askLine(cleanText(hideKeys(question, currentKey()), true).replace(/\t/g, " "), process.stderr, signal) }
+          ? {
+              // R-88 M2: Ctrl+C at the question cancels the run the CLI's own way (as SIGINT, cancel.ts):
+              // the engine's signal ends the question and records it as cancelled.
+              ask: (question: string, signal: AbortSignal) =>
+                askLine(cleanText(hideKeys(question, currentKey()), true).replace(/\t/g, " "), process.stderr, signal, () => {
+                  process.emit("SIGINT");
+                }),
+            }
           : {}),
         cancelSignal: (cancelFile) =>
           createCancelSource({

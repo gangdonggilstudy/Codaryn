@@ -241,6 +241,7 @@ export const EN_MESSAGES: MessageTexts = {
 
   "prompt.yes_no_default_yes": "[Y/n]",
   "prompt.yes_no_default_no": "[y/N]",
+  "prompt.interrupted": "Stopped with Ctrl+C. Nothing more was changed.",
   "confirm.question.command": "Allow a command for this one call? With no answer it is denied. Only its executable and its number of arguments ({count}) are shown, not the arguments themselves. Executable",
 
   "language.chosen": "message language {language}, set by: {source}",

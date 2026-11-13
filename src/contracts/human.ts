@@ -806,6 +806,9 @@ export const FIXED_MESSAGES = {
   // Yes/no prompts (N-20): the hint shows the default answer, as INIT_QUESTION_DEFAULTS says.
   "prompt.yes_no_default_yes": {},
   "prompt.yes_no_default_no": {},
+  // U-110 (review R-88 M2): Ctrl+C at a question of apply, revert, models or init: the command stops
+  // there (exit code 5) without changing anything more. A run's question is cancelled as the run.
+  "prompt.interrupted": {},
 
   // Language (N-20): where it came from is `language.source.<source>`.
   "language.chosen": { language: "language", source: "text" },

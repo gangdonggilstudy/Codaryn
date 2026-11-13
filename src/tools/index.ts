@@ -121,8 +121,8 @@ export interface ToolRunnerOptions {
    * U-203 (bundle A, R-3, R-4): the run's unreadable paths, ResolvedTaskSpec.unreadablePaths (every
    * source united, review R-102 M-1). search_files and inspect_files
    * leave out what is under them, names included, judged by the text and the real path (the gate
-   * refuses a start under them); a result whose folder holds such a path says `withheld`. Absent:
-   * nothing is left out, as before.
+   * refuses a start under them); a result whose folder holds such a path says `withheld`. Absent or
+   * empty: nothing is left out, as before (Codex V-13b L-1).
    */
   readonly unreadablePaths?: readonly string[];
 }
@@ -290,7 +290,10 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   }
 
   // U-203 (R-1): the unreadable paths with the gate's rule (a deny list: an unusable one covers all).
-  const unreadable = options.unreadablePaths === undefined ? null : compilePathSet(options.unreadablePaths, { match: "prefix", onUnusable: "covers" });
+  // Codex V-13b L-1: an empty list is no unreadable path at all, so the tools list as without one; a
+  // value that is not a list is still unusable and covers everything.
+  const noUnreadable = options.unreadablePaths === undefined || (Array.isArray(options.unreadablePaths) && options.unreadablePaths.length === 0);
+  const unreadable = noUnreadable ? null : compilePathSet(options.unreadablePaths, { match: "prefix", onUnusable: "covers" });
 
   async function searchFiles(args: SearchFilesArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");

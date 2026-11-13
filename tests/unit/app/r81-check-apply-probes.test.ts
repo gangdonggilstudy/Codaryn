@@ -6,7 +6,7 @@
  * check or apply is probing this workspace), removes every probe name it finds in the state
  * directory and in the plan's source folders before it checks, and tells how many it removed
  * (`probesRemoved`) and how many it could not (in `probesLeft`).
- * Reproduced first (todo until fixed). Scripted model, temporary folders, fake values only. Every
+ * Reproduced first (3ac88e1, todo until fixed). Scripted model, temporary folders, fake values only. Every
  * probe a test leaves is taken back by the test.
  */
 
@@ -19,9 +19,7 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, AppHooks, PlanCheck } from "../../../src/app/index.js";
 import { appEnvironment, plannedRun, taskForm } from "./support.js";
 
-const TODO = { todo: "R-81: a probe an earlier check left is neither removed nor told" };
-
-type Check = PlanCheck & { readonly probesRemoved?: number };
+type Check = PlanCheck;
 
 function ok(outcome: AppCallOutcome<PlanCheck>): Check {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -40,7 +38,7 @@ async function probes(work: string): Promise<string[]> {
 }
 
 describe("R-81 L1: a probe an earlier check or apply left is removed by the next check, and told", () => {
-  test("a probe in the state directory from a process that ended: removed, probesRemoved 1, the file kept", TODO, async () => {
+  test("a probe in the state directory from a process that ended: removed, probesRemoved 1, the file kept", async () => {
     const { base, app, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     await link(path.join(work, "a.txt"), path.join(work, ".codaryn", LEFT_NAME));
@@ -54,7 +52,7 @@ describe("R-81 L1: a probe an earlier check or apply left is removed by the next
     }
   });
 
-  test("one that cannot be removed is told in probesLeft; a later check removes it", TODO, async () => {
+  test("one that cannot be removed is told in probesLeft; a later check removes it", async () => {
     const { base, app, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     await link(path.join(work, "a.txt"), path.join(work, ".codaryn", LEFT_NAME));

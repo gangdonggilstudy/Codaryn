@@ -21,6 +21,10 @@
  *   while it runs (`workspace_locked` when another run holds it), and before it ends it looks for a
  *   probe of this process that the executor could not take back and removes it. A probe or a lock
  *   it cannot take back is told (`probesLeft`, `lockLeft`), never hidden.
+ * - R-81 L1: before it checks, under the lock, it removes every probe name it finds in the state
+ *   directory and the plan's source folders. A check or an apply probes only under this lock, so
+ *   such a name is a probe an ended process left (between making and removing it), or one an
+ *   earlier check told as left. Removed ones are told (`probesRemoved`), the rest in `probesLeft`.
  * - Nothing is moved, recorded or claimed: no run directory, journal, plan_checked record or
  *   applied mark. The result holds indexes, codes, counts and the digest only; it is no consent
  *   (DR-21) and no promise: the apply checks again.
@@ -41,8 +45,8 @@ import { appError } from "./errors.js";
 import type { AppCallOutcome, AppError, PlanCheck } from "./types.js";
 
 const DIGEST_PREFIX = new RegExp(`^[0-9a-f]{${MIN_PLAN_DIGEST_PREFIX},64}$`);
-/** The start of the executor's probe names (tools' probeHardLink), with this process's id. */
-const PROBE_PREFIX = `.codaryn-link-probe-${process.pid}-`;
+/** The executor's probe names (tools' probeHardLink): `.codaryn-link-probe-<pid>-<time>-<random>`, any process. */
+const PROBE_NAME = /^\.codaryn-link-probe-\d+-[0-9a-z]+-[0-9a-z]+$/;
 
 /** The request's plan run and digest, checked before anything is read. */
 export function checkApplyArguments(
@@ -85,7 +89,7 @@ export interface ApplyCheckOperations {
 
 const sourceOf = (action: ResolvedPlanAction): string => (action.kind === "move" ? action.from : action.path);
 
-/** This process's probe names in `dirs` (files and anything else; only files are removed). */
+/** Probe names in `dirs` (files and anything else; only files are removed). */
 async function probesIn(dirs: readonly string[]): Promise<Set<string>> {
   const found = new Set<string>();
   for (const dir of dirs) {
@@ -95,7 +99,7 @@ async function probesIn(dirs: readonly string[]): Promise<Set<string>> {
     } catch {
       continue;
     }
-    for (const name of names) if (name.startsWith(PROBE_PREFIX)) found.add(path.join(dir, name));
+    for (const name of names) if (PROBE_NAME.test(name)) found.add(path.join(dir, name));
   }
   return found;
 }
@@ -108,6 +112,26 @@ async function present(file: string): Promise<boolean> {
     const code = (error as { code?: unknown } | null)?.code;
     return code !== "ENOENT" && code !== "ENOTDIR";
   }
+}
+
+/** Removes the probes that are plain files; how many were removed and how many are still there. */
+async function removeProbes(probes: Iterable<string>, operations: ApplyCheckOperations): Promise<{ removed: number; left: number }> {
+  let removed = 0;
+  let left = 0;
+  for (const probe of probes) {
+    let file = false;
+    try {
+      const info = await lstat(probe);
+      file = info.isFile() && !info.isSymbolicLink();
+      if (file) await (operations.removeProbe ?? unlink)(probe);
+    } catch {
+      // Counted below when it is still there.
+    }
+    if (!file) continue;
+    if (await present(probe)) left += 1;
+    else removed += 1;
+  }
+  return { removed, left };
 }
 
 /** Checks the plan of `source` under the workspace lock; takes back the lock and every probe it can. */
@@ -132,6 +156,7 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
   const problems: { index: number; problem: PlanItemProblem }[] = [];
   const unsafeMoves: number[] = [];
   let probesLeft = 0;
+  let probesRemoved = 0;
   let lockLeft = false;
   let failed = false;
   try {
@@ -141,6 +166,11 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
       const resolved = await workspace.resolve(sourceOf(action), "read");
       if (resolved.ok) dirs.add(path.dirname(resolved.path.absolute));
     }
+    // R-81 L1: probes an ended check or apply left (only one holding this lock probes here).
+    const earlier = await removeProbes(await probesIn([...dirs]), operations);
+    probesRemoved = earlier.removed;
+    probesLeft += earlier.left;
+    // What is still there is told already; the sweep below takes this check's own probes.
     const before = await probesIn([...dirs]);
     try {
       const policy = createPolicyGate({ config: task.policy, workspace });
@@ -177,16 +207,8 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
       failed = true;
     } finally {
       // A probe the executor could not take back is a second name of a source file: removed here.
-      for (const probe of await probesIn([...dirs])) {
-        if (before.has(probe)) continue;
-        try {
-          const info = await lstat(probe);
-          if (info.isFile() && !info.isSymbolicLink()) await (operations.removeProbe ?? unlink)(probe);
-        } catch {
-          // Counted below when it is still there.
-        }
-        if (await present(probe)) probesLeft += 1;
-      }
+      const own = [...(await probesIn([...dirs]))].filter((probe) => !before.has(probe));
+      probesLeft += (await removeProbes(own, operations)).left;
     }
   } catch {
     failed = true;
@@ -215,6 +237,7 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
       unsafeMoves,
       inventoryLimitReached: source.inventoryLimitReached,
       probesLeft,
+      probesRemoved,
       lockLeft,
     },
   };

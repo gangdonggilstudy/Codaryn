@@ -699,8 +699,10 @@ export interface PlanCheck {
   readonly unsafeMoves: readonly number[];
   /** DR-6: the workspace has more files than the inventory lists, so the apply could not be verified. */
   readonly inventoryLimitReached: boolean;
-  /** Hard link probes this check could not take back (normally 0): each is a second name of a source file. */
+  /** Hard link probes this check could not take back (normally 0), earlier ones it found included: each is a second name of a source file. */
   readonly probesLeft: number;
+  /** R-81 L1: probes an ended check or apply had left (in the state directory or the plan's source folders), removed by this check. */
+  readonly probesRemoved: number;
   /** True when the workspace lock this check took could not be released: runs are refused until it is. */
   readonly lockLeft: boolean;
 }

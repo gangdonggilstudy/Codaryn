@@ -656,7 +656,7 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
 ```ts
 checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   // { kind: "plan_check", planRunId, digest, checkedAt, problems: { index, problem }[], unsafeMoves: number[],
-  //   inventoryLimitReached, probesLeft, lockLeft }
+  //   inventoryLimitReached, probesLeft, probesRemoved, lockLeft }
 ```
 
 - **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
@@ -679,6 +679,9 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   - 하드 링크 시험은 원본 파일의 두 번째 이름을 잠깐 만든다. 같은 볼륨이면 상태 디렉터리 안에, 아니면 원본 옆에 만든다. 그래서 점검하는 동안 작업 공간 잠금을 잡는다.
   - 끝나기 전에, 실행기가 거두지 못한 이 프로세스의 시험 링크를 찾아 지운다. 대상은 점검 전에 없던 이름이고, 일반 파일만이다.
   - 그래도 남은 시험 링크의 수는 `probesLeft`, 풀지 못한 잠금은 `lockLeft: true`로 알린다. 숨기지 않는다. 잠금 풀기는 한 번 더 해 본다.
+  - R-81 L1: 점검하기 전에, 잠금 아래에서 상태 디렉터리와 계획의 원본 폴더에 있는 시험 링크 이름(`.codaryn-link-probe-<pid>-…`, 어느 프로세스의 것이든)을 모두 지운다. 일반 파일만이다.
+    - 점검과 적용은 이 잠금을 쥐어야 시험 링크를 만든다. 그래서 그런 이름은 만들고 지우기 사이에 끝난 프로세스가 남긴 것이거나, 앞선 점검이 남았다고 알린 것이다.
+    - 지운 수는 `probesRemoved`로 알리고, 지우지 못한 것은 `probesLeft`에 더한다.
   - 점검이 도중에 실패하면 `internal_error`이고, 남긴 것이 있으면 문구가 그렇다고 말한다.
 - **남기지 않는다.** 실행 디렉터리, journal, `plan_checked` 기록, 적용 표시(`markApplied`)를 만들지 않는다. 계획은 그대로 다음 적용을 기다린다.
 - **글이 없다.** 응답은 순번, 코드, 수, 다이제스트뿐이다. 경로는 계획 보기(가림본)의 순번으로 짝짓는다.

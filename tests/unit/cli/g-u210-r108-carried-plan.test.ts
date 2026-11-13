@@ -98,11 +98,11 @@ describe("U-210 (R-108 H-1): the run that carries out a plan has the run's unrea
 describe("U-210 (R-108 H-1): runGuards, the one place that gives the run's list and k", () => {
   const policy = { ...POLICY, protectedPaths: ["tests"] } as unknown as ResolvedTaskSpec["policy"];
 
-  test("with a list and k: the tool runner gets both, the verifier runner the list, the integrity checks both lists", async (t) => {
+  test("with a list and k: the tool runner and the verifier runner get both (U-258), the integrity checks both lists", async (t) => {
     const sb = createSandbox(t);
     const guards = runGuards({ policy, unreadablePaths: ["private", "tests"], minGroupSize: 7 }, await createWorkspace({ root: sb.workspace }));
     assert.deepEqual(guards.tools, { unreadablePaths: ["private", "tests"], minGroupSize: 7 });
-    assert.deepEqual(guards.verifiers, { unreadablePaths: ["private", "tests"] });
+    assert.deepEqual(guards.verifiers, { unreadablePaths: ["private", "tests"], minGroupSize: 7 });
     assert.deepEqual(guards.protectedPaths, ["tests", "private"], "each once, the protected paths first");
     assert.equal(typeof guards.gate().checkRequested, "function");
   });

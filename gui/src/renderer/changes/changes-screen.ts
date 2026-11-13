@@ -8,6 +8,8 @@
  *   the plan and the report have theirs; its files come without text, and each says the mark is why.
  * - Keys: F7 and Shift+F7 move to the next and previous change, Alt+F7 and Alt+Shift+F7 to the next
  *   and previous file. Nothing here edits; copying copies the masked text on the screen.
+ * - U-65 (3.3): opened from the file tree's changed file, the view starts at that file; the files it
+ *   loaded go back to the tree as its marks.
  */
 
 import type { Texts } from "../i18n/catalog.js";
@@ -23,11 +25,13 @@ export interface ChangesDeps {
   readonly texts: Texts;
   readonly api: CodarynApi;
   readonly current: () => Workspace | null;
+  /** U-65: the run's files as loaded, for the file tree's marks. */
+  readonly loaded?: (run: { readonly runId: string; readonly profile: string | null; readonly workflow: string | null }, files: readonly ChangedFileItem[]) => void;
 }
 
 export interface ChangesScreen extends Screen {
-  /** Which run's changes to show next, and the profile and task kind of its task form. */
-  choose(runId: string, profile: string | null, workflow: string | null): void;
+  /** Which run's changes to show next, and the profile and task kind of its task form; U-65: and the file to start at. */
+  choose(runId: string, profile: string | null, workflow: string | null, file?: string | null): void;
 }
 
 /** Lines drawn for one file; a longer comparison says how many were left out. */
@@ -95,12 +99,12 @@ function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boo
 
 export function changesScreen(deps: ChangesDeps): ChangesScreen {
   const { texts: t, api } = deps;
-  let chosen: { runId: string; profile: string | null; workflow: string | null } | null = null;
+  let chosen: { runId: string; profile: string | null; workflow: string | null; file: string | null } | null = null;
   return {
     id: "changes",
     title: "nav.changes",
-    choose(runId, profile, workflow) {
-      chosen = { runId, profile, workflow };
+    choose(runId, profile, workflow, file = null) {
+      chosen = { runId, profile, workflow, file };
     },
     show(root) {
       const workspace = deps.current();
@@ -133,15 +137,25 @@ export function changesScreen(deps: ChangesDeps): ChangesScreen {
         }
         // U-48 (DR-38): the mark's warning first; every file below is the marked run's record.
         const warning = reply.recordsChanged ? [el("p", t.format("changes.recordsChanged"), { class: "notice", id: "changes-records-changed" })] : [];
+        const sections = reply.files.map((file, index) => fileSection(t, file, index, reply.recordsChanged));
         body.replaceChildren(
           ...warning,
           el("p", t.format("changes.of", { runId: reply.runId, count: String(reply.files.length) }), { id: "changes-summary" }),
           el("p", t.format("changes.masking"), { class: "notice" }),
           el("p", t.format("changes.textRule"), { class: "notice" }),
           el("p", t.format("changes.keys"), { class: "notice" }),
-          ...(reply.files.length === 0 ? [el("p", t.format("changes.empty"))] : reply.files.map((file, index) => fileSection(t, file, index, reply.recordsChanged))),
+          ...(reply.files.length === 0 ? [el("p", t.format("changes.empty"))] : sections),
         );
         body.setAttribute("data-changes-ready", String(reply.files.length));
+        deps.loaded?.({ runId: target.runId, profile: target.profile, workflow: target.workflow }, reply.files);
+        // U-65: opened from the tree's changed file: start there (once; the next opening starts at the top).
+        const at = target.file === null ? -1 : reply.files.findIndex((file) => file.path === target.file);
+        if (chosen === target) chosen = { ...target, file: null };
+        const section = at < 0 ? undefined : sections[at];
+        if (section !== undefined) {
+          body.setAttribute("data-focus-file", String(at));
+          section.focus();
+        }
       })();
     },
   };

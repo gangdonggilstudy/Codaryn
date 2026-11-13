@@ -440,6 +440,17 @@ startGui({
         })(),
         title: await js("document.getElementById('revert-title')?.textContent ?? null"),
       };
+      // U-65 (3.3): the run ended, so the tree was read again and marks the file the run made; choosing it opens the comparison there.
+      results["treeMarks"] = {
+        made: await waitFor("document.querySelector('.tree [data-change=\"created\"] .name')?.textContent ?? null", 20_000),
+        note: await js(`document.getElementById('tree-marks-text')?.textContent?.includes(${JSON.stringify((results["runResult"] as { runId?: string } | null)?.runId ?? "?")}) === true`),
+      };
+      await js("document.querySelector('.tree [data-change=\"created\"]')?.click(); true");
+      results["treeOpensChange"] = {
+        ready: await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()"),
+        focus: await js("document.getElementById('changes')?.getAttribute('data-focus-file') ?? null"),
+        focused: await js("document.activeElement?.querySelector('.path')?.textContent ?? null"),
+      };
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
       // R29-L1: cancelled only once its model request reached the fake API, so the script's hanging
@@ -849,6 +860,14 @@ startGui({
         }
       })();
       results["setupText"] = await js("document.getElementById('work')?.textContent ?? ''");
+      // U-65 (3.3): setup made package.json a protected path; F5 in the file panel reads the tree again and marks it.
+      const protectedBefore = await js("document.querySelectorAll('.tree [data-protected]').length");
+      await js("document.querySelector('.tree')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', bubbles: true })); true");
+      results["treeProtected"] = {
+        before: protectedBefore,
+        marked: await waitFor("[...document.querySelectorAll('.tree [data-protected=\"true\"] .name')].map((n) => n.textContent).join(',') || null", 20_000),
+        note: await js("document.getElementById('tree-protected-note')?.hasAttribute('hidden') === false"),
+      };
 
       // U-63 (3.5, GUI-D8): a task file's run. Its model is the scripted one (no request to the fake
       // API). The dialogs are answered by the test; no path reaches the page. A dialog closed without a

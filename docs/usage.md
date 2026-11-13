@@ -1099,14 +1099,15 @@ node --test dist/tests/live/openai-live.js
 - **실행 기록 변조(결정 DR-38, DR-37 (b)):** `report`, `changes`, `revert`는 `.codaryn\`의 실행 기록을 믿는다. 이 폴더는 모델의 파일 도구로는 쓸 수 없지만, 허용한 명령이나 같은 사용자의 다른 프로그램은 쓸 수 있다.
   - **실행 중의 변경은 알아챈다.** 실행의 시작과 끝, 그리고 명령을 돌린 뒤마다 `.codaryn\`을 살피고, 그 실행이 쓴 것 말고 바뀐 것이 있는지 본다. 다른 것이 바뀌었으면 실행을 `failed`/`state_changed`(종료 1)로 끝내고 그 실행에 "기록이 바뀜" 표시를 남긴다. 확인(main `6df2eae`, 허용한 `node` 명령이 고침): 그 실행 자신의 기록, 이미 끝난 다른 실행의 `result.json`, `.codaryn\`에 새 파일 하나 모두 이렇게 끝났다. 끝 요약은 `the state directory was changed by something other than the run, or could not be checked (failed/state_changed)`와 "허용한 명령과 검사를 살펴보라"는 안내를 낸다.
   - 표시가 붙는 것은 그때 돌던 실행이다. 기록이 고쳐진 다른 실행에는 표시가 없다.
-  - 표시가 있는 실행: `report`가 `This run has a records-changed mark: … this report may not match what happened.`를 낸다. `changes`는 파일 글을 보이지 않는다(이유는 `masking_unverified`로만 나오고 표시는 따로 말하지 않는다). `revert`는 막지 않고 파일마다 스냅숏과 다이제스트를 확인하며 JSON에 `recordsChanged: true`를 싣는다. 사람용 글에는 파일 목록 뒤에 `This run has a records-changed mark. The revert still checks every file against its snapshot and digest.`(한국어 `이 실행에는 기록 변경 표시가 있습니다. 되돌리기는 그래도 파일마다 스냅샷과 다이제스트를 확인합니다.`)가 나온다(U-139). `runs`는 결과 칸 끝에 표시를 붙이고, `--json`에는 `recordsChanged: true`가 있다. `runs`의 실제 출력(main `cd1cace`, 파일 하나를 만든 뒤 허용한 `node -e` 명령이 `.codaryn\`에 파일 하나를 쓴 실행):
+  - 표시가 있는 실행: `report`가 `This run has a records-changed mark: … this report may not match what happened.`를 낸다. `changes`는 파일 글을 보이지 않는다(이유는 `masking_unverified`로만 나오고 표시는 따로 말하지 않는다). `revert`는 막지 않고 파일마다 스냅숏과 다이제스트를 확인하며 JSON에 `recordsChanged: true`를 싣는다. 사람용 글에는 파일 목록 뒤에 `This run has a records-changed mark. The revert still checks every file against its snapshot and digest.`(한국어 `이 실행에는 기록 변경 표시가 있습니다. 되돌리기는 그래도 파일마다 스냅샷과 다이제스트를 확인합니다.`)가 나온다(U-139). `runs`는 결과 칸 끝에 짧은 표시를 붙이고, 그 뜻은 표 아래에 한 줄로 한 번 말한다(U-157). `--json`에는 `recordsChanged: true`가 있다. `runs`의 실제 출력(U-157, 파일 하나를 만든 뒤 허용한 `node -e` 명령이 `.codaryn\`에 파일 하나를 쓴 실행):
 
     ```
     run id (UTC)               started (local)      changes  result
-    20261113T045804Z-9181679d  2026-11-13 13:58:04  1        failed (failed/state_changed) · records changed (not by the run)
+    20261113T051057Z-c61169fd  2026-11-13 14:10:57  1        failed (failed/state_changed) · records changed
+    records changed: something other than the run changed that run's records
     ```
 
-    한국어로는 `실패 (failed/state_changed) · 기록 변경됨(실행이 아닌 것이 바꿈)`이다. 표시가 붙은 줄은 영어로 121칸, 한국어로 118칸(한글은 두 칸으로 셈)이다. 그래서 80칸과 100칸 터미널에서는 접힌다(U-136 전에는 영어 155칸).
+    한국어로는 `실패 (failed/state_changed) · 기록 변경됨`이고, 표 아래 줄은 `기록 변경됨: 실행이 아닌 것이 그 실행의 기록을 바꿨습니다`이다. 표시가 붙은 줄은 영어로 104칸, 한국어로 95칸(한글은 두 칸으로 셈)이다. 설명을 표 아래로 옮겨 영어 121칸, 한국어 118칸에서 줄었다. 영어는 상태 글이 길어 아직 100칸을 넘는다(`done (done/verified)` 줄은 95칸).
   - 표시가 있는 계획 실행은 `apply`가 거부한다(`plan_records_changed`, 18.3절).
   - 실행 자신의 `journal.jsonl`에 엉뚱한 줄이 들어가면 `report`와 `changes`가 그 실행을 `invalid_run_record`로 읽지 않는다.
   - **실행이 끝난 뒤의 변경은 알아채지 못한다.** 실행이 남긴 자식 프로세스나 다른 프로그램이 끝난 실행의 기록을 고치면 표시가 붙지 않는다. 확인: 끝난 실행의 스냅숏 파일을 고치자 `runs`는 그대로였다. `revert`는 그 파일을 `snapshot missing (missing_snapshot)`으로 건너뛰고 아무것도 쓰지 않았다(다이제스트가 맞지 않아서).

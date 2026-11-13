@@ -117,10 +117,11 @@ describe("U-136 (PM, second part): UXM-22, UXM-18, U-129's cells, help.output", 
     assert.ok(columns(`  고치는 법: ${ko["error.plan_already_applied.fix"]}`) <= 100);
   });
 
-  test("UXM-18: the runs mark for changed records is short in both languages (its explanation is report's)", () => {
+  test("UXM-18: the runs mark for changed records is short in both languages (its explanation is a line under the table, U-157)", () => {
     const { en, ko } = MESSAGE_TEXTS;
-    assert.equal(en["runs.records_changed"], "records changed (not by the run)");
-    assert.equal(ko["runs.records_changed"], "기록 변경됨(실행이 아닌 것이 바꿈)");
+    // U-157 (UXM-18, PM): the mark is shorter still; what it means is one line under the table.
+    assert.equal(en["runs.records_changed"], "records changed");
+    assert.equal(ko["runs.records_changed"], "기록 변경됨");
     for (const text of [en["runs.records_changed"], ko["runs.records_changed"]]) assert.ok(columns(text) <= 40, text);
   });
 

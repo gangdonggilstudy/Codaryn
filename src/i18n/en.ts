@@ -202,7 +202,9 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.incomplete": "no result (running or stopped)",
   "runs.damaged": "damaged (the record could not be checked)",
   "runs.revert_record_damaged": "revert record damaged (the run's records are fine)",
-  "runs.records_changed": "records changed (not by the run)",
+  "runs.records_changed": "records changed",
+  // U-157 (UXM-18; draft for nb-i18n): the line under the runs table that explains the mark.
+  "runs.records_changed_note": "records changed: something other than the run changed that run's records",
   "runs.plan_applied": "plan applied by run {runId}",
   "runs.plan_apply_unfinished": "plan apply not finished (apply run {runId}, {reason})",
   "runs.plan_applying": "plan being applied, or its apply stopped (apply run {runId}, no result yet)",

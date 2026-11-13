@@ -623,6 +623,12 @@ export interface DataChecksOptions {
    * Absent or empty: none, and the result is as before. A value that is not a list covers everything.
    */
   readonly unreadablePaths?: readonly string[];
+  /**
+   * U-258 (PM, F-1): the run's group size k (ResolvedTaskSpec.minGroupSize), never below 5. A grouped
+   * aggregate over a source under unreadable paths compares only the groups of at least k rows.
+   * Absent: DEFAULT_MIN_GROUP_SIZE.
+   */
+  readonly minGroupSize?: number;
 }
 
 export async function runDataChecksVerifier(

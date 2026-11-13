@@ -63,6 +63,12 @@ export interface VerifierRunnerOptions {
    * Absent: none. The CLI's and the app's assembly pass it once a parser takes the field (A-6).
    */
   readonly unreadablePaths?: readonly string[];
+  /**
+   * U-258 (PM, F-1): the run's group size k (ResolvedTaskSpec.minGroupSize). data_checks compares a
+   * grouped aggregate over a source under unreadable paths for the groups of at least k rows only.
+   * Absent: DEFAULT_MIN_GROUP_SIZE (5); never below 5.
+   */
+  readonly minGroupSize?: number;
 }
 
 function errorMessage(error: unknown): string {

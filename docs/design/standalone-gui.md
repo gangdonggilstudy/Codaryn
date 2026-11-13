@@ -293,6 +293,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
   - 설정 바꾸기의 넓히기 `confirm_removed`(묻던 명령을 묻지 않고 허용)는 넓히기 대화상자와 설정 화면이 이름으로 보인다.
   - 대화상자가 이름을 모르는 넓히기 종류가 든 제안은 쓰지 않는다(`unknown_widening`).
   - U-192(U-183, DR-69 B-4): 쓰기 허용 경로의 넓히기 `writable_path_added`(쓰기 허용 경로 넓힘), `writable_paths_unlimited`(쓰기 허용 경로 제한 없앰)도 이름으로 보인다. 그 전에는 모르는 종류라 그런 제안을 `unknown_widening`으로 거부했다.
+  - U-212(U-204, DR-69 묶음 A, A-7): 읽기 제외 경로의 넓히기 `unreadable_path_removed`(읽기 제외 경로 뺌, 모델이 그 파일을 읽을 수 있게 됨)와 묶음 최소 크기의 넓히기 `min_group_size_lowered`(k 낮춤, 읽기 제외 경로의 표에서 더 작은 묶음이 모델에게 보임)도 이름으로 보인다. 필드는 목록이나 `minGroupSize` 자리다(`policy.unreadablePaths`, `profiles.<이름>.policy.minGroupSize` 등). 설정 화면의 읽기 제외 편집과 새 작업 화면의 안내는 다음 단위다(제안서 P-4).
 
 ### 3.7 결과와 사람의 검토
 

@@ -412,9 +412,11 @@ export function asSelectModel(value: unknown): SelectModelReply {
 const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
 
 /** GU-3: the answer to startRun. */
-export function asStartRun(value: unknown): { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string } {
+export function asStartRun(value: unknown): { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string; readonly hint?: string } {
   if (isObj(value) && value["ok"] === true && str(value["runId"]) && RUN_ID.test(value["runId"])) return { ok: true, runId: value["runId"] };
-  return failed(value);
+  // U-212: the CLI's hint id, when the main process passed one.
+  const hint = isObj(value) ? value["hint"] : undefined;
+  return { ...failed(value), ...(str(hint) && /^[a-z][a-z0-9_]{0,63}$/.test(hint) ? { hint } : {}) };
 }
 
 /** GU-3: a batch of progress items; null when it does not fit. */

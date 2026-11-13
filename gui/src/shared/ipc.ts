@@ -329,6 +329,18 @@ export function hostCodeOf(value: unknown): string {
   return typeof code === "string" && ERROR_CODE.test(code) ? code : "host_error";
 }
 
+const HINT_ID = /^[a-z][a-z0-9_]{0,63}$/;
+
+/**
+ * U-212 (bundle A): a start the engine host refused: its code, and the CLI's hint id when the app layer
+ * gave one (error.hint.<hint>, e.g. unreadable_paths_required for analyze-private without an unreadable
+ * path). An id only; the window shows a hint it has words for.
+ */
+export function toStartFailure(value: unknown): { readonly ok: false; readonly code: string; readonly hint?: string } {
+  const hint = isObj(value) ? value["hint"] : undefined;
+  return { ok: false, code: hostCodeOf(value), ...(typeof hint === "string" && HINT_ID.test(hint) ? { hint } : {}) };
+}
+
 /** `listModels` arguments: `{provider}`. */
 export function parseProviderArgs(value: unknown): { readonly provider: string } | null {
   if (!isObj(value) || !hasOnlyKeys(value, ["provider"])) return null;

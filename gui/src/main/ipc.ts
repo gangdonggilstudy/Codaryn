@@ -699,7 +699,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (!checked.ok) return checked;
     if (checked.view.runId !== parsed.runId) return { ok: false, code: "host_error" };
     const moves = checked.view.actions.filter((action) => action.kind === "move").length;
-    // U-206 (U-196): a run plan's token stands for its files (the check's indexes); its apply is refused here.
+    // U-206 (U-196): a run plan's token stands for its files (the check's indexes and its apply dialog).
     const changes = checked.view.planKind === "changes" ? { planKind: "changes" as const, files: checked.view.files?.length ?? 0 } : {};
     // U-32: a marked plan run gets no token (planApprovable): its apply is refused before any dialog.
     const approval =
@@ -714,9 +714,8 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const approval = deps.approvals.get(parsed.approval);
     if (approval === null) return { ok: false, code: "unknown_plan" };
-    // U-206 (U-196): carrying out a run plan is not this app's yet (the app layer's part comes with
-    // U-195); refused before any dialog, run or engine call.
-    if (approval.planKind === "changes") return { ok: false, code: "run_plan_apply_unavailable" };
+    // U-226 (U-218): a run plan is applied as a plan of moves is (its own dialog, confirmApply), as a
+    // run that carries it out. It never asks the DR-21 consent: no apply of it ends consent_required.
     if (deps.runs.running || starting) return { ok: false, code: "run_active" };
     const root = workspaces.path(approval.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };

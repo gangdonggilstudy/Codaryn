@@ -12,7 +12,7 @@ import type { PlanApplyOf } from "./history.js";
 import { changesValue, planValue, reviewValue } from "./plans.js";
 import { reportValue } from "./report.js";
 import { createRunRegistry, taskForm } from "./runs.js";
-import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
+import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf, RunObserverOf } from "./runs.js";
 import { configFileValue, configLanguageOf, modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
 import type { ApiProviderEntry } from "./settings.js";
 import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js";
@@ -58,7 +58,7 @@ export interface HostApp {
   revert(request: { readonly workspace: string; readonly runId: string; readonly dryRun: boolean; readonly unsafeMoveConsent: { readonly runId: string } | null }): Promise<unknown>;
   /** GU-5: the plan view, its apply (DR-1, DR-2, DR-21) and a person's review (GT-D6). */
   plan(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
-  applyPlan(request: HostApplyRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
+  applyPlan(request: HostApplyRequest, observer: RunObserverOf & { onRunEvent(event: unknown): void }): Promise<unknown>;
   review(request: { readonly settings: HostTaskForm; readonly runId: string; readonly decision: "accept" | "reject"; readonly note: string | null }): Promise<unknown>;
   /** DR-7, DR-29: a run's changed files, masked with the task form's secrets (paths and states go on). */
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;

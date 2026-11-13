@@ -784,6 +784,11 @@ export interface RunResultView {
   readonly masking?: MaskingView | null;
   /** U-124: how the run's permission questions ended (counts), or null/absent when none was asked. */
   readonly confirmations?: ConfirmationsView | null;
+  /**
+   * U-226 (U-218): a run that carried out a run plan (kind "run" with `planRunId`): its writes
+   * refused because the approved plan does not name the file (path_not_writable). Absent otherwise.
+   */
+  readonly deniedNotPlanned?: number;
 }
 
 /** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
@@ -849,6 +854,9 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
   const unsafeMoves = result["unsafeMoves"] ?? null;
   const applied = kind === "apply" ? toPlanActions(result["applied"], 10_000) : [];
   if (applied === null || !(planRunId === null || isRunId(planRunId)) || !numOrNull(unsafeMoves)) return fail;
+  // U-226: only a run that carried out a plan has the count of its writes outside the plan.
+  const deniedNotPlanned = result["deniedNotPlanned"];
+  if (deniedNotPlanned !== undefined && (!count(deniedNotPlanned) || kind !== "run" || planRunId === null)) return fail;
   const finalMessage = toFinalMessage(result["finalMessage"]);
   if (finalMessage === "bad") return fail;
   return {
@@ -880,6 +888,7 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       masking: maskingOf(result["masking"]),
       // U-124: how the run's permission questions ended, counts only; anything else gives no lines.
       confirmations: confirmationsOf(result["confirmations"]),
+      ...(deniedNotPlanned === undefined ? {} : { deniedNotPlanned }),
     },
   };
 }

@@ -444,8 +444,15 @@ export function startGui(options: GuiOptions): void {
       approvals,
       // 3.9: "do not apply" is the default; the digest's first 12 characters and the counts are shown.
       confirmApply: async (approval) => {
-        const values = { moves: approval.moves, discards: approval.discards, digest: approval.digest.slice(0, 12) };
         const buttons = [dialogText(language, "apply.confirm"), dialogText(language, "apply.keep")];
+        // U-226 (U-218): a run plan's apply starts a run: its number of files, and that its summary is
+        // the model's words, after the form it is applied with. "Do not apply" stays the default.
+        if (approval.planKind === "changes") {
+          const values = { files: approval.files ?? 0, digest: approval.digest.slice(0, 12) };
+          const detail = `${applyFormText(language, approval.profile, approval.workflowRef)}\n${dialogText(language, "applyRun.detail")}`;
+          return (await ask("applyRun.message", { type: "question", title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true }, values)) === 0;
+        }
+        const values = { moves: approval.moves, discards: approval.discards, digest: approval.digest.slice(0, 12) };
         // R29-I2: the dialog names the form the plan is applied with (from the token), then the rules.
         const detail = `${applyFormText(language, approval.profile, approval.workflowRef)}\n${dialogText(language, "apply.detail")}`;
         const answer = await ask("apply.message", { type: "question", title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true }, values);

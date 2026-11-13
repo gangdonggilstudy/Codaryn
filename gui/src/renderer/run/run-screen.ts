@@ -68,7 +68,9 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView, formKno
   if (result.reason === "protected_changed") out.push(button(t.format("run.viewProtected"), () => deps.openReport(result.runId, form, "protected"), { id: "run-view-protected" }));
   const openSettings = deps.openSettings;
   if (result.status === "budget-exhausted" && openSettings !== undefined) out.push(button(t.format("run.viewLimits"), openSettings, { id: "run-view-limits" }));
-  if (result.reason === "plan_stale") out.push(el("p", t.format("run.planStale"), { class: "notice", id: "run-plan-stale" }), button(t.format("run.newPlan"), deps.newTask, { id: "run-new-plan" }));
+  // U-226: a run that carried out a plan stops as plan_stale before its first model request, writing nothing.
+  const carried = result.kind === "run" && result.planRunId !== null;
+  if (result.reason === "plan_stale") out.push(el("p", t.format(carried ? "run.planStaleCarried" : "run.planStale"), { class: "notice", id: "run-plan-stale" }), button(t.format("run.newPlan"), deps.newTask, { id: "run-new-plan" }));
   if (result.kind === "apply") {
     const applied = el("div", undefined, { id: "run-applied" });
     applied.append(el("h4", t.format("run.applied", { count: String(result.applied.length) })));
@@ -203,6 +205,18 @@ function resultView(t: Texts, api: CodarynApi, result: RunResultView, labels: { 
     }
   }
   if (result.plan !== null) box.append(el("p", t.format("run.plan", { actions: String(result.plan.actions ?? "-"), digest: result.plan.digest.slice(0, 12) }), { id: "run-plan" }));
+  // U-226 (U-218): a run that carried out a run plan: whose plan, and (the CLI's end summary) its writes
+  // refused because the approved plan does not name the file, with how to change other files.
+  if (result.kind === "run" && result.planRunId !== null) {
+    box.append(el("p", t.format("run.carriedPlan", { runId: result.planRunId }), { id: "run-carried-plan" }));
+    const refused = result.deniedNotPlanned ?? 0;
+    if (refused > 0) {
+      box.append(
+        el("p", t.format("run.deniedNotPlanned", { count: String(refused) }), { id: "run-denied-not-planned" }),
+        el("p", t.format("run.deniedNotPlannedHint"), { class: "notice", id: "run-denied-not-planned-hint" }),
+      );
+    }
+  }
   if (result.review !== null) {
     const review = el("div", undefined, { id: "run-review" });
     review.append(el("h4", t.format("run.review")));

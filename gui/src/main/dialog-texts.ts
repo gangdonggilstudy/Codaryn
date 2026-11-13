@@ -44,6 +44,9 @@ const KO = {
   "cleanup.discarded.keep": "폐기 보관함은 남김",
   "apply.confirm": "이 계획 적용",
   "apply.keep": "적용 안 함",
+  // U-226 (U-218): a run plan's apply starts a run that writes the plan's files.
+  "applyRun.message": "이 실행 계획을 적용할까요? 새 실행이 계획의 파일 {files}개를 씁니다 (다이제스트 {digest})",
+  "applyRun.detail": "요약은 계획을 만든 모델이 쓴 글이며 검증되지 않았습니다. 새 실행은 그 요약과 파일 목록을 받고, 목록의 파일만 쓸 수 있습니다(다른 파일 쓰기는 거부됩니다). 계획 뒤에 파일이 바뀌었으면 첫 모델 요청 전에 멈추고 아무것도 쓰지 않습니다.",
   "consent.message": "이 드라이브는 하드 링크를 쓸 수 없습니다. 이번 적용 한 번에만 동의할까요? (다이제스트 {digest})",
   "consent.detail": "옮기는 도중 같은 이름의 파일이 새로 생기면 그 파일을 덮어쓸 수 있습니다. 동의하지 않으면 아무것도 옮기지 않습니다. 동의는 적용 기록에 남습니다.",
   "consent.agree": "이번 적용에 동의",
@@ -109,6 +112,8 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "cleanup.discarded.keep": "Keep the discarded files",
   "apply.confirm": "Apply this plan",
   "apply.keep": "Do not apply",
+  "applyRun.message": "Apply this run plan? A new run writes the plan's {files} files (digest {digest})",
+  "applyRun.detail": "The summary is the words of the model that made the plan, not checked. The new run gets that summary and the file list and may write only the files in the list (writes to others are refused). If files changed after the plan, it stops before its first model request and writes nothing.",
   "consent.message": "This drive cannot use hard links. Agree for this one apply only? (digest {digest})",
   "consent.detail": "If a file with the same name appears while files are moved, it could be replaced. Without your agreement nothing is moved. The agreement is kept in the apply's record.",
   "consent.agree": "Agree for this apply",

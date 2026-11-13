@@ -79,6 +79,15 @@ const steps = [
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_ask_1", "run_command", { executable: process.execPath, args: ["-e", ASK_SCRIPT] })]),
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_ask_2", "run_command", { executable: process.execPath, args: ["-e", ASK_SCRIPT] })]),
   fakeApi.replyText("asked"),
+  // U-226 (U-218): a plan run with the task type "rewrite" (plan "run") names one file (the plan step ends
+  // the run, as propose_plan does), then the run that carries it out writes it and tries one more file,
+  // which the plan does not name (refused).
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_changes", "propose_changes", { summary: "Add the planned note", files: [{ path: "planned.md", change: "create" }] })]),
+  fakeApi.replyTools([
+    fakeApi.toolUse("toolu_smoke_carry_1", "write_file", { path: "planned.md", expectedHash: null, change: { kind: "replace_all", content: "planned by the smoke run\n" } }),
+    fakeApi.toolUse("toolu_smoke_carry_2", "write_file", { path: "unplanned.md", expectedHash: null, change: { kind: "replace_all", content: "not in the plan\n" } }),
+  ]),
+  fakeApi.replyText("carried"),
   { kind: "hang" },
 ];
 const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
@@ -104,6 +113,8 @@ writeFileSync(
       // U-124: a command rule that asks before each call (confirm: true, the user's settings only).
       ask: { policy: { commands: [{ executable: process.execPath, argsPrefix: ["-e", ASK_SCRIPT], allowExtraArgs: false, confirm: true }], network: "deny", destructive: "deny", restorePathTokens: false } },
     },
+    // U-226 (U-218): a task type whose plan is "run": its run makes a changes plan; applying it is a run.
+    workflows: { rewrite: { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" } },
   }),
 );
 
@@ -486,7 +497,8 @@ const expected = [
   [
     "apiRequests",
     // U-13's plan run (5j2) asks once more: 8 before it. U-124's run with the profile "ask" asks three times more.
-    (v) => v.models >= 2 && v.messages === 12 && v.other.length === 0 && v.allFakeKey === true,
+    // U-226: the plan run of a run plan once, and the run that carries it out twice: 15.
+    (v) => v.models >= 2 && v.messages === 15 && v.other.length === 0 && v.allFakeKey === true,
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
   ["runDone", (v) => v === "done"],
@@ -788,9 +800,11 @@ const expected = [
   ["setupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
   // U-184: the text view's two first-save confirmations (textEdit) come first.
   // U-206 (U-196, DR-69 B-3): the run plan from the run list: its files (create, modify) in place of a move
-  // table, its summary under the approved plan's label, apply off with its reason (the window does not
-  // know its form: no check). The main process refuses its apply, with or without consent, before any
-  // dialog; its check gives the app's refusal as it is (no task resolves to plan "run" yet, U-177).
+  // table, its summary under the approved plan's label. U-226 (U-218): the window does not know its form,
+  // so it names the CLI's command in place of the apply button (no check). Through the page's API, its
+  // apply is asked about with the run plan's dialog and the app refuses it (the second workspace's form
+  // does not resolve to plan "run"); a consent is refused before any dialog; the check gives the app's
+  // refusal as it is.
   [
     "runPlan",
     (v) =>
@@ -805,20 +819,47 @@ const expected = [
         approved: "true",
         words: "Add the guide and fix the notes",
         moves: false,
-        applyOff: true,
-        why: true,
+        unknown: true,
+        apply: false,
         check: false,
         planKind: "changes",
         fileCount: 2,
         digest: runPlanDigest,
         approval: "string",
-        apply: "run_plan_apply_unavailable",
-        consent: "run_plan_apply_unavailable",
+        applied: "run_not_plan",
+        consent: "consent_not_asked",
         checked: "run_not_plan",
-        dialogs: 0,
+        dialogs: ["applyRun.message"],
       }),
   ],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["textSave.message", "textSave.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // U-226 (U-218): a plan run from the window with the task type "rewrite" (plan "run"): its plan checked
+  // clean and applied after the run plan's dialog. The run that carries it out writes the planned file,
+  // is refused the one file the plan does not name, and its result says whose plan and how many writes
+  // were refused; with no verifier it ends needs-input (no_verifier), as any run that changed a file does. A token taken before is refused afterwards (already applied); the plan screen then
+  // says which run applied it.
+  [
+    "runPlanApply",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        planReason: "plan_pending",
+        shown: "pending",
+        check: "clean",
+        carried: true,
+        status: "needs-input",
+        reason: "no_verifier",
+        namesPlan: true,
+        refused: 1,
+        hint: true,
+        planned: "planned by the smoke run\n",
+        unplanned: false,
+        again: "plan_already_applied",
+        after: "applied",
+        appliedByCarry: true,
+        dialogs: ["applyRun.message", "applyRun.message"],
+      }),
+  ],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["textSave.message", "textSave.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "applyRun.message", "applyRun.message", "applyRun.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

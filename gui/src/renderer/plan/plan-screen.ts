@@ -168,23 +168,6 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         if (view.status !== "applied" && marked) {
           // DR-38: the engine refuses it (plan_records_changed); in place of the apply button.
           parts.push(el("p", t.format("plan.cannotApply"), { class: "notice", id: "plan-cannot-apply" }));
-        } else if (runPlan && view.status !== "applied" && reply.approval !== null) {
-          // U-206 (U-196): a run plan is checked (files the later run could not write) but not carried
-          // out from this app yet: the button stays off and says why (the main process refuses it too).
-          const off = button(t.format("plan.apply"), () => undefined, { id: "plan-apply", disabled: "", "aria-describedby": "plan-run-apply-unavailable" });
-          const why = el("p", t.format("plan.runApplyUnavailable"), { class: "notice", id: "plan-run-apply-unavailable" });
-          if (target.formKnown) {
-            const approval = reply.approval;
-            const check = el("section", undefined, { id: "plan-check", "aria-labelledby": "plan-check-title", "data-check": "checking" });
-            check.append(el("h3", t.format("plancheck.title"), { id: "plan-check-title" }), el("p", t.format("plancheck.checking")));
-            parts.push(check);
-            void (async () => {
-              const result = asPlanCheck(await api.checkPlan(approval));
-              check.replaceChildren(el("h3", t.format("plancheck.title"), { id: "plan-check-title" }), ...planCheckParts(t, result, rows));
-              check.setAttribute("data-check", !result.ok ? "error" : result.problems.length > 0 ? "problems" : "clean");
-            })();
-          }
-          parts.push(off, why);
         } else if (view.status !== "applied" && reply.approval !== null && !target.formKnown) {
           const unknown = el("div", undefined, { class: "notice", id: "plan-form-unknown" });
           const commands = el("ul", undefined, { id: "plan-cli-commands" });
@@ -198,6 +181,8 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         } else if (view.status === "applied" || reply.approval === null) {
           parts.push(el("p", view.appliedBy === null ? t.format("plan.applied") : t.format("plan.appliedBy", { runId: view.appliedBy.runId, time: localDateTime(view.appliedBy.at) }), { id: "plan-applied" }));
         } else {
+          // U-226 (U-218): a run plan too: its apply is the run that carries it out (the main process
+          // asks first with its own dialog); the run screen shows its progress, cancel and result.
           const approval = reply.approval;
           const apply = button(t.format("plan.apply"), () => {
             if (!run.startingApply(approval)) {

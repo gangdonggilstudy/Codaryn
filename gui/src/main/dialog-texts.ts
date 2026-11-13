@@ -46,7 +46,7 @@ const KO = {
   "apply.keep": "적용 안 함",
   // U-226 (U-218): a run plan's apply starts a run that writes the plan's files. R-109: the detail says
   // what the CLI's approval text says (changesApprovalText: apply.changes.what, summary_note, commands_note).
-  "applyRun.message": "이 실행 계획을 적용할까요? 파일 {files}개 (다이제스트 {digest})",
+  "applyRun.message": "이 바꿀 파일 계획을 적용할까요? 파일 {files}개 (다이제스트 {digest})",
   "applyRun.what": "승인하면 파일 도구가 이 파일 {files}개에만 쓸 수 있는 실행이 시작됩니다.",
   "applyRun.summaryNote": "계획의 요약은 모델이 쓴 작업 설명이며 계획과 함께 승인됩니다. 목표나 새 지시가 아니며, 실행이 그 설명대로 하는지는 아무것도 확인하지 않습니다. 강제되는 것은 파일 목록뿐입니다.",
   "applyRun.commandsNote": "작업이 명령도 허용하면, 정책이 허용한 명령은 이 파일들에 묶이지 않습니다.",
@@ -116,7 +116,7 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "cleanup.discarded.keep": "Keep the discarded files",
   "apply.confirm": "Apply this plan",
   "apply.keep": "Do not apply",
-  "applyRun.message": "Apply this run plan? {files} files (digest {digest})",
+  "applyRun.message": "Apply this changes plan? {files} files (digest {digest})",
   "applyRun.what": "Approving starts a run whose file tools can write only these {files} file(s).",
   "applyRun.summaryNote": "The plan's summary is the model's description of the work, approved with the plan. It is not the goal or a new instruction, and nothing checks the run against it; only the file list is enforced.",
   "applyRun.commandsNote": "If the task also allows commands, a command the policy allows is not limited to these files.",
@@ -230,7 +230,7 @@ const WIDEN_KO: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   profile_changed: "프로필 바꿈",
   workflow_changed: "작업 종류 정의 바꿈",
   confirm_removed: "묻던 명령을 묻지 않고 허용",
-  writable_path_added: "쓰기 허용 경로 넓힘",
+  writable_path_added: "쓰기 허용 경로 더함",
   writable_paths_unlimited: "쓰기 허용 경로 제한 없앰(파일 도구가 작업 공간 어디든 씀)",
   other: "그 밖의 넓히기",
 };

@@ -17,23 +17,31 @@
  * Cases: a document run (with a registered secret read and masked), a run with refusals, a run with
  * a repair, a plan run and its apply, a run that ends with a model error. A difference found here is
  * not fixed in this unit: the case is marked todo with what differs (PM).
+ *
+ * U-295 (before the CLI migration's step C-6a moves a run's life into the app layer): three more,
+ * on the paths that step takes over and no case compared. A cancel file there before the run (the
+ * cancel source sees it as it is made); a permission question with no way to ask (the CLI is not at
+ * a terminal, the app has no observer: both record deny by default), through the local fake API; and
+ * a refusal of a lock another run holds (the CLI's error JSON and the app's StartOutcome).
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { createCodarynApp, createNodeAppEnvironment } from "../../src/app/index.js";
 import type { CodarynApp, TaskForm } from "../../src/app/index.js";
-import { PLAN_FILE_NAME, PRIVACY_TOKEN_PATTERN_SOURCE } from "../../src/contracts/index.js";
+import { PLAN_FILE_NAME, PRIVACY_TOKEN_PATTERN_SOURCE, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
 import type { ApplyJournalRecord, ApplyResult, CommandVerifierConfig, EngineResult, JournalRecord, ScriptStep } from "../../src/contracts/index.js";
+import { fakeApiConfig, writeConfigFile } from "../fixtures/anthropic.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { organizeScript, writeOrganizeTask, writeOrganizeWorkspace } from "../fixtures/general-tasks.js";
 import { EDIT_RIGHT_FIX, EDIT_WRONG_FIX, PRICE_CHECK_PATH, PRICE_PATH, writeRepairProject } from "../fixtures/repair-project.js";
-import { FAKE_SECRET_A, FAKE_SECRET_ENV_A } from "../fixtures/secrets.js";
-import { NODE, cliEnv, expectRunResult, readRunFiles, runDirOf, runTask, sha256Hex, startCli } from "../support/cli.js";
+import { FAKE_API_KEY, FAKE_SECRET_A, FAKE_SECRET_ENV_A } from "../fixtures/secrets.js";
+import { NODE, cliEnv, expectCliError, expectRunResult, lockPath, readRunFiles, runDirOf, runTask, sha256Hex, startCli, waitFor } from "../support/cli.js";
+import { MOCK_LABEL, replyText, replyTools, runGuarded, startFakeAnthropic, toolUse } from "../support/fake-anthropic.js";
 import { applyArgs, expectApplyResult, planDigestOf, readApplyJournal, shortDigest } from "../support/general.js";
 import { attemptSteps, spareSteps } from "../support/repair-script.js";
 import type { Attempt } from "../support/repair-script.js";
@@ -66,15 +74,16 @@ function taskFormOf(task: string): TaskForm {
   return { input: { kind: "task", taskPath: task }, configPath: null, varsFile: null, profile: null, workflowRef: null };
 }
 
-async function viaCli(side: Side, env: NodeJS.ProcessEnv): Promise<RunSide> {
-  const run = await runTask(side.task, { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS });
+/** U-295: `cancelFile`, the run's cancel file (`--cancel-file`, the request's `cancelFile`). */
+async function viaCli(side: Side, env: NodeJS.ProcessEnv, cancelFile?: string): Promise<RunSide> {
+  const run = await runTask(side.task, { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS, ...(cancelFile === undefined ? {} : { cancelFile }) });
   const result = expectRunResult(run);
   return { result, records: readRunFiles(side.sb.workspace, result).records };
 }
 
-async function viaApp(side: Side, env: NodeJS.ProcessEnv): Promise<RunSide & { readonly app: CodarynApp }> {
+async function viaApp(side: Side, env: NodeJS.ProcessEnv, cancelFile?: string): Promise<RunSide & { readonly app: CodarynApp }> {
   const app = await appFor(side.sb, env);
-  const started = await app.startRun({ input: { kind: "task", taskPath: side.task }, configPath: null, varsFile: null, profile: null, workflowRef: null, cancelFile: null });
+  const started = await app.startRun({ input: { kind: "task", taskPath: side.task }, configPath: null, varsFile: null, profile: null, workflowRef: null, cancelFile: cancelFile ?? null });
   assert.ok(started.ok, `the app layer did not start the run: ${JSON.stringify(started)}`);
   const done = await started.handle.done;
   assert.ok(done.ok, `the app layer's run ended with an error: ${JSON.stringify(done)}`);
@@ -275,4 +284,91 @@ test("U-112 모델 오류로 끝난 실행: 대본이 다한 실행의 결과와
   assert.equal(viaCliRun.result.modelError?.kind, "script_exhausted");
   assert.equal(countOf(viaCliRun.records, "model_error"), 1);
   assertSameRun(viaCliRun, cli.sb, viaAppRun, app.sb);
+});
+
+// ---------------------------------------------------------------------------------------------
+// U-295: before C-6a, the paths of a run's life the app layer takes over
+
+test("U-295 시작 전부터 있는 취소 파일: 첫 턴 전에 멈춘 실행의 결과와 기록이 CLI와 앱 계층에서 같다", { timeout: TIMEOUT_MS * 2 }, async (t) => {
+  const env = cliEnv();
+  const { cli, app } = pairOf(t, (sb) => {
+    writeWorkspaceFile(sb, "README.md", "# Readme\n");
+    writeFileSync(sb.cancelFile, "cancel");
+    return writeTask(sb, { id: "u295-cancelled", workflow: "document" }, [{ text: "never asked" }]);
+  });
+  const viaCliRun = await viaCli(cli, env, cli.sb.cancelFile);
+  const viaAppRun = await viaApp(app, env, app.sb.cancelFile);
+
+  assert.deepEqual([viaCliRun.result.status, viaCliRun.result.reason, viaCliRun.result.usage.modelTurns], ["cancelled", "cancelled", 0]);
+  assert.deepEqual(
+    viaCliRun.records.map((record) => record.type),
+    ["run_started", "state_checked", "state_checked", "run_finished"],
+  );
+  assertSameRun(viaCliRun, cli.sb, viaAppRun, app.sb);
+});
+
+test(`${MOCK_LABEL} U-295 터미널 없는 권한 질문: 물을 수 없는 CLI와 관찰자 없는 앱 계층이 같이 기본 거부로 기록한다`, { timeout: TIMEOUT_MS * 2 }, async (t) => {
+  const goal = "Run the two checks.";
+  const asked = (word: string) => toolUse(`toolu_${word}`, "run_command", { executable: NODE, args: ["-e", `require('fs').writeFileSync('ran-${word}.txt', '')`] });
+  /** Each side has its own fake API with the same replies, and a config with its address and an asking rule. */
+  const sideOf = async (): Promise<{ readonly sb: Sandbox; readonly config: string }> => {
+    const sb = createSandbox(t);
+    const api = await startFakeAnthropic(t, [replyTools([asked("one")]), replyTools([asked("two")]), replyText("Both checks are asked.")]);
+    writeWorkspaceFile(sb, "notes.md", "# Weekly notes\n");
+    const config = writeConfigFile(
+      sb,
+      fakeApiConfig(api.url, {
+        model: "fake-model",
+        maxRetries: 0,
+        limits: { maxModelTurns: 6, maxToolCalls: 6, maxTotalTokens: 200_000, maxDurationMs: 60_000 },
+        policy: { commands: [{ executable: NODE, argsPrefix: ["-e"], allowExtraArgs: true, confirm: true }], network: "deny", destructive: "deny", restorePathTokens: false },
+      }),
+    );
+    return { sb, config };
+  };
+  const env = cliEnv({ fakeApiKey: FAKE_API_KEY });
+  const cliSide = await sideOf();
+  const appSide = await sideOf();
+
+  const run = await runGuarded(cliSide.sb, ["run", "--config", cliSide.config, "--workspace", cliSide.sb.workspace, "--goal", goal], env, TIMEOUT_MS);
+  const cliResult = expectRunResult(run, "anthropic");
+  const viaCliRun: RunSide = { result: cliResult, records: readRunFiles(cliSide.sb.workspace, cliResult).records };
+
+  const appOf = await appFor(appSide.sb, env);
+  const started = await appOf.startRun({ input: { kind: "quick", workspace: appSide.sb.workspace, goal }, configPath: appSide.config, varsFile: null, profile: null, workflowRef: null, cancelFile: null });
+  assert.ok(started.ok, `the app layer did not start the run: ${JSON.stringify(started)}`);
+  const done = await started.handle.done;
+  assert.ok(done.ok, `the app layer's run ended with an error: ${JSON.stringify(done)}`);
+  const viaAppRun: RunSide = { result: done.result, records: readRunFiles(appSide.sb.workspace, done.result).records };
+
+  assert.deepEqual([cliResult.status, cliResult.reason, run.exitCode], ["needs-input", "no_verifier", 3]);
+  const answers = (side: RunSide) => side.records.flatMap((record) => (record.type === "confirmation_answered" ? [`${record.decision}/${record.by}`] : []));
+  assert.deepEqual(answers(viaCliRun), ["deny/default", "deny/default"]);
+  for (const side of [cliSide, appSide]) {
+    assert.deepEqual(["ran-one.txt", "ran-two.txt"].filter((name) => existsSync(join(side.sb.workspace, name))), [], "no asked command ran");
+  }
+  assertSameRun(viaCliRun, cliSide.sb, viaAppRun, appSide.sb);
+});
+
+test("U-295 다른 실행이 쥔 잠금: CLI의 오류 JSON과 앱 계층의 거부가 같은 코드·글·분류이고, 둘 다 실행을 만들지 않는다", { timeout: TIMEOUT_MS * 2 }, async (t) => {
+  const env = cliEnv();
+  const sb = createSandbox(t);
+  writeWorkspaceFile(sb, "README.md", "# Readme\n");
+  const task = writeTask(sb, { id: "u295-locked", workflow: "document" }, [{ delayMs: 60_000, text: "never" }]);
+  const holder = startCli(["run", "--task", task, "--cancel-file", sb.cancelFile], { cwd: sb.base, env, timeoutMs: TIMEOUT_MS });
+  try {
+    await waitFor(() => existsSync(lockPath(sb.workspace)), 30_000, "the holder's lock");
+    const run = await runTask(task, { cwd: sb.base, env, timeoutMs: TIMEOUT_MS });
+    const cliError = expectCliError(run, "workspace_locked");
+    assert.equal(run.exitCode, 6);
+
+    const started = await (await appFor(sb, env)).startRun({ input: { kind: "task", taskPath: task }, configPath: null, varsFile: null, profile: null, workflowRef: null, cancelFile: null });
+    assert.ok(!started.ok, `the app layer started a run in a locked workspace: ${JSON.stringify(started)}`);
+    const facts = (error: { code: string; message: string; category?: string; retryable?: boolean }) => ({ code: error.code, message: error.message, category: error.category, retryable: error.retryable });
+    assert.deepEqual(facts(started.error), facts(cliError));
+    assert.equal(readdirSync(join(sb.workspace, STATE_DIR_NAME, RUNS_DIR_NAME)).length, 1, "only the holder's run");
+  } finally {
+    writeFileSync(sb.cancelFile, "cancel");
+    assert.equal(expectRunResult(await holder.done).status, "cancelled");
+  }
 });

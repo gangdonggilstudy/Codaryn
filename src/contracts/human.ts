@@ -825,6 +825,27 @@ export const FIXED_MESSAGES = {
   "progress.workflow_policy.verifiers_dropped": { count: "count" },
   "runs.omitted": { count: "count" },
 
+  // U-156 (nb-i18n's E group, U-154's table): `codaryn models`' text. The renderer adds the marks and
+  // the values the texts end before (G-A): `: `, `* `, the model id and name (outside values, never in
+  // a text). `{variable}` is the provider's model variable, `{field}` where --use writes (`model` or
+  // `providers.openai.model`). The table's `  #` column head is not a word and stays as it is. The
+  // English is the text before U-156, character for character (SP-0 pins it).
+  "models.table.id": {},
+  "models.table.name": {},
+  "models.table.input_tokens": {},
+  "models.table.output_tokens": {},
+  "models.none_listed": {},
+  "models.listed": { count: "count" },
+  "models.no_current": { variable: "settingEnv" },
+  "models.current_from_config": {},
+  "models.current_from_env": { variable: "settingEnv" },
+  "models.not_listed": {},
+  "models.written_label": {},
+  "models.written_place": { field: "field" },
+  "models.written_place_created": { field: "field" },
+  "models.overridden": { variable: "settingEnv", field: "field" },
+  "models.use_prompt": { field: "field" },
+
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
   "init.location": { location: "location" },
   "init.confirm_create": {},

@@ -763,6 +763,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `init`: 터미널이고 키가 없으면 `init.next` 뒤에 `first_use.try_without_key`.
 - `run`의 오류: stderr가 터미널이고 `provider_not_configured`이면 오류 설명 끝에 `first_use.try_without_key`.
 - 설정 파일이 아예 없을 때(`--config`도 `CODARYN_CONFIG`도 없고 기본 위치에 파일이 없음) 간편 형식·한 줄 실행의 설정 오류(`invalid_config`)는 힌트 `config_missing`(U-37 방식, `CLI_ERROR_HINTS`)을 단다. 사람용 줄은 `error.hint.config_missing`(설정 파일이 아직 없다, `codaryn init`으로 만든다)이다. 이것만은 터미널 여부와 상관없다. 오류 JSON에 `hint` 값이 하나 더 생길 뿐 `message`·`diagnostic`·`code`·종료 코드는 그대로다. `--config`로 준 파일이나 기본 위치의 파일이 있으면, 기본 위치가 아예 없으면 힌트가 없다.
+  - U-190(AXM-21): 이 힌트가 있을 때 사람용 오류의 진단 줄은 `invalid_value`("값이 올바르지 않습니다")가 아니라 `missing_field`("필드가 없습니다")로 보인다. 그래서 힌트 줄(설정 파일이 아직 없다)과 어긋나지 않는다. CLI가 렌더러에 넘기는 사본만 그렇고(`src/cli/error-text.ts`), JSON의 `diagnostic.code`는 `invalid_value` 그대로다(DR-48).
+  - 첫 줄(`error.invalid_config.what`, "설정 파일을 읽을 수 없거나 값이 올바르지 않습니다")은 코드로만 고르는 글이라 그대로다.
 - 시험: `tests/unit/cli/g-u115-first-use.test.ts`(렌더러와 실행, 터미널이 아니면 그대로), `tests/unit/cli/g-u115-terminal.test.ts`(실제 CLI, `u115-terminal-preload`로 흐름을 터미널로 보임), `tests/unit/cli/g-u132-first-use-r91.test.ts`(R-91의 넷).
 
 ### init이 제공자를 묻는다 (U-26, UXM-11, DR-46)

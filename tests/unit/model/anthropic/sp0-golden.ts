@@ -11,9 +11,11 @@
  *
  * DR-37 (a) changed three messages on purpose: a 401 or 403 now says only the fixed phrase and the
  * request id (p3Retries.unauthorized, p3Retries.forbidden, p6Models.errorOnSecondPage). Nothing else.
- * DR-68 (U-82) added `retryable` to every failure (ModelOutcome.retryable: the transport's verdict
- * for what was sent, the adapter's own for a malformed reply or a refusal). Nothing else changed:
- * without that key the values equal the ones pinned before (checked by a script in the U-82 report).
+ * DR-68 (U-82) added `retryable` to every failure whose verdict is known (ModelOutcome.retryable:
+ * the transport's verdict for what was sent, the adapter's own for a malformed reply or a refusal);
+ * review R-75 L2 left it off the transport failure of no known kind (p3Retries.unknownFailure).
+ * Nothing else changed: without that key the values equal the ones pinned before (checked by a
+ * script in the U-82 report).
  */
 
 export const SP0_GOLDEN: Record<string, unknown> = {
@@ -320,8 +322,7 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "network error: unknown transport failure",
-        "retryable": false
+        "message": "network error: unknown transport failure"
       }
     },
     "timeoutAlways": {

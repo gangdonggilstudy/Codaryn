@@ -119,6 +119,12 @@ type Attempt =
       readonly kind: ModelErrorKind;
       readonly message: string;
       readonly retryable: boolean;
+      /**
+       * Review R-75 L2 (PM): true when `retryable: false` is a careful choice and not a knowledge
+       * (an unknown transport failure): the attempt is still not retried, but the outcome carries
+       * no verdict (ModelOutcome.retryable absent, unknown).
+       */
+      readonly verdictUnknown?: true;
       readonly retryAfterMs?: number;
       /** SP-3: the status of the HTTP response this failure is, absent for a transport failure. */
       readonly status?: number;
@@ -406,7 +412,7 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
           retryable: false,
         };
       case "unknown":
-        return { type: "failed", kind: "api_error", message: "network error: unknown transport failure", retryable: false };
+        return { type: "failed", kind: "api_error", message: "network error: unknown transport failure", retryable: false, verdictUnknown: true };
     }
   };
 
@@ -488,7 +494,7 @@ export async function sendWithRetries(transport: Transport, request: HttpRequest
         kind: result.kind,
         message: `${result.message}${suffix}`,
         ...(result.status === undefined ? {} : { httpStatus: result.status }),
-        retryable: result.retryable,
+        ...(result.verdictUnknown === true ? {} : { retryable: result.retryable }),
       };
     }
     const backoff = Math.min(BASE_BACKOFF_MS * 2 ** (attempt - 1), MAX_BACKOFF_MS);

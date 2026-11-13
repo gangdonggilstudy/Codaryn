@@ -31,15 +31,20 @@ function failures(value: unknown, at = ""): Map<string, Record<string, unknown>>
 }
 
 describe("U-82: the Anthropic adapter's failures carry the verdict (the SP-0 scenarios)", () => {
-  test("all thirty-two failures say retryable, and api_errors without a status are told apart", async () => {
+  test("thirty-one of the thirty-two failures say retryable, and api_errors without a status are told apart", async () => {
     const found = failures(await collectPins());
     assert.equal(found.size, 32);
-    for (const [path, failure] of found) assert.equal(typeof failure["retryable"], "boolean", path);
+    // Review R-75 L2 (PM): an unknown transport failure (no TypeError, no known cause code) has no
+    // verdict. The transport does not retry it, a careful choice, not a knowledge that retrying fails.
+    for (const [path, failure] of found) {
+      if (path.endsWith(".unknownFailure.outcome")) assert.equal(Object.hasOwn(failure, "retryable"), false, path);
+      else assert.equal(typeof failure["retryable"], "boolean", path);
+    }
     const at = (suffix: string) => [...found].find(([path]) => path.endsWith(suffix))?.[1];
     assert.equal(at(".connectionRefusedAlways.outcome")?.["retryable"], true, "the transport retries a refused connection");
     assert.equal(at(".tlsFailure.outcome")?.["retryable"], false);
     assert.equal(at(".formatRefusal.outcome")?.["retryable"], false);
-    assert.equal(at(".unknownFailure.outcome")?.["retryable"], false);
+    assert.equal(Object.hasOwn(at(".unknownFailure.outcome") ?? {}, "retryable"), false, "unknown: no verdict");
     assert.equal(at(".refusal")?.["retryable"], false);
     for (const [path, failure] of found) {
       if (failure["kind"] === "malformed_response") assert.equal(failure["retryable"], false, path);

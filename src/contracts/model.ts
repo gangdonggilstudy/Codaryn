@@ -140,8 +140,9 @@ export type ModelOutcome =
        * 5xx, a timeout, a refused or reset connection yes; others no), and the adapter's own where
        * it is plain (a malformed response, a refusal, an unusable key, a request it could not build:
        * no). Absent where it is not known (an unexpected failure, a cancel, a response the provider
-       * says failed, was cancelled or is incomplete) and from a provider that does not say (the
-       * scripted one). Absent means unknown, never false.
+       * says failed, was cancelled or is incomplete, and, review R-75 L2, a transport failure of no
+       * known kind, which the transport does not retry out of care) and from a provider that does not
+       * say (the scripted one). Absent means unknown, never false.
        */
       readonly retryable?: boolean;
     };

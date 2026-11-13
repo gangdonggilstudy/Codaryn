@@ -1302,7 +1302,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T200121Z-da084c3e
 - 검증 1번은 적용이 늘 돌리는 파일 목록 확인(`inventory`)이다. 계획에 있던 이동·폐기만 일어났는지 본다. 2번은 task의 `file_rules`다.
 - 적용은 새 실행(적용 실행)이다. stdout은 `kind:"apply"` JSON 한 줄이고(`planRunId`, `digest`, `applied` 등. 콘솔에서는 `--json`이나 `--quiet`일 때만, 10절 "터미널에서"), 같은 내용이 그 실행의 `result.json`이 된다.
 - 폐기한 파일은 `.codaryn\discarded\<적용 실행 id>\` 아래에 동작 번호 이름(`2`)으로 있다.
-- `runs`에는 적용 실행이 맨 위에 `3  done (done/verified)`로 나온다(`changes`는 적용한 동작 수). `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> (<지역 시각>)` 줄이 붙는다(예: `Applied by run 20261112T235227Z-ff199ffc (2026-11-13 08:52:27)`, main `76c5280`, DR-59). 한국어는 `적용 실행 <id>에서 적용함 (<지역 시각>)`이다.
+- `runs`에는 적용 실행이 맨 위에 `3 actions  done (done/verified)`로 나온다. 적용 실행의 변경 칸은 바꾼 파일 수가 아니라 적용한 동작 수이고, 그렇다고 낱말로 말한다(한국어 `동작 3`). `runs --json`의 `changes`는 수(`3`) 그대로다. `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> (<지역 시각>)` 줄이 붙는다(예: `Applied by run 20261112T235227Z-ff199ffc (2026-11-13 08:52:27)`, main `76c5280`, DR-59). 한국어는 `적용 실행 <id>에서 적용함 (<지역 시각>)`이다.
 - **실행 목록의 계획 실행 줄(U-16):** 결과 칸이 그 계획의 적용이 어떻게 되었는지 말한다. 판정은 적용 실행의 기록으로 한다(계약의 `planApplyStateOf`).
 
   | 상태 | 결과 칸(영어) | 한국어 | 언제 |
@@ -1751,11 +1751,11 @@ Review of run 20261113T025019Z-d83b9b61: accepted.
 The run's result and records are unchanged; `codaryn report` shows the verdict.
 ```
 
-- 판정은 `review.json`에만 남는다. 실행의 상태는 그대로 `needs-input`/`awaiting_review`이고, `runs`도 그렇게 보인다:
+- 판정은 `review.json`에만 남는다. 실행의 상태는 그대로 `needs-input`/`awaiting_review`이고, `runs`도 그렇게 보인다. 결과 칸 끝에는 판정이 붙는다(한국어 `검토: 받아들임`). `runs --json`의 그 항목에는 `review`(`verdict`, `at`)가 있다. 메모는 `report`에만 나온다:
 
   ```
   run id                     started              changes  result
-  20261113T025019Z-d83b9b61  2026-11-13 11:50:19  2        needs input (needs-input/awaiting_review)
+  20261113T025019Z-d83b9b61  2026-11-13 11:50:19  2        needs input (needs-input/awaiting_review) · review: accepted
   ```
 
 - 판정 뒤 보고서의 사람 확인 절 끝은 `No verdict yet.` 대신 ``Verdict: **accepted** (`2026-11-13T02:50:19.833Z`), note: `checked-by-hand` ``다.

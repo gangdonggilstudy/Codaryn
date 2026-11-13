@@ -36,6 +36,7 @@ import {
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
+  REVIEW_VERDICTS,
   STATE_CHECK_PHASES,
   TERMINAL_RUN_STATUSES,
   ALL_TOOL_NAMES,
@@ -720,12 +721,25 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
               ? planApplyWords(judged.applyRunId, judged.reason)[judged.state]()
               : catalog.format(`status.${pair.status}`);
         let status = pair === null ? catalog.format("runs.incomplete") : `${words} (${pair.status}/${pair.reason})`;
+        // U-129 (2), AXM-21: a person's verdict on a run that waited for review (the store reads its
+        // review.json); the time is in the JSON only. Before the marks of what came after the run.
+        const review: unknown = entry.review;
+        const verdict: unknown = typeof review === "object" && review !== null ? (review as { readonly verdict?: unknown }).verdict : undefined;
+        if (isOneOf(verdict, REVIEW_VERDICTS)) status += ` · ${catalog.format("runs.review", { verdict: catalog.format(`review.verdict.${verdict}`) })}`;
         if (entry.reverted !== null && isOneOf(entry.reverted.status, ["complete", "partial"] as const)) {
           status += ` · ${catalog.format("runs.reverted")} (${entry.reverted.status})`;
         }
         if (entry.revertRecordDamaged === true) status += ` · ${catalog.format("runs.revert_record_damaged")}`;
         if (entry.recordsChanged === true) status += ` · ${catalog.format("runs.records_changed")}`;
-        rows.push([runId, localTime(entry.startedAt) ?? "?", isCount(entry.changes) ? String(entry.changes) : "-", status]);
+        // U-129 (1), UXM-4: an apply run's number is its applied actions, not files; the cell says so.
+        const changes = !isCount(entry.changes)
+          ? "-"
+          : entry.kind !== "apply"
+            ? String(entry.changes)
+            : entry.changes === 1
+              ? catalog.format("runs.apply_action_one")
+              : catalog.format("runs.apply_actions", { count: entry.changes });
+        rows.push([runId, localTime(entry.startedAt) ?? "?", changes, status]);
       }
       // Every column but the last is padded to its widest cell (Hangul counts two columns).
       const widths = [0, 1, 2].map((column) => Math.max(...rows.map((row) => displayWidth(finalLine(row[column] ?? "")))));

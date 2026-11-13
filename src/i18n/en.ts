@@ -206,6 +206,10 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.plan_applying": "plan being applied, or its apply stopped (apply run {runId}, no result yet)",
   "runs.plan_apply_reverted": "plan applied, then reverted (apply run {runId})",
   "runs.plan_apply_missing": "no readable records of the apply run {runId} (removed, or cannot be checked)",
+  // U-129 (PM draft for nb-i18n): an apply run's changes cell, and a person's verdict in the result column.
+  "runs.apply_actions": "{count} actions",
+  "runs.apply_action_one": "1 action",
+  "runs.review": "review: {verdict}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "report.final_message": "The agent's last message. These are the agent's own words, not a verified fact.",
   "changes.records_changed": "This run has a records-changed mark, so no file text is shown; only paths and states.",

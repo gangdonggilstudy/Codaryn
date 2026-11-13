@@ -195,6 +195,13 @@ function resultView(t: Texts, api: CodarynApi, result: RunResultView, labels: { 
   // after the usage; no line when the result has none.
   const masking = maskingLine(t, result.masking);
   if (masking !== null) box.append(el("p", masking, { id: "run-masking" }));
+  // U-124 (3.6, DR-3): how the permission questions ended, with the CLI's end summary's meaning.
+  const asked = result.confirmations ?? null;
+  if (asked !== null) {
+    for (const [key, count] of [["allowed", asked.allowed], ["user", asked.user], ["unanswered", asked.default], ["cancelled", asked.cancelled]] as const) {
+      if (count > 0) box.append(el("p", t.format(`run.confirm.${key}`, { count: String(count) }), { id: `run-question-${key}` }));
+    }
+  }
   if (result.plan !== null) box.append(el("p", t.format("run.plan", { actions: String(result.plan.actions ?? "-"), digest: result.plan.digest.slice(0, 12) }), { id: "run-plan" }));
   if (result.review !== null) {
     const review = el("div", undefined, { id: "run-review" });

@@ -14,7 +14,7 @@ export const MAX_LINE_CHARS = 8 * 1024 * 1024;
 export const MIN_NODE_MAJOR = 26;
 
 /** Calls the engine host answers. Each later unit adds the app layer functions it needs. */
-export const HOST_CALLS = ["doctor", "messages", "tree", "settings", "listModels", "selectModel", "startRun", "cancelRun", "listRuns", "revert", "plan", "applyPlan", "review", "changes", "report", "proposeSettings", "applySettings", "transport", "stateSummary", "previewCleanup", "applyCleanup", "reportMarkdown", "createSettings", "settingsSuggestions", "startTaskRun", "configFile", "runEvents", "checkPlan"] as const;
+export const HOST_CALLS = ["doctor", "messages", "tree", "settings", "listModels", "selectModel", "startRun", "cancelRun", "listRuns", "revert", "plan", "applyPlan", "review", "changes", "report", "proposeSettings", "applySettings", "transport", "stateSummary", "previewCleanup", "applyCleanup", "reportMarkdown", "createSettings", "settingsSuggestions", "startTaskRun", "configFile", "runEvents", "checkPlan", "answerQuestion"] as const;
 export type HostCall = (typeof HOST_CALLS)[number];
 
 export interface HostRequest {
@@ -77,7 +77,53 @@ export interface HostRunDone {
   readonly outcome: unknown;
 }
 
-export type HostRunMessage = HostRunEvents | HostRunDone;
+/**
+ * U-124 (3.6, DR-3, adapter-contract 5.9): the engine asks a person about a call a `confirm: true`
+ * rule allows. The engine's masked fields only: the executable (`subject`) and the number of
+ * arguments, never an argument. Only the command permission is asked; nothing else comes here.
+ */
+export interface PermissionQuestion {
+  readonly id: string;
+  readonly callId: string;
+  readonly tool: string;
+  readonly permission: "command";
+  readonly subject: string;
+  readonly argumentCount: number;
+}
+
+/** Host → main: a question of the run (the main process's OS dialog asks; the window cannot answer). */
+export interface HostQuestion {
+  readonly v: 1;
+  readonly type: "question";
+  readonly run: string;
+  readonly question: PermissionQuestion;
+}
+
+/** Host → main: the run's signal ended the question (cancelled, or its time is up); the dialog goes. */
+export interface HostQuestionEnded {
+  readonly v: 1;
+  readonly type: "questionEnded";
+  readonly run: string;
+  readonly id: string;
+}
+
+export const QUESTION_ID_PATTERN = /^q[1-9][0-9]{0,5}$/;
+export const MAX_QUESTION_SUBJECT_CHARS = 1000;
+const CALL_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const TOOL_NAME = /^[a-z][a-z_]{0,39}$/;
+/** Control, line, format, direction and invisible characters: a subject holding one is not asked about. */
+const HIDDEN_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/;
+
+/** A question as the host sends it, checked field by field; null when it does not fit. */
+export function parseQuestion(value: unknown): PermissionQuestion | null {
+  if (!isObj(value)) return null;
+  const { id, callId, tool, permission, subject, argumentCount } = value;
+  if (typeof id !== "string" || !QUESTION_ID_PATTERN.test(id) || typeof callId !== "string" || !CALL_ID.test(callId) || typeof tool !== "string" || !TOOL_NAME.test(tool)) return null;
+  if (permission !== "command" || typeof subject !== "string" || subject.length === 0 || subject.length > MAX_QUESTION_SUBJECT_CHARS || HIDDEN_CHARACTER.test(subject) || !isCount(argumentCount)) return null;
+  return { id, callId, tool, permission, subject, argumentCount };
+}
+
+export type HostRunMessage = HostRunEvents | HostRunDone | HostQuestion | HostQuestionEnded;
 export type HostMessage = HostReady | HostResponse | HostRunMessage;
 
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -157,6 +203,16 @@ export function parseHostMessage(line: string): HostMessage | null {
   if (value["type"] === "ready") {
     const node = value["node"];
     return typeof node === "string" && node.length > 0 && node.length <= 64 ? { v: 1, type: "ready", node } : null;
+  }
+  if (value["type"] === "question" || value["type"] === "questionEnded") {
+    const run = value["run"];
+    if (typeof run !== "string" || !RUN_TOKEN_PATTERN.test(run)) return null;
+    if (value["type"] === "questionEnded") {
+      const id = value["id"];
+      return typeof id === "string" && QUESTION_ID_PATTERN.test(id) ? { v: 1, type: "questionEnded", run, id } : null;
+    }
+    const question = parseQuestion(value["question"]);
+    return question === null ? null : { v: 1, type: "question", run, question };
   }
   if (value["type"] === "events" || value["type"] === "done") {
     const run = value["run"];

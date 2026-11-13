@@ -11,7 +11,10 @@
 
 import { IPC_EVENTS, toRunResultView } from "../shared/ipc.js";
 import type { RunDonePayload, RunEventsPayload } from "../shared/ipc.js";
-import type { HostRunMessage } from "../shared/protocol.js";
+import type { HostRunMessage, PermissionQuestion } from "../shared/protocol.js";
+
+/** U-124: an answer to a permission question; "dismissed" when nobody could answer (recorded as deny by default). */
+export type QuestionAnswer = "allow_once" | "deny" | "dismissed";
 
 export interface RunManagerDeps {
   /** Sends to the window (nothing when there is none). */
@@ -25,6 +28,14 @@ export interface RunManagerDeps {
    * and the shared catalog's word for its status, or null (3.6: the end notification).
    */
   readonly onEnded?: (runId: string, reason: string | null, status: string | null) => void;
+  /**
+   * U-124 (3.6, DR-3): asks the person about a question of the run (the OS dialog; the window cannot
+   * answer). `signal` aborts when the engine ended the question or the run ended. Absent: nobody is
+   * asked (dismissed).
+   */
+  readonly ask?: (question: PermissionQuestion, signal: AbortSignal) => Promise<QuestionAnswer>;
+  /** U-124: gives the engine host the answer to the run's question. */
+  readonly answer?: (token: string, id: string, decision: QuestionAnswer) => Promise<void>;
 }
 
 interface Active {
@@ -41,6 +52,8 @@ const EARLY_MESSAGES = 200;
 export class RunManager {
   private active: Active | null = null;
   private readonly early = new Map<string, HostRunMessage[]>();
+  /** U-124: the questions being asked, by id; aborting one closes its dialog. */
+  private readonly asking = new Map<string, AbortController>();
 
   constructor(private readonly deps: RunManagerDeps) {}
 
@@ -55,6 +68,35 @@ export class RunManager {
 
   get token(): string | null {
     return this.active?.token ?? null;
+  }
+
+  /** U-124: a question still open when the run ended is closed (the engine answered it already). */
+  private closeQuestions(): void {
+    for (const controller of this.asking.values()) controller.abort();
+    this.asking.clear();
+  }
+
+  /** U-124: asks, then answers (dismissed when nobody can ask or the asking failed); nothing when the engine ended the question. */
+  private async askQuestion(token: string, question: PermissionQuestion): Promise<void> {
+    const answer = this.deps.answer;
+    if (answer === undefined) return;
+    const controller = new AbortController();
+    this.asking.get(question.id)?.abort();
+    this.asking.set(question.id, controller);
+    let decision: QuestionAnswer = "dismissed";
+    try {
+      decision = this.deps.ask === undefined ? "dismissed" : await this.deps.ask(question, controller.signal);
+    } catch {
+      decision = "dismissed";
+    } finally {
+      if (this.asking.get(question.id) === controller) this.asking.delete(question.id);
+    }
+    if (controller.signal.aborted) return;
+    try {
+      await answer(token, question.id, decision);
+    } catch {
+      // The engine's own signal ends the question then (deny by default).
+    }
   }
 
   begin(token: string, runId: string): void {
@@ -84,11 +126,20 @@ export class RunManager {
       return;
     }
     if (message.run !== active.token) return;
+    if (message.type === "question") {
+      void this.askQuestion(active.token, message.question);
+      return;
+    }
+    if (message.type === "questionEnded") {
+      this.asking.get(message.id)?.abort();
+      return;
+    }
     if (message.type === "events") {
       this.deps.send(IPC_EVENTS.runEvents, { runId: active.runId, items: message.items, counts: message.counts });
       return;
     }
     this.active = null;
+    this.closeQuestions();
     this.deps.onChange?.(false);
     const checked = toRunResultView(message.outcome);
     let payload: RunDonePayload;
@@ -113,6 +164,7 @@ export class RunManager {
     const active = this.active;
     if (active === null) return;
     this.active = null;
+    this.closeQuestions();
     this.deps.onChange?.(false);
     this.deps.send(IPC_EVENTS.runDone, { runId: active.runId, ok: false, code: "adapter_host_exited" });
     this.deps.onEnded?.(active.runId, null, null);

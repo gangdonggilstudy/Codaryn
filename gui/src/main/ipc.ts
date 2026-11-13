@@ -7,6 +7,7 @@
 
 import { isAbsolute, join, relative } from "node:path";
 import { pathOnDisk } from "./on-disk.js";
+import { unnamedWidening } from "./dialog-texts.js";
 import { dialog, ipcMain } from "electron";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import {
@@ -475,6 +476,8 @@ export function registerIpc(deps: IpcDeps): void {
     const proposal = deps.settingsProposals.take(parsed.token);
     if (proposal === null) return { ok: false, code: "unknown_proposal" };
     const widens = proposal.widening.length > 0;
+    // U-124: a widening the dialog cannot name is not written (nobody could be told what it widens).
+    if (unnamedWidening(proposal.widening)) return { ok: false, code: "unknown_widening" };
     if (widens && !(await deps.confirmWidening(proposal))) return { ok: false, code: "not_confirmed" };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };

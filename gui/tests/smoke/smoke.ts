@@ -124,6 +124,9 @@ const notices: { readonly title: string; readonly body: string }[] = [];
 const openAnswers: (string | null)[] = [];
 /** U-62: what the app would have put on the clipboard (the OS clipboard is never touched by the test). */
 const copied: string[] = [];
+/** U-124: the permission questions the main process asked (the test answers for the OS dialog), and its answers. */
+const questionsSeen: { id: string; tool: string; permission: string; subject: string; argumentCount: number }[] = [];
+const permissionAnswers: ("allow_once" | "deny" | "dismissed")[] = [];
 /** U-123: run starts whose button was off when the test pressed it (diagnostic). */
 const startsBlocked: unknown[] = [];
 /** U-66: the paths "show in folder" would select (recorded, not the OS file manager). */
@@ -157,6 +160,10 @@ startGui({
   answerOpenDialog: async () => openAnswers.shift() ?? null,
   writeClipboard: (text) => {
     copied.push(text);
+  },
+  answerPermission: async (question) => {
+    questionsSeen.push({ id: question.id, tool: question.tool, permission: question.permission, subject: question.subject, argumentCount: question.argumentCount });
+    return permissionAnswers.shift() ?? "dismissed";
   },
   showItemInFolder: (path) => {
     revealed.push(path);
@@ -1155,6 +1162,25 @@ startGui({
         doctorAfter: await js("window.codaryn.doctor(null).then((r) => (r.ok ? 'ok' : r.code))"),
         again: await js("window.codaryn.restartEngine().then((r) => (r.ok ? 'restarted' : r.code))"),
       };
+
+      // U-124 (3.6, DR-3): a run with the profile "ask" calls the command its confirm rule asks about, twice;
+      // the main process asks (the test answers for the OS dialog): the first allowed once, the second denied.
+      results["permissionQuestion"] = await (async () => {
+        permissionAnswers.push("allow_once", "deny");
+        await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+        await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+        const before = await js("document.getElementById('run-result-id')?.textContent ?? null");
+        await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'ask'; const g = document.getElementById('task-goal'); g.value = 'ask before running'; document.getElementById('task-run').click(); return true; })()");
+        const ended = await waitFor(`(() => { const id = document.getElementById('run-result-id')?.textContent ?? null; return id !== null && id !== ${JSON.stringify(before)} ? id : null; })()`, 90_000);
+        const asked = join(SECOND, "asked.txt");
+        return {
+          questions: questionsSeen.map((q) => ({ id: q.id, tool: q.tool, permission: q.permission, subject: q.subject.split(/[\\/]/).pop(), argumentCount: q.argumentCount })),
+          ran: existsSync(asked) ? readFileSync(asked, "utf8") : null,
+          lines: await js("[...document.querySelectorAll('[id^=\"run-question-\"]')].map((p) => p.id)"),
+          pageCanAnswer: await js("Object.keys(window.codaryn).some((name) => /answer|permission|question/i.test(name))"),
+          ended: typeof ended === "string" && ended !== "timeout",
+        };
+      })();
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.

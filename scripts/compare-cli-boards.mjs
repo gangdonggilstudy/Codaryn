@@ -31,6 +31,12 @@
 //
 // U-167: a case's `api.models` makes the fake API list those models (GET /v1/models) for
 // `codaryn models`. A cleanup step's byte counts are normalized (normalize.mjs).
+//
+// U-313: file system faults, imitated (after ne-verify's U-312). A case's or a step's `fsFaults`
+// ({ noLinksUnder, failLockRemoval }, paths inside the case folder; a step's over its case's) runs that
+// step with scripts/compare-cli/fs-faults-preload.mjs loaded: hard links under the folder fail as on a
+// volume without them (an apply's moves are then unsafe, DR-21), and the lock file's removal fails (the
+// lock is left, U-220). The tool's own preload, so both builds get the same faults. The report says so.
 
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -46,6 +52,9 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STEP_TIMEOUT_MS = 120_000;
 const NET_GUARD_LOG = "net-guard.log";
 const TERMINAL_PRELOAD = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), "compare-cli", "terminal-preload.mjs")).href;
+/** U-313: the file system faults' preload, and the variable that gives it the faults (JSON, absolute paths). */
+const FS_FAULTS_PRELOAD = path.join(path.dirname(fileURLToPath(import.meta.url)), "compare-cli", "fs-faults-preload.mjs");
+const FS_FAULTS_VARIABLE = "CODARYN_CMP_FS_FAULTS";
 /** A question is taken as waiting once the output has stopped this long without a line end. */
 const QUESTION_IDLE_MS = 150;
 const CTRL_C = String.fromCharCode(3);
@@ -55,6 +64,9 @@ const KEY_VARIABLE = "ANTHROPIC_API_KEY";
 /** The note at the head of every report. */
 export const TERMINAL_NOTE =
   "Terminal cases (`terminal-*`) are an imitation: the CLI's streams are pipes whose `isTTY` a preload sets true, as the unit tests do; readline then reads keys as at a terminal (Ctrl+C is the byte 0x03). No console or pty is used, so what only a real terminal does (raw mode, window size, echo) is not compared.";
+/** U-313: the note on file system faults, at the head of every report. */
+export const FAULTS_NOTE =
+  "Steps marked `faults` are an imitation too: a preload makes hard links under a folder fail with ENOTSUP, as on a volume without hard links, or a lock file's removal fail with EPERM (as tests/support/fs-faults.ts does). No real FAT volume is used.";
 
 function git(args) {
   return execFileSync("git", ["-C", REPO, ...args], { encoding: "utf8" }).trim();
@@ -216,11 +228,21 @@ function filesOf(root) {
   return out;
 }
 
-/** How a step is shown in the report: its arguments, and for a terminal step the streams and answers. */
-function stepName(index, args, terminal, answers) {
+/** How a step is shown in the report: its arguments, for a terminal step the streams and answers, and its faults. */
+function stepName(index, args, terminal, answers, faults = null) {
   const shown = (answer) => (answer === CTRL_C ? "Ctrl+C" : JSON.stringify(answer));
   const typed = answers === undefined ? "" : ` answers [${answers.map(shown).join(", ")}]`;
-  return `step ${index + 1}: codaryn ${args.join(" ")}${terminal === undefined ? "" : ` [terminal: ${terminal}${typed}]`}`;
+  const faulted =
+    faults === null
+      ? ""
+      : ` [faults: ${[...(faults.noLinksUnder === undefined ? [] : [`no hard links under ${faults.noLinksUnder}`]), ...(faults.failLockRemoval === undefined ? [] : [`${faults.failLockRemoval} cannot be removed`])].join("; ")}]`;
+  return `step ${index + 1}: codaryn ${args.join(" ")}${terminal === undefined ? "" : ` [terminal: ${terminal}${typed}]`}${faulted}`;
+}
+
+/** U-313: a step's faults over its case's, or null when it has none. */
+function faultsOf(spec, step) {
+  const faults = { ...(spec.fsFaults ?? {}), ...(step.fsFaults ?? {}) };
+  return faults.noLinksUnder === undefined && faults.failLockRemoval === undefined ? null : faults;
 }
 
 /** Runs one case with one build in `caseDir` (made afresh). Returns its artifacts, in order. */
@@ -234,10 +256,25 @@ export async function runCase(board, spec, caseDir) {
     const artifacts = [];
     const ctx = { dir: caseDir, json: (index) => outputs[index]?.json ?? null };
     for (const [index, step] of spec.steps.entries()) {
-      const { args, lang, env, terminal, answers } = typeof step === "function" ? step(ctx) : step;
-      const imports = [...(board.guard === null ? [] : [board.guard]), ...(terminal === undefined ? [] : [fileURLToPath(TERMINAL_PRELOAD)])];
+      const given = typeof step === "function" ? step(ctx) : step;
+      const { args, lang, env, terminal, answers } = given;
+      const faults = faultsOf(spec, given);
+      const imports = [
+        ...(board.guard === null ? [] : [board.guard]),
+        ...(terminal === undefined ? [] : [fileURLToPath(TERMINAL_PRELOAD)]),
+        ...(faults === null ? [] : [FS_FAULTS_PRELOAD]),
+      ];
       const nodeArgs = [...imports.flatMap((file) => ["--import", pathToFileURL(file).href]), board.cli, ...args];
-      const stepEnv = { ...spec.env, ...env, ...(api === null ? {} : { [KEY_VARIABLE]: FAKE_API_KEY }), ...(terminal === undefined ? {} : { CODARYN_TEST_TERMINAL: terminal }) };
+      const faultsEnv =
+        faults === null
+          ? {}
+          : {
+              [FS_FAULTS_VARIABLE]: JSON.stringify({
+                ...(faults.noLinksUnder === undefined ? {} : { noLinksUnder: path.join(caseDir, faults.noLinksUnder) }),
+                ...(faults.failLockRemoval === undefined ? {} : { failLockRemoval: path.join(caseDir, faults.failLockRemoval) }),
+              }),
+            };
+      const stepEnv = { ...spec.env, ...env, ...(api === null ? {} : { [KEY_VARIABLE]: FAKE_API_KEY }), ...(terminal === undefined ? {} : { CODARYN_TEST_TERMINAL: terminal }), ...faultsEnv };
       const result = await exec(process.execPath, nodeArgs, {
         cwd: caseDir,
         env: environmentFor(caseDir, lang ?? spec.lang ?? "en", stepEnv),
@@ -245,7 +282,7 @@ export async function runCase(board, spec, caseDir) {
       });
       const stdout = result.stdout.toString("utf8");
       outputs.push({ json: lastJson(stdout) });
-      const name = stepName(index, args, terminal, answers);
+      const name = stepName(index, args, terminal, answers, faults);
       artifacts.push({ key: `${name} | exit`, text: `${result.code}${result.signal === null ? "" : ` (${result.signal})`}` });
       artifacts.push({ key: `${name} | stdout`, text: text(result.stdout) });
       artifacts.push({ key: `${name} | stderr`, text: text(result.stderr) });
@@ -314,6 +351,7 @@ export function reportOf({ base, head, results }) {
   out.push(`- base: \`${base.commit}\``, `- head: \`${head.commit}\``);
   out.push(`- cases: ${results.length}, with differences: ${differing.length}`, "");
   out.push(`> ${TERMINAL_NOTE}`, "");
+  out.push(`> ${FAULTS_NOTE}`, "");
   out.push("| case | artifacts | result |", "| --- | --- | --- |");
   for (const result of results) {
     const state = result.fence.length > 0 ? "NETWORK ATTEMPT" : result.differences.length === 0 ? "same" : `${result.differences.length} differing`;

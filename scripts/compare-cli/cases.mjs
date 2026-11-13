@@ -261,6 +261,14 @@ function lockHeld(dir) {
 function lockTaken(dir) {
   rmSync(path.join(dir, "work", ".codaryn", "lock.json"), { force: true });
 }
+/**
+ * U-313: the file system faults of the consent and lock-left cases (scripts/compare-cli-boards.mjs
+ * fsFaults): no hard links in the workspace, as on a FAT volume; the workspace lock cannot be removed.
+ */
+const NO_LINKS = { noLinksUnder: "work" };
+const LOCK_STAYS = { failLockRemoval: "work/.codaryn/lock.json" };
+/** U-313: a run plan applied with another task than the plan run's (another id, the same workflow). */
+const OTHER_RUN_PLAN_TASK = ["--task", "other-task.json", "--config", "config.json"];
 const NOT_RUN_PLAN_CONFIG = { schemaVersion: 1, workflows: { rewrite: { tools: ["read_file", "search_files", "write_file", "propose_changes"] } } };
 
 /** C-9a (nc-human's report 2.5): runs of every kind for `runs` and for the revert of a plan run. */
@@ -1219,4 +1227,66 @@ export const CASES = [
     setup: planSetup,
     steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx), "--allow-unsafe-move"] }), report("latest", "--json")],
   })),
+  // U-313 (the CLI migration's C-7b, the app's apply life; its first commit): DR-21's consent to unsafe
+  // moves needs a volume without hard links, which the tool's fsFaults imitate (after ne-verify's
+  // U-312): the consent question at a terminal (yes and no, English and Korean: the first apply's
+  // summary, the question, the second apply), --digest alone (consent_required, nothing asked) and the
+  // consent argument where a move needs it; a lock the apply cannot release (U-220: its summary's line,
+  // the result kept); and a run plan's other-task notice, which handoff-other-task does not reach: in its
+  // question, before its run, and when its run is refused after the approval (a held lock).
+  ...["", "-ko"].flatMap((suffix) => [
+    {
+      name: `terminal-apply-unsafe-yes${suffix}`,
+      ...(suffix === "-ko" ? { lang: "ko" } : {}),
+      fsFaults: NO_LINKS,
+      setup: planSetup,
+      steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["y", "y"] }), report("latest")],
+    },
+    {
+      name: `terminal-apply-unsafe-no${suffix}`,
+      ...(suffix === "-ko" ? { lang: "ko" } : {}),
+      fsFaults: NO_LINKS,
+      setup: planSetup,
+      steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["y", "n"] }), runs()],
+    },
+    {
+      name: `apply-lock-left${suffix}`,
+      ...(suffix === "-ko" ? { lang: "ko" } : {}),
+      setup: planSetup,
+      steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)], fsFaults: LOCK_STAYS }), runs()],
+    },
+  ]),
+  {
+    name: "apply-unsafe-digest",
+    fsFaults: NO_LINKS,
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }), runs()],
+  },
+  {
+    name: "apply-unsafe-flag-needed",
+    fsFaults: NO_LINKS,
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx), "--allow-unsafe-move"] }), report("latest", "--json")],
+  },
+  {
+    name: "handoff-other-task-run-plan",
+    setup: (dir) => {
+      runPlanSetup(dir);
+      write(dir, "other-task.json", task({ id: "compare-run-plan-other", workflowRef: "rewrite", goal: "Write a summary of notes.md into summary.md." }));
+    },
+    steps: [
+      run("--config", "config.json"),
+      (ctx) => ({ args: ["apply", ...OTHER_RUN_PLAN_TASK, "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["n"] }),
+      (ctx) => {
+        carryingScript(ctx.dir);
+        lockHeld(ctx.dir);
+        return { args: ["apply", ...OTHER_RUN_PLAN_TASK, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      (ctx) => {
+        lockTaken(ctx.dir);
+        return { args: ["apply", ...OTHER_RUN_PLAN_TASK, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      report("latest"),
+    ],
+  },
 ];

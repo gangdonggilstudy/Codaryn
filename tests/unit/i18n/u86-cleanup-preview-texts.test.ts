@@ -115,6 +115,7 @@ describe("U-86: the cleanup preview grouped by what must be given", () => {
 
   test("the summary counts the discarded-files folders whose run has no records left, and says no revert can put them back", () => {
     assert.match(MESSAGE_TEXTS.en["cleanup.summary.discarded_without_records"], /: \{count\} \(\{bytes\} bytes\)\. No revert can put those files back\.$/);
-    assert.match(MESSAGE_TEXTS.ko["cleanup.summary.discarded_without_records"], /: \{count\}개\(\{bytes\}바이트\)\. 어떤 되돌리기로도 그 파일을 제자리에 돌려놓을 수 없습니다\.$/);
+    // U-136: shortened to fit 100 columns with its values.
+    assert.match(MESSAGE_TEXTS.ko["cleanup.summary.discarded_without_records"], /: \{count\}개\(\{bytes\}바이트\)\. 어떤 되돌리기로도 되살릴 수 없습니다\.$/);
   });
 });

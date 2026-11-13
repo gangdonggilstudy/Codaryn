@@ -2,7 +2,7 @@
  * U-170 (DR-69, P1 bundle B, proposal B-1 to B-8): the contract of plan mode `run`, before anything
  * carries it out. writablePaths: g-u170-writable-paths.test.ts.
  * - PLAN_MODES has `run`; `propose_changes` has its arguments, descriptor (`endsRun: "plan"`,
- *   `planMode: "run"`) and definition, and is not a task type tool yet (B-3 adds it to the lists).
+ *   `planMode: "run"`) and definition. U-180 (B-3) made it a task type tool.
  * - plan.json of a `run` plan is `kind: "changes"`: files, their hashes and the summary as visible
  *   parts. At most MAX_PLANNED_FILES (100) files, files only.
  * - plannedFileStale is B-6's one rule; the later run ends as the existing `plan_stale`.
@@ -89,10 +89,10 @@ describe("U-170: propose_changes", () => {
     }
   });
 
-  test("not a task type tool yet: no task can list it before B-3 carries it out", () => {
-    assert.equal((WORKFLOW_TOOL_NAMES as readonly string[]).includes(PROPOSE_CHANGES_TOOL_NAME), false);
-    assert.equal((ALL_TOOL_NAMES as readonly string[]).includes(PROPOSE_CHANGES_TOOL_NAME), false);
-    assert.equal(Object.hasOwn(ALL_TOOL_DESCRIPTORS, PROPOSE_CHANGES_TOOL_NAME), false);
+  test("U-180 (B-3): a task type tool now, with the same descriptor as fixed before", () => {
+    assert.equal((WORKFLOW_TOOL_NAMES as readonly string[]).includes(PROPOSE_CHANGES_TOOL_NAME), true);
+    assert.equal((ALL_TOOL_NAMES as readonly string[]).includes(PROPOSE_CHANGES_TOOL_NAME), true);
+    assert.equal(ALL_TOOL_DESCRIPTORS[PROPOSE_CHANGES_TOOL_NAME], PROPOSE_CHANGES_DESCRIPTOR);
   });
 
   test("its schema: a summary as long as propose_plan's, 1 to 100 files, each a path and create or modify", () => {

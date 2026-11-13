@@ -16,8 +16,9 @@
  * stage 4: LEGACY_WORKFLOW_SETTINGS (the four built-in tools, no instructions, no plan, verifiers
  * decide).
  *
- * P1 (named here only, not part of this contract): `writablePaths` and `unreadablePaths` in the
- * policy, the `query_table` tool, Markdown file rules, the `analyze-private` definition.
+ * P1: `writablePaths` is a policy field of this contract (task.ts, U-170; DR-69 B-4) and plan mode
+ * `run` a plan mode (plan.ts). Named here only, not yet part of it: `unreadablePaths`, the
+ * `query_table` tool, Markdown file rules, the `analyze-private` definition.
  */
 
 import type { PlanActionKind, PlanMode } from "./plan.js";
@@ -314,9 +315,13 @@ export interface WorkflowDefinition {
  * Why a task type cannot be resolved (`invalid_task` or `invalid_config`; the message names the
  * field position, never a value).
  * - unknown_workflow: `workflowRef` names no built-in and no config entry
- * - tool_not_allowed: a task lists a tool its definition does not list (tools only narrow)
+ * - tool_not_allowed: a task lists a tool its definition does not list (tools only narrow). U-180
+ *   (R-99 L-2): also a plan tool of another plan mode than the resolved one (ToolDescriptor.planMode:
+ *   `propose_plan` under "run", `propose_changes` under "apply"), in the definition's tools or the
+ *   task's; the field names its place. Such a tool would never be offered.
  * - plan_weakened: a task sets `plan: "none"` under a definition with `plan: "apply"`, or (U-170,
- *   B-1) with `plan: "run"`
+ *   B-1) with `plan: "run"`. U-180 (R-99 L-2): also a task that changes a definition's "apply" to
+ *   "run" or "run" to "apply": a task may only keep the definition's plan mode, or set one under "none"
  * - commands_not_allowed: command rules under `allowCommands: false`
  * - review_without_checklist, checklist_without_review: humanReview and completion disagree
  * - instructions_too_long, checklist_too_long: over the MAX_ constants above

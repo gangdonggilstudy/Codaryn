@@ -32,9 +32,9 @@
  * who can write the workspace's state directory (allowed commands can, T-11).
  *
  * P1 (DR-69, proposal B-1 to B-8): plan mode "run": a person approves the files a model may write,
- * then a later model run writes those files only. Its contract starts at PLANNED_FILE_CHANGES. It
- * is not carried out yet: no tool stores such a plan and nothing reads one
- * (PROPOSE_CHANGES_TOOL_NAME, tool.ts).
+ * then a later model run writes those files only. Its contract starts at PLANNED_FILE_CHANGES.
+ * U-180 (B-3): the `propose_changes` tool stores such a plan (PlanRecorder.saveChangesPlan); the
+ * run that carries one out follows with the next unit, and the CLI and the app with B-4.
  */
 
 import type { Clock, RunReason, RunReasonByStatus, RunUsage, TerminalRunStatus } from "./engine.js";
@@ -45,6 +45,7 @@ import type { PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
 import { PRIVACY_TOKEN_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, MaskedText } from "./text.js";
+import type { WritablePathSet } from "./task.js";
 import type { ToolDescriptor } from "./tool.js";
 import type { Workspace } from "./workspace.js";
 import type { InventoryChecker, InventoryManifest, VerifierConfig, VerifierResult, VerifierRunner } from "./verify.js";
@@ -54,8 +55,8 @@ import type { InventoryChecker, InventoryManifest, VerifierConfig, VerifierResul
  * moves and discards that an apply run carries out without a model (above). `run` (P1, DR-69,
  * B-1): a person approves the files a model may write (StoredChangesPlan), and a later model run
  * writes those files only. A plan run offers the read tools and its own mode's plan tool
- * (ToolDescriptor.planMode). Until `propose_changes` is offered (B-3), a `run` plan run has no plan
- * tool: it reads, ends without a plan (`failed`/`model_error`) and writes nothing.
+ * (ToolDescriptor.planMode): `propose_changes` (U-180, B-3) for `run`. A plan run whose task does
+ * not list it reads, ends without a plan (`failed`/`model_error`) and writes nothing.
  */
 export const PLAN_MODES = ["none", "apply", "run"] as const;
 export type PlanMode = (typeof PLAN_MODES)[number];
@@ -320,8 +321,10 @@ export interface PlanRecorder {
    * `files` as given), with savePlan's rules: created exclusively, resolved with the SHA-256 of the
    * bytes written, rejected when the file exists or cannot be written, no hard links needed. The
    * `propose_changes` tool builds every `shown` and the summary's visible parts with the run's own
-   * gateway. Optional until the store has it (B-3): a recorder without it stores no `run` plan, and
-   * the tool then fails with `io_error`, as without a recorder.
+   * gateway, the summary made safe with safeModelText first (V-7 M-1). U-181 (store): the store's
+   * recorders have it. It stays optional in the contract for other recorders (test doubles): a
+   * recorder without it stores no `run` plan, and the tool then fails with `io_error`, as without
+   * a recorder.
    */
   saveChangesPlan?(plan: { readonly summary: MaskedParts; readonly files: readonly StoredPlannedFile[] }): Promise<ContentHash>;
 }
@@ -374,7 +377,9 @@ export type LoadPlan = (request: LoadPlanRequest) => Promise<LoadPlanOutcome>;
  * the same codes and checks, and a `kind: "changes"` plan.json is read with its own exact keys
  * (StoredChangesPlan; each file's path passes the same lexical rules as an action's, DR-24 (d)).
  * LoadPlan keeps answering `invalid_run_record` for a `run` plan, so `plan` and `apply`, which use
- * it, are as before until they choose by kind (B-4). Not exported by the store yet (B-3).
+ * it, are as before until they choose by kind (B-4). U-181: exported by the store (`loadAnyPlan`),
+ * which also refuses a plan whose kind is not the one the plan run's result names
+ * (EngineResult.plan.kind "changes" for a `run` plan).
  */
 export type LoadAnyPlan = (request: LoadPlanRequest) => Promise<LoadPlanOutcome<AnyStoredPlan>>;
 
@@ -477,12 +482,14 @@ export type StoredPlannedFile = ResolvedPlannedFile & { readonly shown: MaskedPa
  * B-1: plan.json of a `run` plan: the same file name, digest rule (the SHA-256 of its bytes) and
  * exclusive write as StoredPlan, under the same DR-5 rule: files, their hashes and the summary,
  * nothing that decides how the later run runs (its policy, limits, verifiers and secrets come from
- * the user's settings and the task at that time). `summary` is the summary as the plan run masked
- * it, as visible parts (MaskedParts: no privacy token, no secret value); the later run masks it
- * again before sending it (B-3). R-99 L-1: the summary under the digest differs from the proposal's
- * B-2 (paths and hashes only); the PM accepted it as the safer side. Not written or read yet:
- * LoadPlan takes `kind: "plan"` only and answers `invalid_run_record` for this kind; LoadAnyPlan
- * (B-3) reads both.
+ * the user's settings and the task at that time). `summary` is the summary as the plan run made it
+ * safe (safeModelText, review V-7 M-1: control and invisible characters left out, registered values
+ * masked, key shapes hidden as HIDDEN_KEY_MARKER), as visible parts (MaskedParts: no privacy token,
+ * no secret value, no key shape); the later run masks it again before sending it (B-3). R-99 L-1:
+ * the summary under the digest differs from the proposal's B-2 (paths and hashes only); the PM
+ * accepted it as the safer side. U-181: the store writes it (PlanRecorder.saveChangesPlan) and
+ * reads it with LoadAnyPlan; LoadPlan still takes `kind: "plan"` only and answers
+ * `invalid_run_record` for this kind.
  */
 export interface StoredChangesPlan {
   readonly schemaVersion: 1;
@@ -524,6 +531,54 @@ export type PlannedFileNow =
 export function plannedFileStale(file: ResolvedPlannedFile, now: PlannedFileNow): boolean {
   if (file.change === "create") return now.kind !== "missing";
   return now.kind !== "file" || now.sha256 !== file.sha256;
+}
+
+/**
+ * U-187 (DR-69 B-6): what the workspace holds at a planned file's path now, for the check before a
+ * run carries the plan out. For `create`: `missing` while nothing is at the path and its existing
+ * parents are folders, `other` for anything else (a dangling link too). For `modify`: `file` with its
+ * SHA-256 when the path names a regular file (its last name not a link), `missing` when it is gone,
+ * `other` otherwise. A check that cannot be made answers `other`, which plannedFileStale takes as
+ * stale (fail closed). tools' `createPlannedFileProbe` makes it for a workspace.
+ */
+export type PlannedFileProbe = (file: ResolvedPlannedFile, signal: AbortSignal) => Promise<PlannedFileNow>;
+
+/**
+ * U-187 (DR-69 B-3, B-6, B-7): an approved `run` plan as the engine carries it out
+ * (RunApprovedPlan, engine.ts). The caller (B-4: the CLI's and the app's `apply`) loaded it with
+ * LoadAnyPlan, checked that the person approved this digest (DR-1) and resolved the task to
+ * `plan: "run"`, as an apply run's caller does for `apply`.
+ */
+export interface ApprovedChangesPlan {
+  readonly planRunId: string;
+  /** The approved digest, the SHA-256 of the bytes `plan` was read from. */
+  readonly digest: ContentHash;
+  readonly approval: ApprovalChannel;
+  readonly plan: StoredChangesPlan;
+  readonly fileNow: PlannedFileProbe;
+  /**
+   * As ApplyDeps.markApplied: writes PLAN_APPLIED_FILE_NAME exclusively; "already_applied" when it
+   * exists. U-181: RunRecorders.markApplied of this run's recorders (made with
+   * RunRecordersOptions.planRunId), whose state guard knows that write.
+   */
+  markApplied(): Promise<"marked" | "already_applied">;
+  /**
+   * U-187 (U-181's handoff), as ApplyDeps.planRecordsUnchecked: whether a run since the plan could
+   * not check the state directory (the store's StateUncheckedSince for `planRunId`, with this run as
+   * the apply run). True, or a question that cannot be answered, adds a notice once; the run goes
+   * on. Asked once, after the claim. Absent: not asked.
+   */
+  readonly planRecordsUnchecked?: () => Promise<boolean>;
+}
+
+/**
+ * U-187 (DR-69 B-4, B-5): the writable lists of a run that carries out `plan`: the task's lists
+ * (ResolvedTaskSpec.writablePathSets), then the plan's files as one more list (source `plan`, each
+ * entry exactly that file), so a write must be both a planned file and inside every policy list.
+ * Pure.
+ */
+export function approvedPlanWritablePathSets(sets: readonly WritablePathSet[] | undefined, plan: StoredChangesPlan): readonly WritablePathSet[] {
+  return [...(sets ?? []), { source: "plan", entries: plan.files.map((file) => file.path) }];
 }
 
 /**

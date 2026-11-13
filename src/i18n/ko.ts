@@ -587,6 +587,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.run_command": "명령 실행",
   "tool.inspect_files": "파일 목록 보기",
   "tool.propose_plan": "계획 제안",
+  // U-180 (DR-69 B-3), nb-i18n 이 다듬을 초안.
+  "tool.propose_changes": "바꿀 파일 제안",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

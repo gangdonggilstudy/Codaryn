@@ -88,7 +88,9 @@ export interface ResolvedTaskSpec extends TaskSpec {
    * order, each source once: a file tool may write a path only when every list covers it (the
    * intersection, PolicyConfig.writablePaths). Absent or empty: no such limit. The policy gate
    * judges it (PolicyGateOptions.writablePathSets), never the merged `policy.writablePaths`:
-   * mergeWorkflowPolicy does not combine the lists. Not set yet: the CLI and the app set it with B-4.
+   * mergeWorkflowPolicy does not combine the lists. U-182 (B-4): the CLI builds them from each
+   * source (src/cli/writable.ts); the app layer follows. A run that carries out an approved `run`
+   * plan adds the plan's files as one more list (approvedPlanWritablePathSets, U-187).
    */
   readonly writablePathSets?: readonly WritablePathSet[];
 }
@@ -184,7 +186,10 @@ export interface PolicyConfig {
    * else. The format, the matching and the platform rules are protectedPaths' (checkProtectedPaths;
    * whole `/` separated segments, an entry covers itself and everything below it; judged on the
    * text, then on the real path, and an entry that is a link covers its real path; on Windows
-   * ignoring case). It is an allow list, so an unusable entry covers nothing (fail closed).
+   * ignoring case). It is an allow list and fails closed (review R-101 L-1): a list the format rule
+   * rejects covers nothing as a whole, and an entry whose real path is outside the workspace, a
+   * dangling link or not found (V-3 M-1: an entry allows only once its real path was found) covers
+   * nothing on its own. A path that does not exist yet (a file to create) resolves as usual.
    * - Absent: no such limit. Present and empty: no file tool may write.
    * - Only narrows: each source that states it (the config file, the applied profile, the task type
    *   definition, the task file) is one more list, and a write must be covered by every list
@@ -192,8 +197,12 @@ export interface PolicyConfig {
    * - Protected paths and the other denials still apply under it.
    * - It guards the file tools only (B-8): a command the policy allows can write wherever it can.
    * - U-175 (B-2): the gate judges the lists it is given (PolicyGateOptions.writablePathSets,
-   *   `path_not_writable`). The parsers still refuse the field (`unknown_field`) and nothing builds
-   *   the lists until the CLI and the app (B-4).
+   *   `path_not_writable`). U-182 (B-4): the CLI's parsers take the field and the CLI builds the
+   *   lists; the app layer follows.
+   * - Every write path is under the lists (PM, U-187, on na-core U-182's question): a file tool's
+   *   write, each file a plan proposes (PLANNED_FILE_DESCRIPTOR), each action of a plan of mode
+   *   apply when it is proposed and when it is applied (PLAN_ACTION_DESCRIPTORS). So proposing or
+   *   applying a plan that touches a path outside them fails closed, as a write there would.
    */
   readonly writablePaths?: readonly string[];
 }

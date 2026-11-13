@@ -24,7 +24,9 @@
  * - R-81 L1: before it checks, under the lock, it removes every probe name it finds in the state
  *   directory and the plan's source folders. A check or an apply probes only under this lock, so
  *   such a name is a probe an ended process left (between making and removing it), or one an
- *   earlier check told as left. Removed ones are told (`probesRemoved`), the rest in `probesLeft`.
+ *   earlier check told as left. Only a second name of another file (nlink 2 or more) is removed; a
+ *   file of that name that is the only name of its content is kept. Removed ones are told
+ *   (`probesRemoved`), the rest in `probesLeft`.
  * - Nothing is moved, recorded or claimed: no run directory, journal, plan_checked record or
  *   applied mark. The result holds indexes, codes, counts and the digest only; it is no consent
  *   (DR-21) and no promise: the apply checks again.
@@ -114,7 +116,12 @@ async function present(file: string): Promise<boolean> {
   }
 }
 
-/** Removes the probes that are plain files; how many were removed and how many are still there. */
+/**
+ * Removes the probes; how many were removed and how many are still there. A probe is always a second
+ * name of another file, so only a plain file with two names or more (nlink) is removed. A file of a
+ * probe name that is the only name of its content (nlink 1) is never removed, as its content would be
+ * gone with it (a check never takes away a person's content): it counts as left.
+ */
 async function removeProbes(probes: Iterable<string>, operations: ApplyCheckOperations): Promise<{ removed: number; left: number }> {
   let removed = 0;
   let left = 0;
@@ -123,7 +130,7 @@ async function removeProbes(probes: Iterable<string>, operations: ApplyCheckOper
     try {
       const info = await lstat(probe);
       file = info.isFile() && !info.isSymbolicLink();
-      if (file) await (operations.removeProbe ?? unlink)(probe);
+      if (file && info.nlink >= 2) await (operations.removeProbe ?? unlink)(probe);
     } catch {
       // Counted below when it is still there.
     }

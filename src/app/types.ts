@@ -706,7 +706,11 @@ export interface PlanCheck {
   readonly inventoryLimitReached: boolean;
   /** Hard link probes this check could not take back (normally 0), earlier ones it found included: each is a second name of a source file. */
   readonly probesLeft: number;
-  /** R-81 L1: probes an ended check or apply had left (in the state directory or the plan's source folders), removed by this check. */
+  /**
+   * R-81 L1: probes an ended check or apply had left (in the state directory or the plan's source
+   * folders), removed by this check. Only a second name of another file (nlink 2 or more) is removed;
+   * a file of a probe name that is the only name of its content is kept and counted in `probesLeft`.
+   */
   readonly probesRemoved: number;
   /** True when the workspace lock this check took could not be released: runs are refused until it is. */
   readonly lockLeft: boolean;

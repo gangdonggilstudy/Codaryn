@@ -6,7 +6,7 @@
  * check or apply is probing this workspace), removes every probe name it finds in the state
  * directory and in the plan's source folders before it checks, and tells how many it removed
  * (`probesRemoved`) and how many it could not (in `probesLeft`).
- * Reproduced first (3ac88e1, todo until fixed). Scripted model, temporary folders, fake values only. Every
+ * Reproduced first (3ac88e1, and 3b3309c for a file that is the only name of its content; todo until fixed). Scripted model, temporary folders, fake values only. Every
  * probe a test leaves is taken back by the test.
  */
 
@@ -69,7 +69,7 @@ describe("R-81 L1: a probe an earlier check or apply left is removed by the next
       for (const probe of await probes(work)) await rm(probe);
     }
   });
-  test("a check never takes away a person's content: a file of that name that is the only name of its content stays, told in probesLeft", { todo: "PM after e3444d2: a probe-named file with one link is removed" }, async () => {
+  test("a check never takes away a person's content: a file of that name that is the only name of its content stays, told in probesLeft", async () => {
     const { base, app, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     // A probe is always a second name of another file (nlink 2 or more). These two are not:

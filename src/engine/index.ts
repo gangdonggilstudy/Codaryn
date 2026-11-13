@@ -386,11 +386,12 @@ function isProposedPlan(payload: unknown): payload is { readonly digest: Content
 
 /**
  * U-187 (B-3): the approved plan as the system text gives it: the label, the fixed lines, each file
- * with its change, and the summary's visible parts joined with the gap marker.
+ * with its change, and the summary (`summary`: its visible parts joined with the gap marker, made
+ * safe by the caller).
  */
-function approvedPlanText(plan: StoredChangesPlan): string {
+function approvedPlanText(plan: StoredChangesPlan, summary: string): string {
   const files = plan.files.map((file) => `- ${file.change} ${file.path}`).join("\n");
-  return `${APPROVED_PLAN_LABEL}\n${APPROVED_PLAN_INTRO}\n${files}\n${APPROVED_SUMMARY_LABEL}\n${plan.summary.join(APPROVED_SUMMARY_GAP)}`;
+  return `${APPROVED_PLAN_LABEL}\n${APPROVED_PLAN_INTRO}\n${files}\n${APPROVED_SUMMARY_LABEL}\n${summary}`;
 }
 
 /** U-180: what `propose_changes` returns when it stored the plan (ProposeChangesPayload). */
@@ -1294,8 +1295,15 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
       instructions === null || instructions.trim().length === 0
         ? SYSTEM_PROMPT
         : `${SYSTEM_PROMPT}\n\n${INSTRUCTIONS_LABEL}\n${instructions}`;
-    // U-187 (B-3): the approved plan follows, masked with the rest by this run's gateway.
-    const systemText = approved === null ? baseText : `${baseText}\n\n${approvedPlanText(approved.plan)}`;
+    // U-187 (B-3): the approved plan follows, masked with the rest by this run's gateway. Review
+    // V-7 M-1: its summary made safe once more as the last message is (safeModelText: key shapes
+    // hidden too), whatever the stored plan holds; masking that fails ends the run (fail closed).
+    let systemText = baseText;
+    if (approved !== null) {
+      const summary = safeModelText(approved.plan.summary.join(APPROVED_SUMMARY_GAP), (text) => privacy.mask(text));
+      if (summary === null) return MASKING_FAILED;
+      systemText = `${baseText}\n\n${approvedPlanText(approved.plan, summary)}`;
+    }
     const system = mask(systemText);
     const goal = mask(task.goal);
     const workflow = mask(task.workflow);

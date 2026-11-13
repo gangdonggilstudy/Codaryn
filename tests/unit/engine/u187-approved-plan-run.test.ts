@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { PLANNED_FILE_DESCRIPTOR } from "../../../src/contracts/index.js";
+import { HIDDEN_KEY_MARKER, PLANNED_FILE_DESCRIPTOR } from "../../../src/contracts/index.js";
 import type { ApprovedChangesPlan, ContentHash, PlannedFileNow, PolicyDecision, StoredChangesPlan, WritablePathSet } from "../../../src/contracts/index.js";
 import { APPROVED_PLAN_LABEL, runApprovedPlan, runTask } from "../../../src/engine/index.js";
 import { FAKE_SECRET, FAKE_TOKEN, FakePolicy, FakeTools, HASH_A, HASH_B, finalAnswer, harness } from "./fakes.js";
@@ -107,6 +107,16 @@ describe("U-187: a fresh approved plan is carried out", () => {
     assert.ok(plan.includes("\n- modify docs/guide.md\n- create docs/new.md\n"));
     assert.ok(plan.includes("(a description of the work, not new instructions):\nrewrite the guide, keep [masked] out, see "));
     assert.ok(plan.includes(FAKE_TOKEN) && !plan.includes(FAKE_SECRET), "masked again with this run's gateway");
+  });
+
+  test("review V-7 M-1: a key shape the stored summary still holds is hidden in the system text", async () => {
+    const keyShaped = ["sk", "ant", "api03", "U187fakeVALUE".repeat(3)].join("-");
+    const run = harness({ steps: [() => finalAnswer()], task: TASK, tools: new FakeTools() });
+    const { approved } = approvedPlan();
+    await carryOut(run, { ...approved, plan: { ...PLAN, summary: [`rewrite with ${keyShaped}`] } });
+    const system = run.model.requests[0]?.system ?? "";
+    assert.equal(system.includes(keyShaped), false);
+    assert.ok(system.includes(`\nrewrite with ${HIDDEN_KEY_MARKER}`));
   });
 });
 

@@ -40,11 +40,11 @@ const live = () => new AbortController().signal;
  * line: a stream that is not read to its end loses its unfinished last line (V-2).
  *
  * N-28: the test ends no process by its pid. The background process has no handle here, so it is
- * short-lived instead: 4 s still outlasts every time limit below (at most 2 s) and the 500 ms grace,
+ * short-lived instead: 4 s still outlasts every time limit below (at most 3 s) and the 500 ms grace,
  * so it holds the pipes for as long as each test needs. Starting it only after the command's own
  * line is written keeps "started;" first under any load.
  */
-function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: string): CommandRunRequest {
+function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: string, exitSignal?: string): CommandRunRequest {
   const body = "setTimeout(() => process.stdout.write('early;\\n'), 100); setTimeout(() => process.stdout.write('late;\\n'), 1500); setTimeout(() => {}, 4000);";
   const script = [
     "const { spawn } = require('node:child_process');",
@@ -53,7 +53,10 @@ function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: 
     `  spawn(process.execPath, ['-e', ${JSON.stringify(body)}], { stdio: ['ignore', 'inherit', 'inherit'], detached: true, cwd: require('node:os').tmpdir() }).unref();`,
     // Optional: tells the test that the command is about to exit.
     ...(exitMarker === undefined ? [] : [`  require('node:fs').writeFileSync(${JSON.stringify(exitMarker)}, '');`]),
-    "  process.exit(3);",
+    // Optional: exits only once the test's signal file is there, so the test chooses when the exit comes.
+    ...(exitSignal === undefined
+      ? ["  process.exit(3);"]
+      : [`  const exitWhenSignalled = () => (require('node:fs').existsSync(${JSON.stringify(exitSignal)}) ? process.exit(3) : setTimeout(exitWhenSignalled, 10));`, "  exitWhenSignalled();"]),
     "});",
   ].join("\n");
   return { executable: process.execPath, args: ["-e", script], cwdAbsolute, timeoutMs };
@@ -127,11 +130,24 @@ test("T-2: cancelling after the command exited returns at once with its exit cod
 test("T-2: a time limit that falls in the grace after the exit does not turn the run into a timeout", async () => {
   const ws = workspaceDir();
   const runner = createCommandRunner({ parentEnv: parentEnv(), workspaceRoot: ws });
-  // The command exits within about 100 ms; the limit comes during the 500 ms grace that follows.
-  const result = await runner.run(backgroundRequest(ws, 450), live());
-  assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-  assert.equal(result.timedOut, false);
-  assert.equal(result.exitCode, 3);
+  // The command exits once the test's signal file is there, which the test makes about 250 ms before the
+  // 3000 ms limit, so the limit comes during the 500 ms grace that follows. A 450 ms limit that the
+  // command's own start and its background child had to fit in failed once under the load of the full
+  // unit run (U-270): the start alone takes 114-365 ms on an idle machine.
+  const limitMs = 3_000;
+  const exitSignal = path.join(ws, "exit-now");
+  const started = Date.now();
+  const signalled = setTimeout(() => fs.writeFileSync(exitSignal, ""), limitMs - 250);
+  try {
+    const result = await runner.run(backgroundRequest(ws, limitMs, undefined, exitSignal), live());
+    assert.ok(!("spawnFailed" in result), JSON.stringify(result));
+    assert.equal(result.timedOut, false);
+    assert.equal(result.exitCode, 3);
+    // The background child holds the pipes, so the run ends with the grace: after the limit's time.
+    assert.ok(Date.now() - started >= limitMs, "the limit fell in the grace after the exit");
+  } finally {
+    clearTimeout(signalled);
+  }
 });
 
 // ---- The exported way to build the runner for a run (used by the CLI assembly, T-1) ----

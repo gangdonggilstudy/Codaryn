@@ -19,7 +19,7 @@
  * resolution refuses first, A-6).
  */
 
-import { BUILTIN_TOOLS, PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE } from "../contracts/index.js";
+import { BUILTIN_TOOLS, PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, unreadablePathsOf } from "../contracts/index.js";
 import type {
   CommandRule,
   CreatePolicyGate,
@@ -142,13 +142,20 @@ function compileWritablePathSets(sets: readonly WritablePathSet[] | undefined): 
   );
 }
 
-export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writablePathSets }) => {
+export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writablePathSets, unreadablePaths }) => {
   const tokenLike = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
   // Only the config decides what is protected. Writes are denied; reads and `cwd` are not.
   const protectedPaths = compileProtectedPaths(config.protectedPaths);
   // U-203 (R-1, R-3): unreadable paths; present at all (even unusable), no command may run (R-5).
-  const unreadable = compilePathSet(config.unreadablePaths, { match: "prefix", onUnusable: "covers" });
-  const unreadablePresent = config.unreadablePaths !== undefined && !(Array.isArray(config.unreadablePaths) && config.unreadablePaths.length === 0);
+  // Review R-102 M-1: the run's own list (PolicyGateOptions.unreadablePaths, every source united),
+  // with the policy's list as well, which can only protect more. A value that is not a list makes
+  // the whole set unusable: it covers everything.
+  const unreadableGiven: readonly unknown[] = [unreadablePaths, config.unreadablePaths];
+  const unreadableValue: unknown = unreadableGiven.some((value) => value !== undefined && !Array.isArray(value))
+    ? "not a list"
+    : unreadablePathsOf(unreadableGiven as readonly (readonly string[] | undefined)[]);
+  const unreadable = compilePathSet(unreadableValue, { match: "prefix", onUnusable: "covers" });
+  const unreadablePresent = !Array.isArray(unreadableValue) || unreadableValue.length > 0;
   const writable = compileWritablePathSets(writablePathSets);
 
   /** True when every writable list covers the resolved path (no list: no such limit). */

@@ -56,7 +56,8 @@ after(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 
-const gate = (extra: Partial<PolicyConfig>) => createPolicyGate({ config: { ...BASE, ...extra }, workspace });
+const gate = (extra: Partial<PolicyConfig>, unreadablePaths?: readonly string[]) =>
+  createPolicyGate({ config: { ...BASE, ...extra }, workspace, ...(unreadablePaths === undefined ? {} : { unreadablePaths }) });
 
 async function both(extra: Partial<PolicyConfig>, name: string, args: JsonObject, descriptor: ToolDescriptor): Promise<[PolicyDecision, PolicyDecision]> {
   const g = gate(extra);
@@ -103,6 +104,22 @@ describe("U-203: the gate judges unreadable paths", () => {
     assert.deepEqual(await read({ unreadablePaths: ["../x"] }, "docs/readme.md"), [UNREADABLE, UNREADABLE]);
     assert.deepEqual((await read({ unreadablePaths: ["out-link"] }, "docs/readme.md"))[1], UNREADABLE, "an entry leading outside");
     assert.deepEqual(await both({ unreadablePaths: ["../x"] }, "query_table", { path: "docs/readme.md" }, QUERY_TABLE_DESCRIPTOR), [ALLOW, ALLOW]);
+  });
+
+  test("review R-102 M-1: the run's own list (PolicyGateOptions.unreadablePaths) is judged, with the policy's as well", async () => {
+    const run = gate({}, ["data"]);
+    const args = { path: "data/people.csv" };
+    assert.deepEqual(
+      [run.checkRequested({ id: "c1", name: "read_file", args }, BUILTIN_TOOLS.read_file), await run.checkEffective({ id: "c1", name: "read_file", args } as unknown as EffectiveToolCall, BUILTIN_TOOLS.read_file)],
+      [UNREADABLE, UNREADABLE],
+      "only in the run's list",
+    );
+    const both = gate({ unreadablePaths: ["docs"] }, ["data"]);
+    assert.deepEqual(both.checkRequested({ id: "c1", name: "read_file", args: { path: "docs/readme.md" } }, BUILTIN_TOOLS.read_file), UNREADABLE, "the policy's list too");
+    assert.deepEqual(both.checkRequested({ id: "c1", name: "read_file", args }, BUILTIN_TOOLS.read_file), UNREADABLE);
+    const command = gate({}, ["data"]);
+    assert.deepEqual(command.checkRequested({ id: "c1", name: "run_command", args: { executable: "node", args: ["--test"] } }, BUILTIN_TOOLS.run_command), NO_COMMAND);
+    assert.deepEqual(gate({}, []).checkRequested({ id: "c1", name: "read_file", args }, BUILTIN_TOOLS.read_file), ALLOW, "an empty run list adds nothing");
   });
 
   test("R-5: with any unreadable entry every command is denied, even one a rule allows", async () => {

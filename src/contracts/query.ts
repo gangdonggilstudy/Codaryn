@@ -272,41 +272,36 @@ export type PrivateDataWorkflowProblem = (typeof PRIVATE_DATA_WORKFLOW_PROBLEMS)
 
 /**
  * U-203 (A-3, R-2): the union of the sources' unreadable paths (config file, profile, definition,
- * task file), in that order, each entry once. Pure.
+ * task file), in that order, each entry once: ResolvedTaskSpec.unreadablePaths, which the CLI and
+ * the app set with it (A-6; R-102 M-1), the config file's own entries also in a task file's run and
+ * under a profile. Pure.
  */
 export function unreadablePathsOf(sources: readonly (readonly string[] | undefined)[]): readonly string[] {
   return [...new Set(sources.flatMap((source) => source ?? []))];
 }
 
 /**
- * U-203 (A-3, R-2): `policy` with the user's settings' unreadable paths added, also when `policy` is
- * a task file's own (whose policy otherwise replaces the config's): no source takes one away. The
- * policy as it was when nothing is added. Pure; the CLI and the app call it (A-6).
+ * U-203 (A-3, R-3): what the integrity checks watch: the policy's protected paths and the run's
+ * unreadable paths (ResolvedTaskSpec.unreadablePaths, review R-102 M-1), each once
+ * (IntegrityCheckerOptions.protectedPaths). Pure; the CLI and the app call it (A-6).
  */
-export function withUnreadablePaths<P extends PolicyConfig>(policy: P, added: readonly (readonly string[] | undefined)[]): P {
-  const all = unreadablePathsOf([policy.unreadablePaths, ...added]);
-  return all.length === 0 ? policy : { ...policy, unreadablePaths: all };
-}
-
-/**
- * U-203 (A-3, R-3): what the integrity checks watch: the protected paths and the unreadable paths,
- * each once (IntegrityCheckerOptions.protectedPaths). Pure; the CLI and the app call it (A-6).
- */
-export function integrityPathsOf(policy: PolicyConfig): readonly string[] {
-  return unreadablePathsOf([policy.protectedPaths, policy.unreadablePaths]);
+export function integrityPathsOf(protectedPaths: readonly string[] | undefined, unreadablePaths: readonly string[] | undefined): readonly string[] {
+  return unreadablePathsOf([protectedPaths, unreadablePaths]);
 }
 
 /**
  * U-203 (A-3, R-5): the resolution's refusal of unreadable paths beside commands: a command rule
- * (field `policy.commands`) or a `command` verifier (field `verifiers[i]`, the first) while the
- * effective policy has any unreadable path. Null otherwise. Pure; the CLI resolves with it once the
- * problem joins WORKFLOW_PROBLEMS (A-6). The gate also denies every command meanwhile.
+ * (field `policy.commands`) or a `command` verifier (field `verifiers[i]`, the first) while the run
+ * has any unreadable path (ResolvedTaskSpec.unreadablePaths, every source united, review R-102 M-1).
+ * Null otherwise. Pure; the CLI resolves with it once the problem joins WORKFLOW_PROBLEMS (A-6). The
+ * gate also denies every command meanwhile.
  */
 export function privateDataProblem(
-  policy: PolicyConfig,
+  unreadablePaths: readonly string[] | undefined,
+  policy: Pick<PolicyConfig, "commands">,
   verifiers: readonly VerifierConfig[],
 ): { readonly problem: PrivateDataWorkflowProblem; readonly field: string } | null {
-  if ((policy.unreadablePaths ?? []).length === 0) return null;
+  if ((unreadablePaths ?? []).length === 0) return null;
   if (policy.commands.length > 0) return { problem: "unreadable_with_commands", field: "policy.commands" };
   const index = verifiers.findIndex((verifier) => verifier.kind === "command");
   return index === -1 ? null : { problem: "unreadable_with_commands", field: `verifiers[${index}]` };

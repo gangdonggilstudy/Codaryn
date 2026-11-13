@@ -117,7 +117,8 @@ export interface ToolRunnerOptions {
   /** For tests. Defaults to `process.platform`. Decides whether plan paths compare without case. */
   readonly platform?: NodeJS.Platform;
   /**
-   * U-203 (bundle A, R-3, R-4): the run's PolicyConfig.unreadablePaths. search_files and inspect_files
+   * U-203 (bundle A, R-3, R-4): the run's unreadable paths, ResolvedTaskSpec.unreadablePaths (every
+   * source united, review R-102 M-1). search_files and inspect_files
    * leave out what is under them, names included, judged by the text and the real path (the gate
    * refuses a start under them); a result whose folder holds such a path says `withheld`. Absent:
    * nothing is left out, as before.

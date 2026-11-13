@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CleanupOutput, MessageCatalog, MessageId } from "../../../src/contracts/index.js";
 import { renderCleanup } from "../../../src/cli/cleanup.js";
+import { PLAN_ALL_FATES } from "./u86-cleanup-fixtures.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
 import {
   LEFTOVER,
@@ -43,6 +44,12 @@ const standIn = {
 const marked: Format = standIn.format as Format;
 
 /** The lines of a preview of PLAN_ALL, with the texts of `f`. */
+/** U-86: an item line, its kind named (one group can hold an apply run's records and its folder). */
+function itemLine(f: Format, target: "run" | "discarded" | "leftover", name: string, files: number, bytes: number): string {
+  return `- ${f(`cleanup.target.${target}` as MessageId)} ${name}: ${f("cleanup.size", { files, bytes })}`;
+}
+
+/** The lines of a preview of PLAN_ALL as the store foresees it (U-86: grouped by what each item needs). */
 function planAllLines(f: Format): string[] {
   return [
     f("cleanup.summary.runs", { count: 4, bytes: 4000 }),
@@ -51,21 +58,22 @@ function planAllLines(f: Format): string[] {
     f("cleanup.summary.leftovers", { count: 1, bytes: 30 }),
     f("cleanup.summary.unknown_folders", { count: 1, bytes: 5 }),
     "",
-    f("cleanup.confirm.runs", { count: 3, bytes: 450 }),
-    `  ${f("cleanup.confirm.not_reverted", { count: 1 })}`,
-    `- ${RUN_A}: ${f("cleanup.size", { files: 3, bytes: 300 })}; ${f("cleanup.warning.not_reverted")}`,
-    `- ${RUN_B}: ${f("cleanup.size", { files: 1, bytes: 100 })}; ${f("cleanup.warning.discarded_left")}`,
-    `- ${RUN_C}: ${f("cleanup.size", { files: 1, bytes: 50 })}`,
-    f("cleanup.confirm.discarded", { files: 2, bytes: 200 }),
-    `- ${RUN_B}: ${f("cleanup.size", { files: 2, bytes: 200 })}; ${f("cleanup.warning.people_files")}`,
-    f("cleanup.confirm.leftovers", { count: 1, bytes: 30 }),
-    `- cleanup-${LEFTOVER}: ${f("cleanup.size", { files: 3, bytes: 30 })}; ${f("cleanup.warning.leftover")}`,
+    f("cleanup.group.confirm", { count: 2, bytes: 80 }),
+    itemLine(f, "run", RUN_C, 1, 50),
+    itemLine(f, "leftover", `cleanup-${LEFTOVER}`, 3, 30),
+    `  ${f("cleanup.warning.leftover")}`,
+    f("cleanup.group.include_not_reverted", { count: 1, bytes: 300 }),
+    itemLine(f, "run", RUN_A, 3, 300),
+    `  ${f("cleanup.warning.not_reverted")}`,
+    f("cleanup.group.delete_discarded", { count: 2, files: 3, bytes: 300 }),
+    itemLine(f, "run", RUN_B, 1, 100),
+    `  ${f("cleanup.warning.discarded_left")}`,
+    itemLine(f, "discarded", RUN_B, 2, 200),
+    `  ${f("cleanup.warning.people_files")}`,
     `- ${f("cleanup.target.run")} ${RUN_D}: ${f("cleanup.blocked.lock_held")}`,
     "",
-    `${f("cleanup.next.confirm_runs")} --confirm ${SHORT}.`,
-    f("cleanup.next.not_reverted", { count: 1 }),
-    f("cleanup.next.discarded"),
-    f("cleanup.next.discarded_left", { count: 1 }),
+    `${f("cleanup.command.confirm")} --confirm ${SHORT}`,
+    `${f("cleanup.command.all")} --confirm ${SHORT} --include-not-reverted --delete-discarded`,
   ];
 }
 
@@ -74,17 +82,18 @@ const summaryOf = (lines: readonly string[]): string[] => lines.slice(0, 6);
 function cases(f: Format): { readonly name: string; readonly output: CleanupOutput; readonly lines: readonly string[] }[] {
   const all = planAllLines(f);
   return [
-    { name: "a preview with every kind of item and a blocked run", output: preview(PLAN_ALL), lines: all },
+    { name: "a preview with every kind of item and a blocked run", output: preview(PLAN_ALL_FATES), lines: all },
     {
       name: "a preview with only a discarded-files folder",
       output: preview(PLAN_DISCARDED),
       lines: [
         ...summaryOf(all),
-        f("cleanup.confirm.discarded", { files: 2, bytes: 200 }),
-        `- ${RUN_B}: ${f("cleanup.size", { files: 2, bytes: 200 })}; ${f("cleanup.warning.people_files")}`,
+        f("cleanup.group.delete_discarded", { count: 1, files: 2, bytes: 200 }),
+        itemLine(f, "discarded", RUN_B, 2, 200),
+        `  ${f("cleanup.warning.people_files")}`,
         `- ${f("cleanup.target.discarded")} ${RUN_D}: ${f("cleanup.blocked.no_result")}`,
         "",
-        `${f("cleanup.next.confirm_discarded")} --confirm ${SHORT} --delete-discarded.`,
+        `${f("cleanup.command.all")} --confirm ${SHORT} --delete-discarded`,
       ],
     },
     {
@@ -92,10 +101,11 @@ function cases(f: Format): { readonly name: string; readonly output: CleanupOutp
       output: preview(PLAN_LEFTOVERS),
       lines: [
         ...summaryOf(all),
-        f("cleanup.confirm.leftovers", { count: 1, bytes: 30 }),
-        `- cleanup-${LEFTOVER}: ${f("cleanup.size", { files: 3, bytes: 30 })}; ${f("cleanup.warning.leftover")}`,
+        f("cleanup.group.confirm", { count: 1, bytes: 30 }),
+        itemLine(f, "leftover", `cleanup-${LEFTOVER}`, 3, 30),
+        `  ${f("cleanup.warning.leftover")}`,
         "",
-        `${f("cleanup.next.confirm_leftovers")} --confirm ${SHORT}.`,
+        `${f("cleanup.command.confirm")} --confirm ${SHORT}`,
       ],
     },
     {

@@ -33,6 +33,7 @@ import {
   SUMMARY_PLAIN,
   preview,
 } from "./u34-cleanup-fixtures.js";
+import { PLAN_ALL_FATES } from "./u86-cleanup-fixtures.js";
 
 const temporaryDirs: string[] = [];
 after(async () => {
@@ -53,26 +54,29 @@ const summaryLines = [
 ];
 
 describe("U-34: the English cleanup output is as it was", () => {
+  // U-86 (PM, plan B): the preview is grouped by what must be given for each item to go. These three
+  // cases changed with it (approved); the lines after a confirmation and the JSON did not.
   test("a preview with run records, a discarded-files folder, a leftover and a blocked run", () => {
     assert.equal(
-      renderCleanup(preview(PLAN_ALL), english),
+      renderCleanup(preview(PLAN_ALL_FATES), english),
       text([
         ...summaryLines,
-        en("cleanup.confirm.runs", { count: 3, bytes: 450 }),
-        `  ${en("cleanup.confirm.not_reverted", { count: 1 })}`,
-        `- ${RUN_A}: 3 file(s), 300 bytes; ${en("cleanup.warning.not_reverted")}`,
-        `- ${RUN_B}: 1 file(s), 100 bytes; ${en("cleanup.warning.discarded_left")}`,
-        `- ${RUN_C}: 1 file(s), 50 bytes`,
-        en("cleanup.confirm.discarded", { files: 2, bytes: 200 }),
-        `- ${RUN_B}: 2 file(s), 200 bytes; ${en("cleanup.warning.people_files")}`,
-        en("cleanup.confirm.leftovers", { count: 1, bytes: 30 }),
-        `- cleanup-${LEFTOVER}: 3 file(s), 30 bytes; ${en("cleanup.warning.leftover")}`,
+        en("cleanup.group.confirm", { count: 2, bytes: 80 }),
+        `- run ${RUN_C}: 1 file(s), 50 bytes`,
+        `- leftover cleanup-${LEFTOVER}: 3 file(s), 30 bytes`,
+        `  ${en("cleanup.warning.leftover")}`,
+        en("cleanup.group.include_not_reverted", { count: 1, bytes: 300 }),
+        `- run ${RUN_A}: 3 file(s), 300 bytes`,
+        `  ${en("cleanup.warning.not_reverted")}`,
+        en("cleanup.group.delete_discarded", { count: 2, files: 3, bytes: 300 }),
+        `- run ${RUN_B}: 1 file(s), 100 bytes`,
+        `  ${en("cleanup.warning.discarded_left")}`,
+        `- discarded ${RUN_B}: 2 file(s), 200 bytes`,
+        `  ${en("cleanup.warning.people_files")}`,
         `- run ${RUN_D}: ${en("cleanup.blocked.lock_held")}`,
         "",
-        `Nothing was removed. To remove the run records, run the same command with --confirm ${SHORT}.`,
-        "The records of 1 run(s) not reverted, only partly reverted, or whose records cannot be checked are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.",
-        "People's discarded files are deleted only with --delete-discarded besides.",
-        "The records of 1 apply run(s) whose discarded files are still kept stay unless those files are deleted in the same cleanup (--delete-discarded, with their folders selected) or the apply is reverted first; only the records say what the files were.",
+        `${en("cleanup.command.confirm")} --confirm ${SHORT}`,
+        `${en("cleanup.command.all")} --confirm ${SHORT} --include-not-reverted --delete-discarded`,
       ]),
     );
   });
@@ -82,11 +86,12 @@ describe("U-34: the English cleanup output is as it was", () => {
       renderCleanup(preview(PLAN_DISCARDED), english),
       text([
         ...summaryLines,
-        en("cleanup.confirm.discarded", { files: 2, bytes: 200 }),
-        `- ${RUN_B}: 2 file(s), 200 bytes; ${en("cleanup.warning.people_files")}`,
+        en("cleanup.group.delete_discarded", { count: 1, files: 2, bytes: 200 }),
+        `- discarded ${RUN_B}: 2 file(s), 200 bytes`,
+        `  ${en("cleanup.warning.people_files")}`,
         `- discarded ${RUN_D}: ${en("cleanup.blocked.no_result")}`,
         "",
-        `Nothing was removed. To delete the discarded files, run the same command with --confirm ${SHORT} --delete-discarded.`,
+        `${en("cleanup.command.all")} --confirm ${SHORT} --delete-discarded`,
       ]),
     );
   });
@@ -96,10 +101,11 @@ describe("U-34: the English cleanup output is as it was", () => {
       renderCleanup(preview(PLAN_LEFTOVERS), english),
       text([
         ...summaryLines,
-        en("cleanup.confirm.leftovers", { count: 1, bytes: 30 }),
-        `- cleanup-${LEFTOVER}: 3 file(s), 30 bytes; ${en("cleanup.warning.leftover")}`,
+        en("cleanup.group.confirm", { count: 1, bytes: 30 }),
+        `- leftover cleanup-${LEFTOVER}: 3 file(s), 30 bytes`,
+        `  ${en("cleanup.warning.leftover")}`,
         "",
-        `Nothing was removed. To remove what earlier cleanups left, run the same command with --confirm ${SHORT}.`,
+        `${en("cleanup.command.confirm")} --confirm ${SHORT}`,
       ]),
     );
   });
@@ -113,6 +119,21 @@ describe("U-34: the English cleanup output is as it was", () => {
         en("cleanup.summary.parked", { files: 0, bytes: 0 }),
         "",
         en("cleanup.nothing"),
+      ]),
+    );
+  });
+
+  test("U-86: a preview with nothing selected offers two example commands", () => {
+    assert.equal(
+      renderCleanup(preview(PLAN_EMPTY, SUMMARY_PLAIN), english, { selected: false }),
+      text([
+        en("cleanup.summary.runs", { count: 0, bytes: 0 }),
+        en("cleanup.summary.discarded", { files: 0, bytes: 0 }),
+        en("cleanup.summary.parked", { files: 0, bytes: 0 }),
+        "",
+        en("cleanup.no_selection"),
+        `  ${en("cleanup.example.older_than")}`,
+        `  ${en("cleanup.example.reverted")}`,
       ]),
     );
   });

@@ -190,15 +190,23 @@ describe("U-13 (UXM-1), the CLI over the contract's answer", () => {
     assert.ok(lines.some((line) => line.startsWith(`- run ${done.ids.applyRunId}: `)), done.text);
   });
 
+  // U-86: the apply run is in the --delete-discarded group (its folder is selected), with its warning
+  // line, and the command that removes everything names --delete-discarded.
   test("the preview says beforehand that the apply's records stay without --delete-discarded", async () => {
-    const { base } = await appliedNotReverted();
+    const { base, applyRunId } = await appliedNotReverted();
     const text = (await cleanup(base, SELECT, false)).text;
-    assert.ok(text.includes("The records of 1 apply run(s) whose discarded files are still kept stay unless"), text);
+    const en = createMessageCatalog("en");
+    const lines = text.split("\n");
+    const at = lines.findIndex((line) => line.startsWith(`- run ${applyRunId}: `));
+    assert.ok(at > 0, text);
+    assert.ok(lines.slice(at + 1).some((line) => line === `  ${en.format("cleanup.warning.discarded_left")}`), text);
+    assert.ok(/--confirm [0-9a-f]{12}( --include-not-reverted)? --delete-discarded/.test(text), text);
   });
 
-  test("a plan without such an apply has no such line (the preview is as before)", async () => {
+  test("a plan without such an apply has no such line", async () => {
     const { base, otherRunId } = await appliedNotReverted();
     const text = (await cleanup(base, ["--run", otherRunId], false)).text;
-    assert.equal(text.includes("apply run(s)"), false, text);
+    const en = createMessageCatalog("en");
+    for (const id of ["cleanup.warning.discarded_left", "cleanup.kept.discarded_left"] as const) assert.equal(text.includes(en.format(id)), false, text);
   });
 });

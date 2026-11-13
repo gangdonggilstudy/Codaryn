@@ -33,12 +33,12 @@ import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
 import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
 import { INTEGRITY_PHASES } from "./integrity.js";
 import { MODEL_ERROR_KINDS } from "./model.js";
-import { PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
+import { CONFIRMATION_BY, PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
 import type { CliErrorCode, CliErrorHint, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
-import type { PermissionKind, PolicyDenialCode } from "./policy.js";
+import type { ConfirmationBy, PermissionKind, PolicyDenialCode } from "./policy.js";
 import { APPLY_NOTICE_KINDS, APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS, PLAN_RECORDS_UNCHECKED_CAUSES } from "./plan.js";
 import type { ApplyJournalEvent, ApplyNoticeKind, ApplyResult, ApprovalChannel, PlanItemProblem, PlanRecordsUncheckedCause } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
@@ -640,23 +640,17 @@ export const FIXED_MESSAGES = {
   "revert.parked": { count: "count" },
   // DR-39 (cleanup.ts): the preview, the two confirmations (run records; then people's discarded
   // files), and the outcome. Sizes are byte counts. Parked files are never cleaned.
+  // `cleanup.nothing`: a selection that matched nothing (U-86: with nothing selected,
+  // cleanup.no_selection instead).
   "cleanup.summary.runs": { count: "count", bytes: "count" },
   "cleanup.summary.discarded": { files: "count", bytes: "count" },
   "cleanup.summary.parked": { files: "count", bytes: "count" },
   "cleanup.nothing": {},
-  "cleanup.confirm.runs": { count: "count", bytes: "count" },
-  "cleanup.confirm.discarded": { files: "count", bytes: "count" },
   "cleanup.done": { runs: "count", folders: "count", bytes: "count" },
-  // DR-44 (R-34): shown after cleanup.confirm.runs when above 0: how many of those run records are of
-  // runs not reverted or only partly reverted, or whose records cannot be checked (R-34b P-1)
-  // (CleanupPlan.totals.runs.notReverted), which go only with
-  // their own confirmation (CLI `--include-not-reverted`; the GUI asks apart). Not a question.
-  "cleanup.confirm.not_reverted": { count: "count" },
   // DR-44 (d): folders an earlier cleanup moved aside and could not remove entirely (StateSummary.
-  // leftovers, CleanupPlan.totals.leftovers, the removed ones): the summary line (when above 0), the
-  // header of their items in a plan (they are always in it), and the outcome's line.
+  // leftovers, CleanupPlan.totals.leftovers, the removed ones): the summary line (when above 0) and
+  // the outcome's line. In a plan they are always in the --confirm alone group (U-86).
   "cleanup.summary.leftovers": { count: "count", bytes: "count" },
-  "cleanup.confirm.leftovers": { count: "count", bytes: "count" },
   "cleanup.done_leftovers": { count: "count", bytes: "count" },
   // U-13 (UXM-1): after cleanup.done when above 0: how many apply runs' records were kept because
   // their discarded files stay (CleanupOutcome.kept with reason discarded_left); they go once those
@@ -669,26 +663,52 @@ export const FIXED_MESSAGES = {
   // - cleanup.size: an item's size after its name in a plan (CleanupItem.size).
   // - cleanup.nothing_removed: first line of a confirmed cleanup that removed nothing
   //   (CleanupStatus nothing_removed); what was kept follows, as after cleanup.done.
-  // - cleanup.next.*: after a preview's items when the plan has any, what to type to confirm.
-  //   confirm_runs when the plan has run records, else confirm_discarded when it has
-  //   discarded-files folders, else confirm_leftovers. G-A (0a9f9ec): no message takes a digest;
-  //   the renderer puts the options after the text on the same line, one space apart, so they can
-  //   be copied: `--confirm <the plan digest's first MIN_PLAN_DIGEST_PREFIX characters>`, and
-  //   ` --delete-discarded` after it for confirm_discarded. The text says nothing was removed and
-  //   ends leading into them. After confirm_runs, as they apply: not_reverted ({count}: run
-  //   records that go only with `--include-not-reverted`, which the person adds themselves; once
-  //   removed, those runs can no longer be reverted), discarded (people's discarded files are
-  //   deleted only with `--delete-discarded` besides), discarded_left ({count}: apply runs whose
-  //   records stay while their discarded files do, unless those are deleted in the same cleanup or
-  //   the apply is reverted first). Option names are fixed text in the templates.
   "cleanup.size": { files: "count", bytes: "count" },
   "cleanup.nothing_removed": {},
-  "cleanup.next.confirm_runs": {},
-  "cleanup.next.not_reverted": { count: "count" },
-  "cleanup.next.discarded": {},
-  "cleanup.next.discarded_left": { count: "count" },
-  "cleanup.next.confirm_discarded": {},
-  "cleanup.next.confirm_leftovers": {},
+  // U-86 (UXM-10, the rest of UXM-1; PM, plan B): the preview, grouped by what a person must give
+  // for an item to go (CleanupPlan's CLEANUP_ITEM_FATES). The output after a confirmation and
+  // `cleanup --json` do not change. It retires cleanup.confirm.runs, .discarded, .not_reverted and
+  // .leftovers and the six cleanup.next.* (U-34).
+  // - cleanup.summary.discarded_without_records: after cleanup.summary.discarded when above 0:
+  //   discarded-files folders whose run has no records left (StateSummary's
+  //   STATE_DISCARDED_WITHOUT_RECORDS); no revert can put those files back.
+  // - The groups, in this order, each shown only when it has items: cleanup.group.confirm
+  //   (removed with --confirm alone; leftovers among them), cleanup.group.include_not_reverted
+  //   (only with --include-not-reverted besides), cleanup.group.delete_discarded (only with
+  //   --delete-discarded besides), cleanup.group.both (R-76 M-1: only with both flags besides: an
+  //   apply run not reverted whose discarded files go with it, its plan run), cleanup.group.kept (no
+  //   confirmation removes them in this selection), and last cleanup.group.blocked (R-76 L-1: the
+  //   plan's `blocked`, which cannot be removed in this cleanup, each with its
+  //   `cleanup.blocked.<code>`). Each group's `{count}` is the number of its items, so with a
+  //   confirmation the items that go are the confirm group's and those of each group whose flags it
+  //   gives (cleanup.group.both only with both).
+  //   PM: not one word weaker than before. cleanup.group.include_not_reverted says at least what
+  //   cleanup.confirm.not_reverted said (once their records are removed, those runs can no longer be
+  //   reverted or put back by hand); cleanup.group.delete_discarded what cleanup.confirm.discarded
+  //   said (they are people's own files and cannot be put back); cleanup.group.both both of them.
+  //   `{count}` items, `{files}` and `{bytes}` their sizes.
+  // - Under each item (its name and cleanup.size, as before): one line per warning,
+  //   `cleanup.warning.<code>`, in place of the "; " list; a kept item's `cleanup.kept.<keptFor>`.
+  // - Then the commands (G-A: the renderer puts the options after the text on one line, one space
+  //   apart): cleanup.command.confirm when the --confirm alone group has items
+  //   (`--confirm <digest prefix>`), cleanup.command.all when an item needs a flag
+  //   (`--confirm <digest prefix>` and every flag some item needs, in CLEANUP_CONFIRM_FLAGS order).
+  //   Each says nothing was removed and leads into them.
+  // - cleanup.no_selection, with nothing selected (no selection option given): then the two example
+  //   commands cleanup.example.older_than and cleanup.example.reverted, fixed text with
+  //   `<workspace>`. Leftovers still show their group above it.
+  "cleanup.summary.discarded_without_records": { count: "count", bytes: "count" },
+  "cleanup.group.confirm": { count: "count", bytes: "count" },
+  "cleanup.group.include_not_reverted": { count: "count", bytes: "count" },
+  "cleanup.group.delete_discarded": { count: "count", files: "count", bytes: "count" },
+  "cleanup.group.both": { count: "count", files: "count", bytes: "count" },
+  "cleanup.group.kept": { count: "count" },
+  "cleanup.group.blocked": { count: "count" },
+  "cleanup.command.confirm": {},
+  "cleanup.command.all": {},
+  "cleanup.no_selection": {},
+  "cleanup.example.older_than": {},
+  "cleanup.example.reverted": {},
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
@@ -752,6 +772,12 @@ export const FIXED_MESSAGES = {
   // of the state directory that was too large to check (the run goes on).
   "progress.state_changed": { count: "count" },
   "progress.state_unchecked": {},
+  // U-74 (DR-3): the in-run permission question (ConfirmRequest). The question: `{count}` is
+  // ConfirmRequest.argumentCount; the renderer puts the masked executable (`subject`) after it as an
+  // item and then `prompt.yes_no_default_no` (Enter, end of input or no terminal: no). Then one
+  // progress line: allowed for this call once, or `progress.confirmation_denied.<by>`.
+  "confirm.question.command": { count: "count" },
+  "progress.confirmation_allowed": {},
   // DR-41: lines at the run's start from run_started.policyNarrowings. Counts only.
   "progress.workflow_policy.commands_dropped": { count: "count" },
   "progress.workflow_policy.commands_narrowed": { count: "count" },
@@ -985,6 +1011,7 @@ export type ListedMessageId =
   | `permission.${PermissionKind}`
   | `phase.${IntegrityPhase}`
   | `modelError.${ModelErrorKind}`
+  | `progress.confirmation_denied.${ConfirmationBy}`
   | `language.source.${LanguageSource}`
   | `help.command.${HelpCommand}`
   | `help.option.${HelpOption}`
@@ -1041,6 +1068,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...PERMISSION_KINDS.map((kind) => `permission.${kind}` as const),
   ...INTEGRITY_PHASES.map((phase) => `phase.${phase}` as const),
   ...MODEL_ERROR_KINDS.map((kind) => `modelError.${kind}` as const),
+  ...CONFIRMATION_BY.map((by) => `progress.confirmation_denied.${by}` as const),
   ...LANGUAGE_SOURCES.map((source) => `language.source.${source}` as const),
   ...HELP_COMMANDS.map((command) => `help.command.${command}` as const),
   ...HELP_OPTIONS.map((option) => `help.option.${option}` as const),

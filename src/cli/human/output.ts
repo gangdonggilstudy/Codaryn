@@ -508,11 +508,14 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           line = `${catalog.format(event.created ? "progress.file_created" : "progress.file_changed")} ${shownPath(String(event.path))}`;
           break;
         case "verifier_result": {
-          const id = String(event.result.id);
-          let number = verifierNumbers.get(id);
+          // U-99a: a verifier is told apart by its kind and its id. An apply's built-in inventory check
+          // (kind inventory) and a task verifier named inventory are two checks with two numbers; in a
+          // model run a verifier keeps its kind, so its number, from round to round.
+          const key = `${String(event.result.kind)}\u0000${String(event.result.id)}`;
+          let number = verifierNumbers.get(key);
           if (number === undefined) {
             number = verifierNumbers.size + 1;
-            verifierNumbers.set(id, number);
+            verifierNumbers.set(key, number);
           }
           const outcome = event.result.outcome;
           line = isOneOf(outcome, OUTCOMES)

@@ -396,7 +396,8 @@ export function parseToolList(value: unknown, field: string): AnyToolName[] {
 /**
  * A task file's or a config definition's `plan` (invalid_task or invalid_config by the caller).
  * U-195 (DR-69 B-4): every PLAN_MODES value, "run" again: codaryn apply carries out a run plan now.
- * U-177's refusal (the hint plan_run_not_available) is no longer given; the hint stays listed.
+ * U-177's refusal is no longer given, and U-235 took its hint plan_run_not_available out of the
+ * contract's list (cli-contract 8.3's one exception).
  */
 export function parsePlanMode(value: unknown, field: string): PlanMode {
   if (!(PLAN_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${PLAN_MODES.join(", ")}`);

@@ -129,7 +129,10 @@ const copied: string[] = [];
 /** U-124: the permission questions the main process asked (the test answers for the OS dialog), and its answers. */
 const questionsSeen: { id: string; tool: string; permission: string; subject: string; argumentCount: number }[] = [];
 const permissionAnswers: ("allow_once" | "deny" | "dismissed")[] = [];
-/** U-123: run starts whose button was off when the test pressed it (diagnostic). */
+/**
+ * U-123, R-111b M-1: run starts whose button was off when the new task screen was ready, before the test
+ * waited for it (pinned empty: after this window's own run the button is on at once, R-111b a).
+ */
 const startsBlocked: unknown[] = [];
 /**
  * U-178: a run id as the window shows it. A result wait's "timeout", or the "error:<code>" a start or
@@ -635,11 +638,25 @@ startGui({
         }
       })();
 
+      // R-111b M-1: a start on the new task screen (shown and ready) records whether the run button was
+      // on at once (startsBlocked: the product's own check, no wait), then waits for it to be on, sets the
+      // form (`setup`) and presses it. The wait keeps a slow open check on a busy machine from failing the
+      // steps after it; it does not hide a lock carried from this window's own run, which startsBlocked shows.
+      const pressRun = async (where: string, setup: string): Promise<void> => {
+        const off = await js(
+          "document.getElementById('task-run')?.hasAttribute('disabled') ? { where: " +
+            JSON.stringify(where) +
+            ", locked: document.getElementById('task-locked')?.hasAttribute('hidden') === false, lock: document.getElementById('task-locked')?.getAttribute('data-lock') ?? null, message: document.getElementById('task-message')?.textContent ?? null } : null",
+        );
+        if (off !== null) startsBlocked.push(off);
+        await waitFor("document.getElementById('task-run')?.hasAttribute('disabled') === false ? 'on' : null", 60_000);
+        await js(`(() => { ${setup} document.getElementById('task-run').click(); return true; })()`);
+      };
       // 5c. GU-3: a run from the new task screen (the fake API asks to read a.txt, then ends).
       const startTask = async (goal: string): Promise<void> => {
         await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
         await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
-        await js(`(() => { const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
+        await pressRun(goal, `const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)};`);
       };
       // U-5 (3.6): the window is not active while this run ends, so its end is one OS notification.
       pretendInactive = true;
@@ -802,9 +819,7 @@ startGui({
         await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
         await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
         // U-123: a start whose run button is off is recorded (it would not start; the reason helps).
-        const off = await js("document.getElementById('task-run')?.hasAttribute('disabled') ? { workflow: " + JSON.stringify(workflow) + ", locked: document.getElementById('task-locked')?.hasAttribute('hidden') === false, message: document.getElementById('task-message')?.textContent ?? null } : null");
-        if (off !== null) startsBlocked.push(off);
-        await js(`(() => { document.getElementById('task-workflow').value = ${JSON.stringify(workflow)}; const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
+        await pressRun(workflow, `document.getElementById('task-workflow').value = ${JSON.stringify(workflow)}; const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)};`);
       };
       // A: the task kind chosen directly (R-14 L-3, R21-M-1): the plan view, its apply and the
       // file moved, through the task form's workflowRef.
@@ -839,7 +854,7 @@ startGui({
       const beforePlan = await resultId();
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
       await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
-      await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'sub/b.txt를 moved 폴더로 옮긴다'; document.getElementById('task-run').click(); return true; })()");
+      await pressRun("profile tidy", "document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'sub/b.txt를 moved 폴더로 옮긴다';");
       const planRunId = (await newResult(beforePlan, 90_000, "5f plan run B")) as string;
       results["planRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
       // R21b-L-1: B's plan is opened from the run list, with the form the main process remembered
@@ -1328,7 +1343,7 @@ startGui({
         await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
         await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
         const before = await js("document.getElementById('run-result-id')?.textContent ?? null");
-        await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'ask'; const g = document.getElementById('task-goal'); g.value = 'ask before running'; document.getElementById('task-run').click(); return true; })()");
+        await pressRun("profile ask", "document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'ask'; const g = document.getElementById('task-goal'); g.value = 'ask before running';");
         const ended = await waitFor(`(() => { const id = document.getElementById('run-result-id')?.textContent ?? null; return id !== null && id !== ${JSON.stringify(before)} ? id : null; })()`, 90_000);
         const asked = join(SECOND, "asked.txt");
         return {
@@ -1441,7 +1456,7 @@ startGui({
           )) as { shown: boolean; needs: boolean; commands: boolean };
         };
         const startRefused = async (): Promise<unknown> => {
-          await js("(() => { const g = document.getElementById('task-goal'); g.value = 'count the rows'; document.getElementById('task-run').click(); return true; })()");
+          await pressRun("analyze-private", "const g = document.getElementById('task-goal'); g.value = 'count the rows';");
           return waitFor("(() => { const e = document.querySelector('#run-end [data-error]'); return e ? { code: e.getAttribute('data-error'), hint: e.getAttribute('data-hint'), text: e.textContent } : null; })()", 30_000);
         };
         const before = await chooseAnalyzePrivate();
@@ -1483,7 +1498,7 @@ startGui({
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
       await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
       const beforeClose = messagesReceived();
-      await js("(() => { const g = document.getElementById('task-goal'); g.value = 'close while running'; document.getElementById('task-run').click(); return true; })()");
+      await pressRun("close while running", "const g = document.getElementById('task-goal'); g.value = 'close while running';");
       await waitFor("document.getElementById('run-cancel')?.hasAttribute('disabled') === false ? 'ready' : null", 60_000);
       // R29-L1: closed only once this run's model request reached the fake API.
       results["closeRequestArrived"] = await requestArrived(beforeClose);

@@ -483,7 +483,7 @@ confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
    - 둘 다 실행 이벤트로 관찰자에게 간다(DR-15). 순서는 `confirmation_requested` 이벤트 → `confirm` 부름 → `confirmation_answered` 이벤트다(시험).
    - 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다.
 - 질문 글은 가림본이다. 화면을 위해 복원하지 않는다. `subject`는 엔진이 이미 제어·보이지 않는 문자를 빼고 키 모양을 가렸다(U-106). 실행 사건 목록(5.13)은 그래도 다른 글처럼 다시 가리고 정리한다.
-- 남은 단위: B-5 CLI 터미널 질문, B-6 GUI 대화상자. 통로 단위의 시험에 "기다리는 동안 프로세스가 산다"를 넣는다(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다).
+- 두 단위는 끝났다: B-5 CLI 터미널 질문은 U-110(병합 `15e49a4`), B-6 GUI 대화상자는 U-124(병합 `aa723d2`, 메인 프로세스의 OS 대화상자, 기본과 Esc는 거부, [독립 GUI 설계](standalone-gui.md) 3.6)다. "기다리는 동안 프로세스가 산다"(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다)는 CLI 쪽 시험 `tests/unit/cli/g-u110-terminal-line.test.ts`가 본다. GUI의 연기 시험은 대화상자 대신 답한다(사람 점검은 [수동 점검](../manual-checks.md) M-3.11).
 
 ### 5.10 오류 모델 [구현 A-1]
 

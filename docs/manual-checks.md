@@ -2149,7 +2149,7 @@ Get-ChildItem -Recurse $pr\workspace -Exclude .codaryn | Select-Object FullName 
   - 끝 요약에 다음 줄들이 있다.
     - `Plan run: <계획 실행 id>`
     - `Denied calls: 1`
-    - `Writes refused because the file is not one this plan approved: 1`
+    - `Writes denied because the file is not in the approved plan: 1`
     - `To change other files, make a new plan that names them and approve it.`
   - `writablePaths`를 넓히라는 줄(`Writes denied because the file is not in writablePaths …`)은 없다.
   - `notes.txt`는 생기지 않는다.
@@ -2233,7 +2233,7 @@ node dist/src/cli/main.js revert --workspace $rp\workspace --run latest
   - 설명이 무엇을 바꿀지 사람이 판단할 만큼 구체적인지 적는다. 정해진 기대는 없다.
 - 수행 실행
   - 계획 밖 파일(예: `README.md`)을 쓰려 했는지, 거부(`path_not_writable`) 뒤에 무엇을 했는지 적는다. 되풀이했는지, 계획의 파일로 돌아갔는지, 할 수 없다고 끝냈는지다.
-  - 끝 요약에 계획 밖 쓰기가 있었으면 `Writes refused because the file is not one this plan approved: <n>`과 새 계획 안내가 있다.
+  - 끝 요약에 계획 밖 쓰기가 있었으면 `Writes denied because the file is not in the approved plan: <n>`과 새 계획 안내가 있다.
   - 결과(`done/verified`이면 좋다)와 쓴 파일을 적는다. 계획의 두 파일 밖은 바뀌지 않는다(시험 기준).
   - `report`에 계획 실행 id와 다이제스트가 있다. `changes`에 두 파일의 전후가 있다.
 - `revert`는 `complete`이고, `docs/guide.md`가 처음 글로 돌아오고 `docs/faq.md`가 없어진다.

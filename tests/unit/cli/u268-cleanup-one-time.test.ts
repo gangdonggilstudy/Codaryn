@@ -11,8 +11,8 @@
  * The time the request carries feeds only the selection by age: the cleanup record's time is the
  * store's own (new Date()), and no output carries it, so nothing a person or a program reads changes
  * except in that case. Real store and runs made through the CLI at fixed past times (scripted model,
- * nothing sent); and the store's functions spied on. Reproduced first (todo until the CLI read the
- * clock once).
+ * nothing sent); and the store's functions spied on. Reproduced first (0282c4c, todo until the CLI
+ * read the clock once).
  */
 
 import assert from "node:assert/strict";
@@ -30,7 +30,6 @@ import { runCli } from "../../../src/cli/run.js";
 import { locateInWorkspace } from "../../../src/cli/security/index.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
 
-const TODO = { todo: "U-268: the CLI's confirmed cleanup reads the clock once" };
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const temporaryDirs: string[] = [];
@@ -95,7 +94,7 @@ async function cleanupAt(base: string, args: readonly string[], readings: readon
 }
 
 describe("U-268: a confirmed cleanup judges its selection at one time", () => {
-  test("a run that becomes older than --older-than between the clock's readings: the run selected at the preview's time goes, not cleanup_plan_changed", TODO, async () => {
+  test("a run that becomes older than --older-than between the clock's readings: the run selected at the preview's time goes, not cleanup_plan_changed", async () => {
     // Whole seconds (a run id names its start to the second), two days and nine days ago.
     const today = Math.floor(Date.now() / 1000) * 1000;
     const atBoundary = today - 2 * DAY_MS;
@@ -115,7 +114,7 @@ describe("U-268: a confirmed cleanup judges its selection at one time", () => {
     assert.equal(await exists(path.join(work, STATE_DIR_NAME, RUNS_DIR_NAME, boundary)), true, "the run at the boundary stays: it was not in the plan confirmed");
   });
 
-  test("the store's plan and its apply are given the same time", TODO, async () => {
+  test("the store's plan and its apply are given the same time", async () => {
     const { base } = await workspaceWithRunsAt([Math.floor(Date.now() / 1000) * 1000 - 3 * DAY_MS]);
     const times: { plan: string[]; apply: string[] } = { plan: [], apply: [] };
     const plan: CleanupPlan = { items: [], blocked: [], totals: { runs: { count: 0, notReverted: 0, files: 0, bytes: 0 }, discarded: { count: 0, files: 0, bytes: 0 }, leftovers: { count: 0, files: 0, bytes: 0 } }, parked: { files: 0, bytes: 0 }, digest: "a".repeat(64) } as unknown as CleanupPlan;

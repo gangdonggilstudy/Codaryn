@@ -156,6 +156,7 @@ test("U-223: a source under unreadable paths keeps every verdict and gives no nu
   }
 });
 
+// U-258 (F-1): this source's groups all have fewer than 5 rows, so a grouped rule compares none of them.
 test("U-223: the hidden evidence names the target row and column that did not match", async () => {
   const result = await run(rulesOn("data/sales.csv"), { unreadablePaths: ["data"] });
   const lines = result.evidence.split("\n");
@@ -165,7 +166,7 @@ test("U-223: the hidden evidence names the target row and column that did not ma
   );
   assert.equal(
     lines[4],
-    `not held: sum of "amount" in "data/sales.csv" (csv) grouped by "region" matches "sum" in "out/by-region-wrong.csv" (csv) (key column "region") within absolute 1e-9, relative 1e-9 (target data row 1 of column "sum" does not match (group first seen at source data row 1); target data row 3 of column "sum" does not match (group first seen at source data row 5); source rows without a group value left out; ${UNREADABLE_SOURCE_NOTE})`,
+    `not held: sum of "amount" in "data/sales.csv" (csv) grouped by "region" matches "sum" in "out/by-region-wrong.csv" (csv) (key column "region") within absolute 1e-9, relative 1e-9 (4 target data rows have a key that is not one of the source's groups of at least 5 rows; source rows without a group value left out; the source's groups of fewer than 5 rows are not compared; ${UNREADABLE_SOURCE_NOTE})`,
   );
   // The source has 7 data rows; that number is not written when the target has another count.
   assert.equal(
@@ -277,7 +278,15 @@ test("U-223 (PM): a source and a target both under unreadable paths give neither
   const rules = targetRules("data/sales.csv");
   const plain = await run(rules);
   const hidden = await run(rules, { unreadablePaths: ["data", "secret-out"] });
-  assert.deepEqual(verdicts(hidden), verdicts(plain));
+  // U-258 (F-1): every group of this source has fewer than 5 rows, so none is compared and the right
+  // target (rule 4) fails like any target whose keys are not groups of at least k rows.
+  assert.deepEqual(verdicts(hidden), verdicts(plain).map((verdict, index) => (index === 4 ? "not held" : verdict)));
+  assert.ok(
+    hidden.evidence.split("\n")[4]?.includes(
+      "(the target has rows whose key is not one of the source's groups of at least 5 rows; source rows without a group value left out; the source's groups of fewer than 5 rows are not compared;",
+    ),
+    hidden.evidence,
+  );
   assert.equal(/recomputed|found|[0-9]+ source rows|expected 7 as/.test(hidden.evidence), false, hidden.evidence);
   // Rules 5, 6 and 9 count rows against the rule's own numbers: no source, so the target's note only.
   for (const [index, line] of hidden.evidence.split("\n").entries()) {

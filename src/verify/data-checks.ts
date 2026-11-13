@@ -31,11 +31,19 @@
  * back), which is the way around k. The paths are judged as the policy gate judges them: the same
  * matcher (compilePathSet, prefix, an unusable list covers everything), on the real path. Without
  * unreadable paths the evidence is as before, letter for letter.
+ *
+ * U-258 (PM decision on F-1 and F-2, DR-70): for such a source a grouped aggregate compares only the
+ * groups of at least k rows (the run's k, never below 5), the ones query_table shows the model. A
+ * target row whose key is not one of them fails, counted, in the same words whether the key is a
+ * hidden group's or no source row's (so a repair cannot learn that a guessed key exists); a missing
+ * group of at least k rows is counted too. No source data row is named for such a source: not as a
+ * group's label, not for a cell that is not a number, not for where it does not parse. A problem in
+ * a hidden group (a cell that is not a number) decides nothing.
  */
 
 import fs from "node:fs/promises";
 
-import { AGGREGATE_OPS, DEFAULT_DATA_TOLERANCE, MAX_DATA_TABLE_BYTES, TABLE_FORMATS } from "../contracts/index.js";
+import { AGGREGATE_OPS, DEFAULT_DATA_TOLERANCE, MAX_DATA_TABLE_BYTES, TABLE_FORMATS, effectiveMinGroupSize } from "../contracts/index.js";
 import type {
   AggregateOp,
   DataChecksVerifierConfig,
@@ -99,12 +107,19 @@ function describeProblem(problem: TableProblem): string {
   return `${problem.code.replace(/_/g, " ")}${where.length > 0 ? ` at ${where.join(", ")}` : ""}`;
 }
 
+/** U-258: a parse problem without its place, for a source under unreadable paths. */
+function describeProblemCode(problem: TableProblem): string {
+  return problem.code.replace(/_/g, " ");
+}
+
 /** U-202: what a rule's tables are read with. */
 interface Reading {
   readonly maxBytes: number;
   readonly chunkBytes: number;
   /** U-223 (R-6): the run's unreadable paths as the gate matches them; null when there are none. */
   readonly unreadable: PathSet | null;
+  /** U-258: the run's group size k, never below 5 (a grouped aggregate over such a source compares groups of at least k rows). */
+  readonly minGroupSize: number;
 }
 
 /** U-223 (R-6): what the evidence says, once per rule, in place of the numbers read from such a source. */
@@ -138,11 +153,19 @@ function unreadableSet(value: unknown): PathSet | null {
  */
 type Loaded =
   | { readonly ok: true; readonly columns: readonly string[]; readonly rows: number; readonly relative: string }
-  | { readonly ok: false; readonly fixable: boolean; readonly note: string };
+  | {
+      readonly ok: false;
+      readonly fixable: boolean;
+      readonly note: string;
+      /** U-258: the real path relative to the root, once `Workspace.resolve` gave it. */
+      readonly relative?: string;
+      /** U-258: the note without a data row or line, where the note names one (a parse problem). */
+      readonly unplacedNote?: string;
+    };
 
 /** U-223 (R-6): whether a table read through is under the run's unreadable paths (links resolved). */
-async function isUnreadable(loaded: Extract<Loaded, { ok: true }>, workspace: Workspace, reading: Reading): Promise<boolean> {
-  return reading.unreadable !== null && (await reading.unreadable.coversEffective(loaded.relative, workspace));
+async function isUnreadable(loaded: { readonly relative?: string }, workspace: Workspace, reading: Reading): Promise<boolean> {
+  return reading.unreadable !== null && loaded.relative !== undefined && (await reading.unreadable.coversEffective(loaded.relative, workspace));
 }
 
 /** U-223: a verdict whose source or target is under unreadable paths says so once each, after its own note. */
@@ -173,13 +196,15 @@ async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, 
   const { maxBytes } = reading;
   const resolved = await workspace.resolve(ref.path, "read");
   if (!resolved.ok) return { ok: false, fixable: false, note: `path rejected (${resolved.code})` };
+  const relative = resolved.path.relative;
+  const failed = (fixable: boolean, note: string, unplacedNote?: string): Loaded => ({ ok: false, fixable, note, relative, ...(unplacedNote === undefined ? {} : { unplacedNote }) });
   let handle: fs.FileHandle;
   try {
     handle = await fs.open(resolved.path.absolute, "r");
   } catch (error) {
     const code = errorCode(error);
-    if (code === "ENOENT" || code === "ENOTDIR") return { ok: false, fixable: true, note: "file not found" };
-    return { ok: false, fixable: false, note: `file could not be opened (${code ?? "unknown error"})` };
+    if (code === "ENOENT" || code === "ENOTDIR") return failed(true, "file not found");
+    return failed(false, `file could not be opened (${code ?? "unknown error"})`);
   }
   const read = { bytes: 0, failed: false, error: undefined as unknown };
   let scanned: TableScanOutcome;
@@ -188,10 +213,10 @@ async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, 
     try {
       info = await handle.stat();
     } catch (error) {
-      return { ok: false, fixable: false, note: `file could not be read (${errorCode(error) ?? "unknown error"})` };
+      return failed(false, `file could not be read (${errorCode(error) ?? "unknown error"})`);
     }
-    if (!info.isFile()) return { ok: false, fixable: true, note: "not a regular file" };
-    if (info.size > maxBytes) return { ok: false, fixable: true, note: `larger than ${maxBytes} bytes` };
+    if (!info.isFile()) return failed(true, "not a regular file");
+    if (info.size > maxBytes) return failed(true, `larger than ${maxBytes} bytes`);
     // One byte more than allowed tells a file that grew after stat.
     const limit = Math.min(info.size, maxBytes) + 1;
     const buffer = Buffer.alloc(Math.max(1, Math.min(reading.chunkBytes, limit)));
@@ -216,14 +241,14 @@ async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, 
   } finally {
     await handle.close().catch(() => undefined);
   }
-  if (read.failed) return { ok: false, fixable: false, note: `file could not be read (${errorCode(read.error) ?? "unknown error"})` };
-  if (read.bytes > maxBytes) return { ok: false, fixable: true, note: `larger than ${maxBytes} bytes` };
+  if (read.failed) return failed(false, `file could not be read (${errorCode(read.error) ?? "unknown error"})`);
+  if (read.bytes > maxBytes) return failed(true, `larger than ${maxBytes} bytes`);
   if (!scanned.ok) {
     // The default decoder drops a leading byte order mark (scanTable decodes as before).
-    if (scanned.reason === "not_text") return { ok: false, fixable: true, note: "not UTF-8 text" };
-    return { ok: false, fixable: true, note: `does not parse as ${ref.format}: ${describeProblem(scanned.problem)}` };
+    if (scanned.reason === "not_text") return failed(true, "not UTF-8 text");
+    return failed(true, `does not parse as ${ref.format}: ${describeProblem(scanned.problem)}`, `does not parse as ${ref.format}: ${describeProblemCode(scanned.problem)}`);
   }
-  return { ok: true, columns: scanned.columns, rows: scanned.rows, relative: resolved.path.relative };
+  return { ok: true, columns: scanned.columns, rows: scanned.rows, relative };
 }
 
 /** U-202: finds a column as `findColumn` does on the whole table, while the columns arrive (stream.ts). */
@@ -251,7 +276,7 @@ class ColumnAt {
  */
 class SourceTally implements TableSink {
   readonly total: RunningAggregate;
-  readonly groups = new Map<string, { readonly firstDataRow: number; readonly aggregate: RunningAggregate }>();
+  readonly groups = new Map<string, { readonly firstDataRow: number; readonly aggregate: RunningAggregate; rows: number }>();
   withoutKey = 0;
   private readonly column: ColumnAt;
   private readonly key: ColumnAt | null;
@@ -280,9 +305,10 @@ class SourceTally implements TableSink {
     }
     let group = this.groups.get(key);
     if (group === undefined) {
-      group = { firstDataRow: dataRow, aggregate: new RunningAggregate(this.op) };
+      group = { firstDataRow: dataRow, aggregate: new RunningAggregate(this.op), rows: 0 };
       this.groups.set(key, group);
     }
+    group.rows += 1;
     group.aggregate.add(cell, dataRow);
   }
 }
@@ -329,6 +355,16 @@ class TargetTally implements TableSink {
 function loadVerdict(role: Role, ref: TableRef, loaded: Extract<Loaded, { ok: false }>): Verdict {
   const note = `${role} ${describeTable(ref)}: ${loaded.note}`;
   return role === "target" && loaded.fixable ? notHeld(note) : undecided(note);
+}
+
+/**
+ * U-258: a source's load problem. For a source under unreadable paths the note names no data row or
+ * line (where it does not parse) and says once that the source is under unreadable paths.
+ */
+async function sourceLoadVerdict(ref: TableRef, loaded: Extract<Loaded, { ok: false }>, workspace: Workspace, reading: Reading): Promise<Verdict> {
+  if (!(await isUnreadable(loaded, workspace, reading))) return loadVerdict("source", ref, loaded);
+  const unplaced = { ...loaded, note: loaded.unplacedNote ?? loaded.note };
+  return withUnreadableNotes(loadVerdict("source", ref, unplaced), { source: true, target: false });
 }
 
 function isCount(value: unknown): value is number {
@@ -439,7 +475,7 @@ async function checkShape(
     } else if (rows.sameAs !== undefined) {
       if (!isTableRef(rows.sameAs)) return undecided("the rule is not valid: rows.sameAs needs a path and a format");
       const other = await loadTable(rows.sameAs, workspace, reading);
-      if (!other.ok) return loadVerdict("source", rows.sameAs, other);
+      if (!other.ok) return sourceLoadVerdict(rows.sameAs, other, workspace, reading);
       const expected = other.rows;
       hiddenSource = await isUnreadable(other, workspace, reading);
       const as = describeTable(rows.sameAs);
@@ -465,10 +501,14 @@ async function checkShape(
   return withUnreadableNotes(verdict, { source: hiddenSource, target: hiddenTable });
 }
 
-/** What an aggregate problem in the source means: the model cannot fix the input. */
-function sourceProblem(outcome: Extract<AggregateOutcome, { ok: false }>, column: string, scope: string): Verdict {
+/**
+ * What an aggregate problem in the source means: the model cannot fix the input. U-258: for a source
+ * under unreadable paths (`unplaced`) no data row is named and `scope` is empty.
+ */
+function sourceProblem(outcome: Extract<AggregateOutcome, { ok: false }>, column: string, scope: string, unplaced = false): Verdict {
   switch (outcome.problem) {
     case "not_a_number":
+      if (unplaced) return undecided(`a source cell of column ${shownName(column)} is not a number`);
       return undecided(`source data row ${outcome.dataRow} of column ${shownName(column)} is not a number${scope}`);
     case "no_values":
       return undecided(`source column ${shownName(column)} has no number to compute${scope}`);
@@ -524,7 +564,7 @@ async function checkAggregate(
   // the order the whole-table reading asked (columns first, then the computed values).
   const sourceTally = new SourceTally(rule.column, grouped ? (rule.groupBy as string) : null, op);
   const source = await loadTable(rule.source, workspace, reading, sourceTally);
-  if (!source.ok) return loadVerdict("source", rule.source, source);
+  if (!source.ok) return sourceLoadVerdict(rule.source, source, workspace, reading);
   // U-223 (R-6): every verdict from here on says once that the source is under unreadable paths,
   // and none of them writes a number read from it; the same for the target (PM), once it is read.
   const hidden: { source: boolean; target: boolean } = { source: await isUnreadable(source, workspace, reading), target: false };
@@ -542,7 +582,7 @@ async function checkAggregate(
 
   if (!grouped) {
     const outcome = sourceTally.total.result();
-    if (!outcome.ok) return finish(sourceProblem(outcome, rule.column, ""));
+    if (!outcome.ok) return finish(sourceProblem(outcome, rule.column, "", hidden.source));
     if (target.rows !== 1) return finish(notHeld(hidden.target ? "target does not have exactly 1 data row" : `target has ${target.rows} data rows; expected exactly 1`));
     const cell = targetTally.firstCell;
     if (compareValue(outcome.value, cell, 1, rule.targetColumn, tolerance, problems, "", hidden)) {
@@ -559,23 +599,33 @@ async function checkAggregate(
   const targetKey = findColumn(target, keyName);
   if (!targetKey.ok) return finish(notHeld(`target column ${shownName(keyName)} is ${targetKey.problem}`));
 
+  // U-258 (F-1): for a source under unreadable paths only the groups of at least k rows are compared,
+  // as query_table shows only those; the others are left out before anything is computed of them.
+  const k = reading.minGroupSize;
+  const compared = [...sourceTally.groups].filter(([, group]) => !hidden.source || group.rows >= k);
+  const notCompared = sourceTally.groups.size - compared.length;
   // R-13 L-2 (PM decision: kept, and named in DATA_CHECKS_LIMITS): a group without any number in the
   // column leaves the whole rule undecided, like every other source problem.
   const computed = new Map<string, { value: number; firstDataRow: number }>();
-  for (const [key, group] of sourceTally.groups) {
+  for (const [key, group] of compared) {
     const outcome = group.aggregate.result();
-    if (!outcome.ok) return finish(sourceProblem(outcome, rule.column, ` (group first seen at source data row ${group.firstDataRow})`));
+    if (!outcome.ok) {
+      // U-258 (F-2): no source data row, no group label for a source under unreadable paths.
+      return finish(sourceProblem(outcome, rule.column, hidden.source ? "" : ` (group first seen at source data row ${group.firstDataRow})`, hidden.source));
+    }
     computed.set(key, { value: outcome.value, firstDataRow: group.firstDataRow });
   }
 
   for (const dataRow of targetTally.emptyKeyRows) problems.add(`target data row ${dataRow} has an empty key`);
   const targetRows = targetTally.byKey;
   let agreed = 0;
+  let missing = 0;
   for (const [key, { value, firstDataRow }] of computed) {
     const entry = targetRows.get(key);
-    const label = ` (group first seen at source data row ${firstDataRow})`;
+    const label = hidden.source ? "" : ` (group first seen at source data row ${firstDataRow})`;
     if (entry === undefined) {
-      problems.add(`no target row for the group first seen at source data row ${firstDataRow}`);
+      if (hidden.source) missing += 1;
+      else problems.add(`no target row for the group first seen at source data row ${firstDataRow}`);
       continue;
     }
     const rows = entry.rows;
@@ -586,15 +636,29 @@ async function checkAggregate(
     const targetRow = rows[0] as number;
     if (compareValue(value, entry.cell, targetRow, rule.targetColumn, tolerance, problems, label, hidden)) agreed += 1;
   }
-  for (const [key, { rows }] of targetRows) {
-    if (!computed.has(key)) problems.add(`target data row ${rows[0]} has a key that no source row has`);
+  if (missing > 0) problems.add(`no target row for ${missing} of the source's groups of at least ${k} rows`);
+  if (hidden.source) {
+    // U-258 (F-1): a key of a hidden group and a key no source row has read alike, counted by target row.
+    let strange = 0;
+    for (const [key, { rows }] of targetRows) if (!computed.has(key)) strange += rows.length;
+    // A target under unreadable paths too gives no count of its rows (U-223, PM).
+    if (strange > 0 && hidden.target) problems.add(`the target has rows whose key is not one of the source's groups of at least ${k} rows`);
+    else if (strange > 0) {
+      problems.add(`${strange} target data ${strange === 1 ? "row has" : "rows have"} a key that is not one of the source's groups of at least ${k} rows`);
+    }
+  } else {
+    for (const [key, { rows }] of targetRows) {
+      if (!computed.has(key)) problems.add(`target data row ${rows[0]} has a key that no source row has`);
+    }
   }
   // U-223 (R-6): how many source rows had no group value is a number read from the source.
   const skipped =
     sourceTally.withoutKey === 0 ? "" : hidden.source ? "; source rows without a group value left out" : `; ${sourceTally.withoutKey} source rows without a group value left out`;
-  if (problems.size > 0) return finish(notHeld(`${problems.text()}${skipped}`));
+  // U-258: that groups were left out is said, not how many or which.
+  const leftOut = notCompared === 0 ? "" : `; the source's groups of fewer than ${k} rows are not compared`;
+  if (problems.size > 0) return finish(notHeld(`${problems.text()}${skipped}${leftOut}`));
   // How many groups agreed is how many rows the target has.
-  return finish(held(hidden.target ? `the groups agree${skipped}` : `${agreed} groups agree${skipped}`));
+  return finish(held(hidden.target ? `the groups agree${skipped}${leftOut}` : `${agreed} groups agree${skipped}${leftOut}`));
 }
 
 async function checkRule(rule: DataRule, workspace: Workspace, reading: Reading): Promise<Verdict> {
@@ -641,6 +705,7 @@ export async function runDataChecksVerifier(
     maxBytes: options.maxTableBytes ?? MAX_DATA_TABLE_BYTES,
     chunkBytes: Math.max(1, Math.floor(options.chunkBytes ?? DATA_TABLE_CHUNK_BYTES)),
     unreadable: unreadableSet(options.unreadablePaths),
+    minGroupSize: effectiveMinGroupSize(options.minGroupSize, []),
   };
   const rules = Array.isArray(config.rules) ? config.rules : [];
   if (rules.length === 0) {

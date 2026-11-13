@@ -286,7 +286,7 @@ async function runFileRulesVerifier(
 }
 
 export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRunner {
-  const { workspace, commandRunner, unreadablePaths } = options;
+  const { workspace, commandRunner, unreadablePaths, minGroupSize } = options;
   return {
     async run(config: VerifierConfig, signal: AbortSignal): Promise<RawVerifierResult> {
       try {
@@ -297,7 +297,10 @@ export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRu
           return await runFileRulesVerifier(config, workspace, signal);
         }
         if (config.kind === "data_checks") {
-          return await runDataChecksVerifier(config, workspace, signal, unreadablePaths === undefined ? {} : { unreadablePaths });
+          return await runDataChecksVerifier(config, workspace, signal, {
+            ...(unreadablePaths === undefined ? {} : { unreadablePaths }),
+            ...(minGroupSize === undefined ? {} : { minGroupSize }),
+          });
         }
       } catch (error) {
         return createRawVerifierResult({

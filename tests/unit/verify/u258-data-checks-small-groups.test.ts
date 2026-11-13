@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 import type { DataChecksVerifierConfig, DataRule, RawVerifierResult, TableRef, Workspace } from "../../../src/contracts/index.js";
-import { UNREADABLE_SOURCE_NOTE, runDataChecksVerifier } from "../../../src/verify/data-checks.js";
+import { UNREADABLE_SOURCE_NOTE, UNREADABLE_TARGET_NOTE, runDataChecksVerifier } from "../../../src/verify/data-checks.js";
 import type { DataChecksOptions } from "../../../src/verify/data-checks.js";
 import { createVerifierRunner } from "../../../src/verify/index.js";
 import type { CommandRunner } from "../../../src/verify/index.js";
@@ -76,6 +76,10 @@ before(async () => {
     "out/with-unknown.csv": `region,sum\nharbor,${harbor}\nmeadow,${meadow}\nnowhere,${sumOf("summit")}\n`,
     "out/with-two-hidden.csv": `region,sum\nharbor,${harbor}\nmeadow,${meadow}\nsummit,1\nvalley,2\n`,
     "out/total.csv": "total\n1\n",
+    // A quote inside an unquoted field on data row 4 (line 5): the source does not parse.
+    "data/broken.csv": "region,amount\nharbor,1.5\nmeadow,2.5\nsummit,3.5\nval\"ley,4.5\n",
+    // A target under the unreadable folder too: no count of its rows is written (U-223, PM).
+    "data/target-with-hidden.csv": `region,sum\nharbor,${harbor}\nmeadow,${meadow}\nsummit,1\nvalley,2\n`,
   };
   for (const [name, text] of Object.entries(files)) await writeFile(join(root, name), text, "utf8");
   workspace = await createWorkspace({ root });
@@ -143,6 +147,13 @@ test("U-258 (F-1): a target row for a hidden group fails, in the words of a key 
   for (const result of [hidden, unknown, two]) assertNothingHidden(result.note);
 });
 
+test("U-258: a target under unreadable paths too gets no count of its rows", async () => {
+  const { state, note } = await noteOf(byRegion("data/target-with-hidden.csv"));
+  assert.equal(state, "not held");
+  assert.equal(note, `the target has rows whose key is not one of the source's groups of at least 5 rows; ${NOT_COMPARED}; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE}`);
+  assertNothingHidden(note);
+});
+
 test("U-258 (F-2): the other problems of a group name the target's rows only", async () => {
   const wrong = await noteOf(byRegion("out/shown-wrong.csv"));
   assert.equal(wrong.note, `target data row 1 of column "sum" does not match; ${NOT_COMPARED}; ${UNREADABLE_SOURCE_NOTE}`);
@@ -159,6 +170,18 @@ test("U-258: a source cell that is not a number is named without its row; in a h
   const total: DataRule = { type: "aggregate_match", source: csv("data/bad-shown.csv"), column: "amount", op: "sum", target: csv("out/total.csv"), targetColumn: "total" };
   assert.deepEqual(await noteOf(total), { state: "undecided", note: `a source cell of column "amount" is not a number; ${UNREADABLE_SOURCE_NOTE}` });
   for (const result of [shown, hiddenGroup]) assertNothingHidden(result.note);
+});
+
+test("U-258: a source that does not parse is named without its data row or line", async () => {
+  const hidden = await noteOf(byRegion("out/shown-right.csv", "data/broken.csv"));
+  assert.deepEqual(hidden, { state: "undecided", note: `source "data/broken.csv" (csv): does not parse as csv: quote in unquoted field; ${UNREADABLE_SOURCE_NOTE}` });
+  const plain = await noteOf(byRegion("out/shown-right.csv", "data/broken.csv"), {});
+  assert.deepEqual(plain, { state: "undecided", note: 'source "data/broken.csv" (csv): does not parse as csv: quote in unquoted field at data row 4, line 5' });
+  // The same for the table a row count is compared with (rows.sameAs).
+  const shape: DataRule = { type: "table_shape", table: csv("out/total.csv"), rows: { sameAs: csv("data/broken.csv") } };
+  const line = (await run([shape])).evidence;
+  assert.equal(/data row|line [0-9]/.test(line.slice(line.indexOf("(csv) ("))), false, line);
+  assert.ok(line.endsWith(`; ${UNREADABLE_SOURCE_NOTE})`), line);
 });
 
 test("U-258: k is the run's, never below 5", async () => {

@@ -1,9 +1,13 @@
 // U-130: the cases scripts/compare-cli-boards.mjs runs with each build's real CLI.
 //
-// Every case runs in a fresh folder: `setup(dir)` writes its files, then its steps run one after
-// another with that folder as the working directory. A step is { args, lang?, env? } or a function
-// of the steps before it (ctx) that returns one, for run ids and digests the CLI chose.
-// Models are scripted only (no network). An address in a config is a closed loopback port.
+// Every case runs in a fresh folder: `setup(dir, { api })` writes its files, then its steps run one
+// after another with that folder as the working directory. A step is { args, lang?, env?, terminal?,
+// answers? } or a function of the steps before it (ctx) that returns one, for run ids and digests the
+// CLI chose. `terminal` names the streams that look like a terminal (an imitation, see the tool);
+// `answers` are typed one by one at the questions.
+// Models are scripted, except in the cases with `api` (a permission question needs a config's rule,
+// and a config's runs use an API provider): those get a fake Anthropic API on 127.0.0.1 and
+// FAKE_API_KEY. An address in any other config is a closed loopback port.
 // Fake values only; a key-shaped text is built at run time, never written in this file.
 
 import { createHash } from "node:crypto";
@@ -13,6 +17,12 @@ import path from "node:path";
 /** A closed loopback port: an address that is never reached. */
 export const CLOSED_LOOPBACK = "http://127.0.0.1:9";
 const FAKE_SECRET = "fake-compare-SECRET-0042";
+/** The key the cases with a fake API use; it never leaves the loopback fake server. */
+export const FAKE_API_KEY = "cdy-fake-apikey-compareCLI01";
+const CTRL_C = String.fromCharCode(3);
+/** The streams a terminal shows output on, and those of a terminal that is also asked. */
+const SHOWN = "stdout,stderr";
+const ASKED = "stdin,stdout,stderr";
 const NO_RUN = "20200101T000000Z-00000000";
 
 function write(dir, relative, content) {
@@ -60,6 +70,48 @@ const run = (...more) => ({ args: ["run", "--task", "task.json", ...more] });
 const report = (run, ...more) => ({ args: ["report", "--workspace", "work", "--run", run, ...more] });
 const runs = (...more) => ({ args: ["runs", "--workspace", "work", ...more] });
 const runIdOf = (step) => (ctx) => ctx.json(step)?.runId ?? "none";
+
+/** An organize task whose scripted model proposes a move and a discard. */
+function planSetup(dir) {
+  write(dir, "work/inbox/a.txt", "alpha\n");
+  write(dir, "work/inbox/old.tmp", "old\n");
+  write(dir, "task.json", task({ workflowRef: "organize", goal: "Sort the inbox.", policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move", "discard"] }, verifiers: [] }));
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [
+      {
+        toolCalls: [
+          {
+            name: "propose_plan",
+            args: { summary: "Sort the inbox", actions: [{ kind: "move", from: "inbox/a.txt", to: "sorted/a.txt" }, { kind: "discard", path: "inbox/old.tmp" }] },
+          },
+        ],
+      },
+    ],
+  });
+}
+
+/** The command the permission cases' model asks to run, twice; a config's rule allows it after a yes. */
+const NODE = process.execPath;
+const check = (word) => ({ type: "tool_use", id: `toolu_${word}`, name: "run_command", input: { executable: NODE, args: ["-e", `process.stdout.write("${word}")`] } });
+function permissionReplies() {
+  return [[check("one")], [check("two")], [{ type: "text", text: "Both checks are asked." }]];
+}
+/** A quick run's config with the fake API's address and one asking command rule (U-109). */
+function permissionSetup(dir, { api }) {
+  write(dir, "work/notes.md", "# Weekly notes\n");
+  write(dir, "config.json", {
+    schemaVersion: 1,
+    model: "fake-model",
+    maxOutputTokens: 256,
+    apiBaseUrl: api,
+    requestTimeoutMs: 20000,
+    maxRetries: 0,
+    limits: { maxModelTurns: 6, maxToolCalls: 6, maxTotalTokens: 200000, maxDurationMs: 60000 },
+    policy: { commands: [{ executable: NODE, argsPrefix: ["-e"], allowExtraArgs: true, confirm: true }], network: "deny", destructive: "deny", restorePathTokens: false },
+  });
+}
+const PERMISSION_RUN = ["run", "--config", "config.json", "--workspace", "work", "--goal", "Run the two checks."];
 
 export const CASES = [
   {
@@ -128,24 +180,7 @@ export const CASES = [
   },
   {
     name: "plan-apply",
-    setup: (dir) => {
-      write(dir, "work/inbox/a.txt", "alpha\n");
-      write(dir, "work/inbox/old.tmp", "old\n");
-      write(dir, "task.json", task({ workflowRef: "organize", goal: "Sort the inbox.", policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move", "discard"] }, verifiers: [] }));
-      write(dir, "script.json", {
-        schemaVersion: 1,
-        steps: [
-          {
-            toolCalls: [
-              {
-                name: "propose_plan",
-                args: { summary: "Sort the inbox", actions: [{ kind: "move", from: "inbox/a.txt", to: "sorted/a.txt" }, { kind: "discard", path: "inbox/old.tmp" }] },
-              },
-            ],
-          },
-        ],
-      });
-    },
+    setup: planSetup,
     steps: [
       run(),
       (ctx) => ({ args: ["plan", "--task", "task.json", "--run", runIdOf(0)(ctx)] }),
@@ -212,5 +247,67 @@ export const CASES = [
     lang: "ko",
     setup: documentSetup(DOCUMENT_STEPS),
     steps: [{ args: ["frobnicate"] }, { args: ["run", "--task", "missing.json"] }, { args: ["report", "--workspace", "work", "--run", NO_RUN] }],
+  },
+  // U-135: terminal cases (imitated: see the tool).
+  {
+    name: "terminal-first-page",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      { args: [], terminal: SHOWN },
+      { args: ["--help"], terminal: SHOWN },
+      { args: ["--help"], terminal: SHOWN, lang: "ko" },
+    ],
+  },
+  {
+    name: "terminal-doctor",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      { args: ["doctor"], terminal: SHOWN },
+      { args: ["doctor"], terminal: SHOWN, lang: "ko" },
+    ],
+  },
+  {
+    name: "terminal-run",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      { ...run(), terminal: SHOWN },
+      { ...run(), terminal: SHOWN, lang: "ko" },
+      { ...report("latest"), terminal: SHOWN },
+    ],
+  },
+  {
+    name: "terminal-init",
+    setup: (dir) => write(dir, "work/package.json", { name: "compare", scripts: { test: "node --test", lint: "node lint.js" } }),
+    steps: [
+      { args: ["init", "--workspace", "work"], terminal: ASKED, answers: ["y", "", "y", "n"] },
+      { args: ["init", "--workspace", "work"], terminal: ASKED, answers: ["y"] },
+    ],
+  },
+  {
+    name: "terminal-init-declined",
+    setup: (dir) => mkdirSync(path.join(dir, "work"), { recursive: true }),
+    steps: [{ args: ["init", "--workspace", "work"], terminal: ASKED, answers: ["n"] }],
+  },
+  {
+    name: "terminal-apply-yes",
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["y"] }), report("latest")],
+  },
+  {
+    name: "terminal-apply-no",
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["n"] }), runs()],
+  },
+  {
+    name: "terminal-permission",
+    api: { replies: permissionReplies() },
+    setup: permissionSetup,
+    steps: [{ args: PERMISSION_RUN, terminal: ASKED, answers: ["y", "n"] }, report("latest")],
+  },
+  {
+    name: "terminal-permission-ctrl-c",
+    api: { replies: permissionReplies() },
+    setup: permissionSetup,
+    steps: [{ args: PERMISSION_RUN, terminal: ASKED, answers: [CTRL_C] }, report("latest")],
   },
 ];

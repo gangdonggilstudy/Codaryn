@@ -11,4 +11,4 @@ export type { TableScanOutcome, TableSink, TableTextOutcome } from "./stream.js"
 export { RunningAggregate, aggregate, columnCells, groupCells, parseNumber, withinTolerance } from "./aggregate.js";
 export type { AggregateOutcome, CellAt, Group, Grouping, Tolerance } from "./aggregate.js";
 export { TableQuerySink, TableShapeSink, queryTable, tableShape } from "./query.js";
-export type { TableQuery, TableQueryOutcome, TableReadFailure, TableShapeOutcome } from "./query.js";
+export type { QueryTally, TableQuery, TableQueryOutcome, TableReadFailure, TableShapeOutcome } from "./query.js";

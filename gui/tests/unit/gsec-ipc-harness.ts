@@ -5,14 +5,17 @@
  * PlanApprovals, SettingsProposals, CleanupPreviews, TextEdits, RunManager, RunHistory, model
  * entries); what reaches outside is recorded instead of done: every engine host call, every OS
  * dialog or question, the clipboard, the file manager, and what is sent to the window.
- * Temporary folders only; nothing is sent anywhere.
+ * Temporary folders only, all under one root that is removed after the file's cases, whether they
+ * passed, failed or ran out of time (U-284); nothing is sent anywhere.
  */
 
 import { randomBytes } from "node:crypto";
 import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { register } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { after } from "node:test";
 import type { IpcDeps } from "../../src/main/ipc.js";
 import type { HostCall, HostResponse } from "../../src/shared/protocol.js";
 
@@ -78,6 +81,9 @@ export interface Ipc {
 }
 
 const temporaryRoot = mkdtempSync(path.join(tmpdir(), "codaryn-gsec-"));
+// U-284: the file's root hook runs after every case, a failed or cancelled one too; a removal that
+// fails fails the file instead of leaving the folder unseen.
+after(() => rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 let folders = 0;
 
 /** A fresh registration of every handler with recording dependencies. */

@@ -92,10 +92,67 @@ export interface PathSet {
    * resolved; `covers` alone never allows a write there.
    */
   coversEffective(relative: string, workspace: Workspace): Promise<boolean>;
+  /**
+   * U-203 (bundle A, R-3, R-4): every entry resolved once, for judging many paths of one listing
+   * without resolving again for each: an entry covers by its text and by its real path as resolved
+   * now. An unusable list or entry covers everything (`covers`) or nothing (`misses`), as for
+   * coversEffective; an entry in the state directory is passed over. Link entries cover their real
+   * paths: it is for lists that follow links (the unreadable paths, a deny list).
+   */
+  snapshot(workspace: Workspace): Promise<PathSetSnapshot>;
 }
 
-const NOTHING: PathSet = { covers: () => false, coversEffective: async () => false };
-const EVERYTHING: PathSet = { covers: () => true, coversEffective: async () => true };
+/** U-203: a path set with its entries resolved once (PathSet.snapshot). */
+export interface PathSetSnapshot {
+  /** True when an entry covers `relative` (`/` separated, "." for the root) by its text or its real path. */
+  covers(relative: string): boolean;
+  /**
+   * True when an entry, by its text or its real path, lies at or below `relative`: a listing of
+   * that folder reaches what the set covers. It depends on the entries only, never on what exists.
+   */
+  within(relative: string): boolean;
+}
+
+const ALL_SNAPSHOT: PathSetSnapshot = { covers: () => true, within: () => true };
+const NO_SNAPSHOT: PathSetSnapshot = { covers: () => false, within: () => false };
+const NOTHING: PathSet = { covers: () => false, coversEffective: async () => false, snapshot: async () => NO_SNAPSHOT };
+const EVERYTHING: PathSet = { covers: () => true, coversEffective: async () => true, snapshot: async () => ALL_SNAPSHOT };
+
+/** U-203: a snapshot from entry segments (text and real paths), as prefixes. */
+function snapshotOf(prefixes: readonly (readonly string[])[], match: PathSetOptions["match"]): PathSetSnapshot {
+  return {
+    covers: (relative) => prefixes.some((entry) => entryCovers(entry, relative, match)),
+    within: (relative) => {
+      const folder = relative === "." ? [] : relative.split("/").map(fold);
+      return prefixes.some((entry) => folder.length <= entry.length && folder.every((segment, index) => segment === entry[index]));
+    },
+  };
+}
+
+/** U-203: the entries resolved once: their text, and their real paths where they resolve. */
+async function resolvedPrefixes(
+  entries: readonly string[],
+  lexical: readonly (readonly string[])[],
+  workspace: Workspace,
+  options: PathSetOptions,
+): Promise<readonly (readonly string[])[] | "everything"> {
+  const prefixes: (readonly string[])[] = [];
+  for (const [index, entry] of entries.entries()) {
+    let resolved: Awaited<ReturnType<Workspace["resolve"]>> | null;
+    try {
+      resolved = await workspace.resolve(entry, "read");
+    } catch {
+      resolved = null;
+    }
+    if (resolved === null || !resolved.ok) {
+      if (resolved !== null && !resolved.ok && resolved.code === "state_dir") continue;
+      if (options.onUnusable === "covers") return "everything";
+      continue;
+    }
+    prefixes.push(lexical[index] as readonly string[], segmentsOf(resolved.path.relative));
+  }
+  return prefixes;
+}
 
 function entryCovers(entry: readonly string[], relative: string, match: PathSetOptions["match"]): boolean {
   const segments = relative === "." ? [] : relative.split("/").map(fold);
@@ -113,10 +170,15 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
   if (entries.length === 0) return NOTHING;
   const lexical = entries.map(segmentsOf);
   const covers = (relative: string): boolean => lexical.some((entry) => entryCovers(entry, relative, options.match));
+  const snapshot = async (workspace: Workspace): Promise<PathSetSnapshot> => {
+    const prefixes = await resolvedPrefixes(entries, lexical, workspace, options);
+    return prefixes === "everything" ? ALL_SNAPSHOT : snapshotOf(prefixes, options.match);
+  };
   if (options.onUnusable === "covers") {
     // A deny list (the protected paths' rule, unchanged): the text covers at once.
     return {
       covers,
+      snapshot,
       async coversEffective(relative, workspace) {
         if (covers(relative)) return true;
         for (const entry of entries) {
@@ -136,6 +198,7 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
   // An allow list (V-3 M-1): an entry allows only after its real path was found.
   return {
     covers,
+    snapshot,
     async coversEffective(relative, workspace) {
       // R-101 L-2: the entries whose text covers the path first, then the others.
       const byText = lexical.map((text) => entryCovers(text, relative, options.match));

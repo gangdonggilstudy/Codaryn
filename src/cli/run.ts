@@ -67,6 +67,9 @@ import type {
 import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText } from "./text-safety.js";
+import { createMessageCatalog } from "../i18n/index.js";
+import { terminalConfirm } from "./confirm.js";
+import type { AskLine } from "./confirm.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
@@ -133,6 +136,12 @@ export interface CliEnvironment {
   readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
   /** Cancellation for the run. Created from the parsed arguments. */
   readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
+  /**
+   * U-110 (B-5): asks one line at a terminal. The real CLI gives it only when standard input and
+   * stderr are terminals. Absent, or with --quiet: the permission question is not asked (denied by
+   * default, DR-10).
+   */
+  readonly ask?: AskLine;
   /**
    * U-3: the running CLI's package root (`findInstall` in the real CLI, which always sets it).
    * Undefined: not checked (in-process tests). Null: it could not be found, so every run is refused.
@@ -879,7 +888,18 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
             },
             close: () => progressed.close(),
           };
-    const deps = { ...assembled.deps, journal };
+    // U-110 (B-5): at a terminal and without --quiet, the engine's permission question is asked on
+    // stderr in the chosen language (English when no renderer is given).
+    let questions: MessageCatalog | undefined;
+    if (!args.quiet && io.ask !== undefined) {
+      try {
+        questions = human?.messages ?? io.human?.(notes.configLanguage).messages;
+      } catch {
+        questions = undefined;
+      }
+    }
+    const confirm = args.quiet || io.ask === undefined ? undefined : terminalConfirm(io.ask, questions ?? createMessageCatalog("en"));
+    const deps = { ...assembled.deps, journal, ...(confirm === undefined ? {} : { confirm }) };
     let result: EngineResult | null = null;
     try {
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.

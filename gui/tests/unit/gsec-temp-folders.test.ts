@@ -56,7 +56,7 @@ async function runFixture(t: TestContext, name: string, boundMs: number): Promis
   let closed = false;
   const ended = new Promise<void>((resolve) => child.once("close", () => ((closed = true), resolve())));
   // Whatever the fixture left is removed after this case, so it leaves nothing either. A CLI run a
-  // stopped fixture left behind ends by itself within its short wait, so the removal waits that out.
+  // stopped fixture left behind ends by itself within its 40 s wait, so the removal waits that out.
   t.after(async () => {
     if (!closed) {
       child.kill();
@@ -83,7 +83,7 @@ function summary(output: string): Record<string, number> {
 }
 
 describe("G-sec: no temporary folder and no process left behind", () => {
-  test("U-284: the IPC harness's cases leave no temporary folder, whether they pass, fail or run out of time", { todo: "U-284: the harness's root is never removed", timeout: 120_000 }, async (t) => {
+  test("U-284: the IPC harness's cases leave no temporary folder, whether they pass, fail or run out of time", { timeout: 120_000 }, async (t) => {
     const run = await runFixture(t, "gsec-fixture-temp-harness.js", 60_000);
     assert.equal(run.endedByItself, true, `the fixture's process ended by itself:\n${run.output.slice(-2000)}`);
     assert.deepEqual(summary(run.output), { pass: 1, fail: 1, cancelled: 1 }, run.output.slice(-2000));
@@ -91,7 +91,7 @@ describe("G-sec: no temporary folder and no process left behind", () => {
     for (const dir of run.recorded) assert.equal(await exists(dir), false, `left behind: ${dir}`);
   });
 
-  test("U-284: a host-process case that fails or runs out of time leaves no folder and no process", { skip, todo: "U-284: a case's own finally is never reached when it runs out of time", timeout: 240_000 }, async (t) => {
+  test("U-284: a host-process case that fails or runs out of time leaves no folder and no process", { skip, timeout: 240_000 }, async (t) => {
     const run = await runFixture(t, "gsec-fixture-temp-host.js", 90_000);
     assert.equal(run.endedByItself, true, `the fixture's process ended by itself (nothing it started kept it alive):\n${run.output.slice(-2000)}`);
     assert.deepEqual(summary(run.output), { pass: 0, fail: 1, cancelled: 1 }, run.output.slice(-2000));

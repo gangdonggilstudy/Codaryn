@@ -3,13 +3,18 @@
  * fixture of gsec-temp-folders.test.ts): the real engine host the main process's own client starts,
  * the real CLI, scripted task files, and an environment with no key, no Codaryn variable of this
  * machine and the default config locations in the case's folder.
+ * U-284: a case's folder comes from `scratch`, and what the case starts there (the host, a CLI run)
+ * is undone after the case in t.after, which also runs after a case that failed or ran out of time;
+ * then the folder is removed. No case leaves a folder or a process behind.
  */
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { startEngineHost } from "../../src/main/engine-client.js";
 import type { EngineHost } from "../../src/main/engine-client.js";
@@ -23,6 +28,39 @@ export const ENGINE_DIR = path.join(GUI, "..", "dist", "src");
 export const CLI = path.join(ENGINE_DIR, "cli", "main.js");
 export const ENGINE_BUILT = existsSync(path.join(ENGINE_DIR, "app", "index.js"));
 export const skip = !ENGINE_BUILT && "the engine is not built (npm run build in the root)";
+
+/** A case's own folder, and what the case started there, to undo after it. */
+export interface Scratch {
+  readonly dir: string;
+  /** `undo` runs after the case, before the folder goes, the last one given first; given after that, at once. */
+  defer(undo: () => Promise<unknown>): void;
+}
+
+/**
+ * U-284: a fresh folder in the system's temporary folder for the case `t`, made before anything else
+ * of the case (so a host that fails to start leaves no folder either). In t.after, which runs after
+ * a case that passed, failed or ran out of time, what the case started is undone, the last first,
+ * and then the folder is removed; a removal that fails fails the case instead of leaving the folder
+ * unseen. A case that ran out of time may still be running: what it starts after that is undone at once.
+ */
+export async function scratch(t: TestContext): Promise<Scratch> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codaryn-gsec-host-"));
+  const undos: (() => Promise<unknown>)[] = [];
+  let over = false;
+  const quietly = (undo: () => Promise<unknown>): Promise<unknown> => Promise.resolve().then(undo).catch(() => undefined);
+  t.after(async () => {
+    over = true;
+    for (const undo of undos.splice(0).reverse()) await quietly(undo);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  return {
+    dir,
+    defer(undo) {
+      if (over) void quietly(undo);
+      else undos.push(undo);
+    },
+  };
+}
 
 /**
  * The host's and the CLI's environment: no key or Codaryn variable of this machine (so no CODARYN_CONFIG:
@@ -67,9 +105,14 @@ export interface Host {
   readonly done: Promise<unknown>;
 }
 
-/** The real host, with its run messages collected (each events message checked as the main process checks it). */
-export async function startHost(dir: string): Promise<Host> {
+/**
+ * The real host in the case's folder, with its run messages collected (each events message checked as
+ * the main process checks it); closed after the case.
+ */
+export async function startHost(space: Scratch): Promise<Host> {
+  const { dir } = space;
   const outcome = await startEngineHost({ nodePath: process.execPath, hostScript: HOST_SCRIPT, engineDir: ENGINE_DIR, env: isolatedEnv(dir), cwd: dir, transport: "loopback-only" });
+  if (outcome.ok) space.defer(() => outcome.host.close());
   assert.ok(outcome.ok, `the host started: ${JSON.stringify(outcome)}`);
   const items: HostRunItem[] = [];
   let ended: (value: unknown) => void = () => undefined;
@@ -85,8 +128,12 @@ export async function startHost(dir: string): Promise<Host> {
   return { host: outcome.host, items, done };
 }
 
-export const within = <T>(promise: Promise<T>, ms: number, what: string): Promise<T> =>
-  Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`gsec: ${what} took more than ${ms} ms`)), ms))]);
+/** `promise`, or a failure after `ms`; the timer goes once either comes, so it keeps no process alive. */
+export function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`gsec: ${what} took more than ${ms} ms`)), ms)));
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
 
 export async function waitFor(check: () => Promise<boolean>, what: string, ms = 20_000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -96,14 +143,22 @@ export async function waitFor(check: () => Promise<boolean>, what: string, ms = 
   }
 }
 
-/** The real CLI with the isolated environment; its exit code and stdout's last JSON line. */
-export function cli(dir: string, args: readonly string[]): { readonly ended: Promise<{ code: number | null; json: Record<string, unknown> | null }> } {
+/**
+ * The real CLI in the case's folder with the isolated environment; its exit code and stdout's last
+ * JSON line. A run the case did not see end is ended after the case: through `cancelFile` when the
+ * run was given it (--cancel-file), and only when that does not end it, by ending the process the
+ * case started.
+ */
+export function cli(space: Scratch, args: readonly string[], cancelFile?: string): { readonly ended: Promise<{ code: number | null; json: Record<string, unknown> | null }> } {
+  const { dir } = space;
   const child = spawn(process.execPath, [CLI, ...args], { cwd: dir, env: isolatedEnv(dir), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let stdout = "";
+  let closed = false;
   child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
   child.stderr.on("data", () => undefined);
   const ended = new Promise<{ code: number | null; json: Record<string, unknown> | null }>((resolve) =>
     child.once("close", (code) => {
+      closed = true;
       const last = stdout.trim().split("\n").filter((line) => line.startsWith("{")).pop();
       let json: Record<string, unknown> | null = null;
       try {
@@ -114,6 +169,17 @@ export function cli(dir: string, args: readonly string[]): { readonly ended: Pro
       resolve({ code, json });
     }),
   );
+  space.defer(async () => {
+    if (closed) return;
+    if (cancelFile !== undefined) {
+      await fs.writeFile(cancelFile, "", "utf8").catch(() => undefined);
+      await within(ended, 30_000, "the CLI's run ending after the case").catch(() => undefined);
+    }
+    if (!closed) {
+      child.kill();
+      await within(ended, 10_000, "the CLI's process ending after the case").catch(() => undefined);
+    }
+  });
   return { ended };
 }
 

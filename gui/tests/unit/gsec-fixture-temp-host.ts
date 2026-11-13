@@ -1,20 +1,22 @@
 /**
  * U-284 fixture, not a test file of its own: gsec-temp-folders.test.ts runs it in a Node process of
- * its own. Host-process cases written as gsec-host-process.test.ts writes them, that fail or run out
- * of time while the real engine host runs in their folder and a CLI run holds the workspace there.
+ * its own. Host-process cases written as gsec-host-process.test.ts writes them (a folder from
+ * `scratch`, the host and the CLI run started through gsec-host-support.ts), that fail or run out of
+ * time while the real engine host runs in their folder and a CLI run holds the workspace there.
  * Each records its folder in the file that GSEC_FIXTURE_RECORD names. The held run's model step
- * waits only a few seconds, so a run a stopped fixture leaves behind soon ends by itself.
+ * waits 40 s: longer than scratch's removal keeps trying (its rm retries back off for about 21 s in
+ * all), so a run the cleanup did not end keeps the folder from going; and short enough that a run a
+ * stopped fixture left behind ends by itself soon after.
  */
 
 import assert from "node:assert/strict";
 import { appendFileSync } from "node:fs";
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { cli, exists, lockFile, startHost, taskFile, waitFor, within } from "./gsec-host-support.js";
+import type { TestContext } from "node:test";
+import { cli, exists, lockFile, scratch, startHost, taskFile, waitFor } from "./gsec-host-support.js";
 
-const SHORT_WAIT = { text: "waiting", delayMs: 8_000 };
+const HELD_WAIT = { text: "waiting", delayMs: 40_000 };
 
 function record(dir: string): void {
   const file = process.env["GSEC_FIXTURE_RECORD"];
@@ -22,30 +24,20 @@ function record(dir: string): void {
 }
 
 /** A case as gsec-host-process.test.ts writes it: the host and a held CLI run, then `then`. */
-async function heldCase(then: () => Promise<void>): Promise<void> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codaryn-gsec-host-"));
-  record(dir);
-  const { host } = await startHost(dir);
-  const cancelFile = path.join(dir, "cancel.flag");
-  let running: ReturnType<typeof cli> | null = null;
-  try {
-    running = cli(dir, ["run", "--task", await taskFile(dir, "holding", [SHORT_WAIT]), "--json", "--cancel-file", cancelFile]);
-    await waitFor(() => exists(lockFile(dir)), "the CLI's run taking the lock");
-    await then();
-  } finally {
-    if (running !== null) {
-      await fs.writeFile(cancelFile, "", "utf8").catch(() => undefined);
-      await within(running.ended, 30_000, "the CLI's run ending after the case").catch(() => undefined);
-    }
-    await host.close();
-    await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
+async function heldCase(t: TestContext, then: () => Promise<void>): Promise<void> {
+  const space = await scratch(t);
+  record(space.dir);
+  await startHost(space);
+  const cancelFile = path.join(space.dir, "cancel.flag");
+  cli(space, ["run", "--task", await taskFile(space.dir, "holding", [HELD_WAIT]), "--json", "--cancel-file", cancelFile], cancelFile);
+  await waitFor(() => exists(lockFile(space.dir)), "the CLI's run taking the lock");
+  await then();
 }
 
-test("gsec fixture: a host case that fails", { timeout: 60_000 }, async () => {
-  await heldCase(async () => assert.fail("gsec fixture: a failing case"));
+test("gsec fixture: a host case that fails", { timeout: 60_000 }, async (t) => {
+  await heldCase(t, async () => assert.fail("gsec fixture: a failing case"));
 });
 
-test("gsec fixture: a host case that runs out of time", { timeout: 15_000 }, async () => {
-  await heldCase(() => new Promise(() => undefined));
+test("gsec fixture: a host case that runs out of time", { timeout: 15_000 }, async (t) => {
+  await heldCase(t, () => new Promise(() => undefined));
 });

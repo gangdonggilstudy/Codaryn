@@ -28,6 +28,9 @@
 // gets a fake Anthropic API on 127.0.0.1 (scripts/compare-cli/fake-anthropic.mjs) and a fake key:
 // a permission question comes only from a config's rule, and a config's runs use an API provider.
 // The requests it got are compared too. The report says the terminal cases are an imitation.
+//
+// U-167: a case's `api.models` makes the fake API list those models (GET /v1/models) for
+// `codaryn models`. A cleanup step's byte counts are normalized (normalize.mjs).
 
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -126,7 +129,9 @@ function removeLink(link) {
  * Unpacks `commit` into `dir` (git archive) and builds it. `alter(dir)` may change the unpacked
  * sources before the build (the tool's own tests). Returns the build.
  */
-export async function prepareBoard({ commit, dir, nodeModules = path.join(REPO, "node_modules"), alter }) {
+export async function prepareBoard({ commit, dir: given, nodeModules = path.join(REPO, "node_modules"), alter }) {
+  // U-167: a relative folder is taken from the current directory once (the build runs inside it).
+  const dir = path.resolve(given);
   const sha = git(["rev-parse", "--verify", `${commit}^{commit}`]);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -222,7 +227,7 @@ function stepName(index, args, terminal, answers) {
 export async function runCase(board, spec, caseDir) {
   rmSync(caseDir, { recursive: true, force: true });
   mkdirSync(caseDir, { recursive: true });
-  const api = spec.api === undefined ? null : await startFakeAnthropic(spec.api.replies);
+  const api = spec.api === undefined ? null : await startFakeAnthropic(spec.api.replies, { models: spec.api.models });
   try {
     spec.setup(caseDir, { api: api?.url ?? null });
     const outputs = [];
@@ -280,7 +285,9 @@ function pathsFor(caseDir, board, apiUrl) {
 }
 
 /** Runs the cases with both builds and compares them. */
-export async function compareBuilds({ base, head, cases = CASES, caseDir }) {
+export async function compareBuilds({ base, head, cases = CASES, caseDir: given }) {
+  // U-167: absolute, so the path forms normalized are those the CLI prints.
+  const caseDir = path.resolve(given);
   const results = [];
   for (const spec of cases) {
     const sides = {};
@@ -357,7 +364,8 @@ export async function main(argv) {
   const names = options.cases === undefined ? null : new Set(options.cases.split(","));
   const cases = names === null ? CASES : CASES.filter((spec) => names.has(spec.name));
   if (names !== null && cases.length !== names.size) throw new Error(`unknown case in --cases: ${[...names].filter((name) => !CASES.some((spec) => spec.name === name)).join(", ")}`);
-  const work = options.work ?? path.join(tmpdir(), `codaryn-compare-${process.pid}`);
+  // U-167: --work may be relative (to the current directory).
+  const work = path.resolve(options.work ?? path.join(tmpdir(), `codaryn-compare-${process.pid}`));
   mkdirSync(work, { recursive: true });
   try {
     const base = await prepareBoard({ commit: options.base, dir: path.join(work, "base") });

@@ -98,6 +98,32 @@ test("U-213: no try starts at or after the time limit (slow tries of a large tre
   assert.equal(read.tries(), 6);
 });
 
+test("U-213 (Codex V-16): a wait that ends late, at or after the time limit, starts no try more", async () => {
+  // Codex's reproduction: three changed tries at once, then the 50 ms wait ends at 2,000 or 2,001 ms.
+  for (const late of [2_000, 2_001]) {
+    const clock = fakeClock(() => {
+      clock.time = late;
+    });
+    const run = attempts(clock, 3, 0);
+    assert.equal(await retried(run.attempt, { clock, until: retryDeadline(clock) }), "changed", `wait ended at ${late} ms`);
+    assert.deepEqual([run.tries(), clock.slept], [3, [50]], `wait ended at ${late} ms: no fourth try`);
+  }
+  // A wait that ends just before the limit still lets the next try start.
+  const inTime = fakeClock(() => {
+    inTime.time = 1_999;
+  });
+  const early = attempts(inTime, 3, 0);
+  assert.equal(await retried(early.attempt, { clock: inTime, until: retryDeadline(inTime) }), "read");
+  assert.equal(early.tries(), 4);
+  // A single read has no limit: a late wait does not end it.
+  const alone = fakeClock(() => {
+    alone.time += 5_000;
+  });
+  const read = attempts(alone, 3, 0);
+  assert.equal(await retried(read.attempt, { clock: alone }), "read");
+  assert.equal(read.tries(), 4);
+});
+
 test("U-213: the run's signal ends the tries: aborted during a wait, or already aborted, no try more starts", async () => {
   const controller = new AbortController();
   const clock = fakeClock(() => controller.abort());

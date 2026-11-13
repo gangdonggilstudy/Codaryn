@@ -198,7 +198,9 @@ export async function retried<T>(attempt: () => Promise<T | "changed">, options:
     if (until !== undefined && clock.now() + pause >= until) return outcome;
     if (pause > 0) {
       await clock.sleep(pause, signal);
-      if (aborted()) return outcome;
+      // Codex V-16: a timer can end late (a busy machine, a paused event loop): the limit is looked at
+      // again, so no try starts at or after it.
+      if (aborted() || (until !== undefined && clock.now() >= until)) return outcome;
     }
   }
 }

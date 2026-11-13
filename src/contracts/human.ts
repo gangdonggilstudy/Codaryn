@@ -1205,7 +1205,9 @@ export type DoctorText = {
  *   way to ask (the CLI gave the engine its terminal question). Absent when there was none. They are
  *   among deniedCommandCalls; the add-a-rule hint is for the other denied command calls only, and
  *   each count above 0 has its line: `summary.confirm_denied.user`, `.cancelled`, and for `default`
- *   `.unanswered` when couldAsk, else `.unasked`.
+ *   `.unanswered` when couldAsk, else `.unasked`. U-137 (R88b-L1): "among deniedCommandCalls" holds also
+ *   for a call whose run ended at its question (cancelled, or the time limit): the engine records its
+ *   denied `tool_decision` after the answer (journal.ts), so the hint still counts the other calls.
  * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
  *   Optional (PM, after e94decc): absent counts as 0, so no line; `run` gives it.
  *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the

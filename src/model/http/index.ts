@@ -102,6 +102,8 @@ export type Failure = {
   readonly message: string;
   /** SP-3: the HTTP status of a failure that is an HTTP response (ModelOutcome.httpStatus). */
   readonly httpStatus?: number;
+  /** U-82 (DR-68): ModelOutcome.retryable; absent when it is not known. */
+  readonly retryable?: boolean;
 };
 
 /**
@@ -358,7 +360,8 @@ export interface HttpRequest {
 /** A request that ended: the 2xx body, or a failure whose message is not yet redacted. */
 export type Sent =
   | { readonly ok: true; readonly text: string }
-  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string; readonly httpStatus?: number };
+  /** U-82 (DR-68): `retryable` is the transport's verdict on its last attempt; absent for a cancel. */
+  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string; readonly httpStatus?: number; readonly retryable?: boolean };
 
 /**
  * One attempt: the request time limit, no redirects (the key is not sent elsewhere), the body read
@@ -475,12 +478,18 @@ export async function sendWithRetries(transport: Transport, request: HttpRequest
     const result = await attemptOnce(transport, request, signal);
     if (result.type === "aborted") return { ok: false, kind: "aborted", message: "cancelled while the request was in flight" };
     if (result.type === "body") return { ok: true, text: result.text };
-    if (result.type === "final") return { ok: false, kind: result.kind, message: result.message };
+    if (result.type === "final") return { ok: false, kind: result.kind, message: result.message, retryable: false };
     const minimum = transport.retryAfter === "minimum";
     const tooLong = minimum && result.retryAfterMs !== undefined && result.retryAfterMs > MAX_RETRY_AFTER_MS;
     if (!result.retryable || attempt >= attempts || tooLong) {
       const suffix = attempt > 1 ? ` (after ${attempt} attempts)` : "";
-      return { ok: false, kind: result.kind, message: `${result.message}${suffix}`, ...(result.status === undefined ? {} : { httpStatus: result.status }) };
+      return {
+        ok: false,
+        kind: result.kind,
+        message: `${result.message}${suffix}`,
+        ...(result.status === undefined ? {} : { httpStatus: result.status }),
+        retryable: result.retryable,
+      };
     }
     const backoff = Math.min(BASE_BACKOFF_MS * 2 ** (attempt - 1), MAX_BACKOFF_MS);
     const delay = minimum

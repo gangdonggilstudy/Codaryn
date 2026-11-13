@@ -11,6 +11,9 @@
  *
  * DR-37 (a) changed three messages on purpose: a 401 or 403 now says only the fixed phrase and the
  * request id (p3Retries.unauthorized, p3Retries.forbidden, p6Models.errorOnSecondPage). Nothing else.
+ * DR-68 (U-82) added `retryable` to every failure (ModelOutcome.retryable: the transport's verdict
+ * for what was sent, the adapter's own for a malformed reply or a refusal). Nothing else changed:
+ * without that key the values equal the ones pinned before (checked by a script in the U-82 report).
  */
 
 export const SP0_GOLDEN: Record<string, unknown> = {
@@ -158,7 +161,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "overloaded",
         "message": "HTTP 529 overloaded_error: busy (request req_011CAbCdEf) (after 4 attempts)",
-        "httpStatus": 529
+        "httpStatus": 529,
+        "retryable": true
       }
     },
     "unavailableThenServerError": {
@@ -206,7 +210,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "auth_failed",
         "message": "HTTP 401: the key or its access was refused; the provider's message is not shown (request req_011CAbCdEf)",
-        "httpStatus": 401
+        "httpStatus": 401,
+        "retryable": false
       }
     },
     "forbidden": {
@@ -216,7 +221,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "auth_failed",
         "message": "HTTP 403: the key or its access was refused; the provider's message is not shown (request req_011CAbCdEf)",
-        "httpStatus": 403
+        "httpStatus": 403,
+        "retryable": false
       }
     },
     "badRequest": {
@@ -226,7 +232,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 400 invalid_request_error: bad field (request req_011CAbCdEf)",
-        "httpStatus": 400
+        "httpStatus": 400,
+        "retryable": false
       }
     },
     "notFound": {
@@ -236,7 +243,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 404 not_found_error: model: test-model-id (request req_011CAbCdEf)",
-        "httpStatus": 404
+        "httpStatus": 404,
+        "retryable": false
       }
     },
     "serverErrorAlways": {
@@ -250,7 +258,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 500 api_error: boom (request req_011CAbCdEf) (after 4 attempts)",
-        "httpStatus": 500
+        "httpStatus": 500,
+        "retryable": true
       }
     },
     "connectionResetThenOk": {
@@ -281,7 +290,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "network error: connection failed (ECONNREFUSED) (after 4 attempts)"
+        "message": "network error: connection failed (ECONNREFUSED) (after 4 attempts)",
+        "retryable": true
       }
     },
     "tlsFailure": {
@@ -290,7 +300,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "network error: TLS connection failed (CERT_HAS_EXPIRED)"
+        "message": "network error: TLS connection failed (CERT_HAS_EXPIRED)",
+        "retryable": false
       }
     },
     "formatRefusal": {
@@ -299,7 +310,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "the transport refused the request format (header, URL or port); nothing was sent"
+        "message": "the transport refused the request format (header, URL or port); nothing was sent",
+        "retryable": false
       }
     },
     "unknownFailure": {
@@ -308,7 +320,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "network error: unknown transport failure"
+        "message": "network error: unknown transport failure",
+        "retryable": false
       }
     },
     "timeoutAlways": {
@@ -319,7 +332,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "timeout",
-        "message": "the request did not finish within 30 ms (after 2 attempts)"
+        "message": "the request did not finish within 30 ms (after 2 attempts)",
+        "retryable": true
       }
     },
     "redirect": {
@@ -329,7 +343,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 302: redirects are not followed, so the key is not sent elsewhere",
-        "httpStatus": 302
+        "httpStatus": 302,
+        "retryable": false
       }
     },
     "noRetriesAllowed": {
@@ -339,7 +354,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "rate_limited",
         "message": "HTTP 429 rate_limit_error: slow down (request req_011CAbCdEf)",
-        "httpStatus": 429
+        "httpStatus": 429,
+        "retryable": true
       }
     },
     "badGatewayThenOk": {
@@ -385,7 +401,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 413 request_too_large: too big (request req_011CAbCdEf)",
-        "httpStatus": 413
+        "httpStatus": 413,
+        "retryable": false
       }
     },
     "unprocessable": {
@@ -395,7 +412,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 422 invalid_request_error: cannot process (request req_011CAbCdEf)",
-        "httpStatus": 422
+        "httpStatus": 422,
+        "retryable": false
       }
     },
     "retryAfterPastDate": {
@@ -467,7 +485,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 500 api_error: boom (request req_011CAbCdEf) (after 8 attempts)",
-        "httpStatus": 500
+        "httpStatus": 500,
+        "retryable": true
       }
     }
   },
@@ -478,7 +497,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 400 invalid_request_error: bad key [redacted] (request req_011CAbCdEf)",
-        "httpStatus": 400
+        "httpStatus": 400,
+        "retryable": false
       }
     },
     "jsonLongMessage": {
@@ -487,7 +507,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 400 invalid_request_error: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ...",
-        "httpStatus": 400
+        "httpStatus": 400,
+        "retryable": false
       }
     },
     "jsonOddType": {
@@ -496,7 +517,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 400: m",
-        "httpStatus": 400
+        "httpStatus": 400,
+        "retryable": false
       }
     },
     "htmlBody": {
@@ -505,7 +527,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 502 (the error body is not a JSON error object and is not shown)",
-        "httpStatus": 502
+        "httpStatus": 502,
+        "retryable": true
       }
     },
     "emptyBody": {
@@ -514,7 +537,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 500",
-        "httpStatus": 500
+        "httpStatus": 500,
+        "retryable": true
       }
     },
     "hugeBody": {
@@ -523,7 +547,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 400 (the error body is longer than 4096 bytes and is not shown)",
-        "httpStatus": 400
+        "httpStatus": 400,
+        "retryable": false
       }
     },
     "successNotJson": {
@@ -531,7 +556,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "malformed_response",
-        "message": "malformed response: the body is not JSON"
+        "message": "malformed response: the body is not JSON",
+        "retryable": false
       }
     },
     "successWrongShape": {
@@ -539,7 +565,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "malformed_response",
-        "message": "malformed response: unexpected stop_reason undefined"
+        "message": "malformed response: unexpected stop_reason undefined",
+        "retryable": false
       }
     },
     "keyFragmentAndSpacedKey": {
@@ -548,7 +575,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "api_error",
         "message": "HTTP 400 invalid_request_error: piec[redacted] and spaced [redacted] end (request req_011CAbCdEf)",
-        "httpStatus": 400
+        "httpStatus": 400,
+        "retryable": false
       }
     },
     "successOverLimit": {
@@ -556,7 +584,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "malformed_response",
-        "message": "malformed response: the response body is larger than 8388608 bytes"
+        "message": "malformed response: the response body is larger than 8388608 bytes",
+        "retryable": false
       }
     }
   },
@@ -637,7 +666,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
     "refusal": {
       "ok": false,
       "kind": "api_error",
-      "message": "the model declined the request (stop_reason refusal)"
+      "message": "the model declined the request (stop_reason refusal)",
+      "retryable": false
     },
     "thinkingDropped": {
       "ok": true,
@@ -666,17 +696,20 @@ export const SP0_GOLDEN: Record<string, unknown> = {
     "unknownStop": {
       "ok": false,
       "kind": "malformed_response",
-      "message": "malformed response: unexpected stop_reason \"something_new\""
+      "message": "malformed response: unexpected stop_reason \"something_new\"",
+      "retryable": false
     },
     "nullStop": {
       "ok": false,
       "kind": "malformed_response",
-      "message": "malformed response: unexpected stop_reason null"
+      "message": "malformed response: unexpected stop_reason null",
+      "retryable": false
     },
     "toolUseBadInput": {
       "ok": false,
       "kind": "malformed_response",
-      "message": "malformed response: tool_use block 0 input is not an object"
+      "message": "malformed response: tool_use block 0 input is not an object",
+      "retryable": false
     }
   },
   "p6Models": {
@@ -721,7 +754,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "auth_failed",
         "message": "HTTP 401: the key or its access was refused; the provider's message is not shown (request req_011CAbCdEf) (page 2)",
-        "httpStatus": 401
+        "httpStatus": 401,
+        "retryable": false
       }
     },
     "entryWithoutId": {
@@ -731,7 +765,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "malformed_response",
-        "message": "malformed response: entry 0 has no string id"
+        "message": "malformed response: entry 0 has no string id",
+        "retryable": false
       }
     },
     "empty": {

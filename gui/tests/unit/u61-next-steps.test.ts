@@ -290,8 +290,9 @@ test("U-61 (DR-23): data analysis says the rows go to the model as they are, for
       assert.equal(notice.hasAttribute("hidden"), false, `${language}: the profile's task type`);
     }
     // Only what is so (M-8): the rows are sent; nothing claims they are not.
-    assert.match(EN["task.analyzeNotice"], /sends the rows of the tables to the model as they are/);
-    assert.match(KO["task.analyzeNotice"], /표의 행을 그대로 모델에 보냅니다/);
+    // U-212 (bundle A): a table read as it is still goes to the model as it is; query_table can send groups only.
+    assert.match(EN["task.analyzeNotice"], /Rows of a table read as it is go to the model as they are/);
+    assert.match(KO["task.analyzeNotice"], /그대로 읽은 표의 행은 모델에 그대로 가고/);
     assert.doesNotMatch(EN["task.analyzeNotice"], /not sen[dt]/);
     assert.doesNotMatch(KO["task.analyzeNotice"], /보내지 않/);
   } finally {

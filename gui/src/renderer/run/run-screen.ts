@@ -9,7 +9,7 @@
  */
 
 import type { Texts } from "../i18n/catalog.js";
-import { errorText } from "../i18n/catalog.js";
+import { errorText, startErrorText } from "../i18n/catalog.js";
 import { asRuns, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { actionLine } from "../plan/plan-screen.js";
@@ -318,7 +318,7 @@ export function runScreen(deps: RunScreenDeps): Screen {
         lastPhase = phase;
         end.replaceChildren();
         if (phase === "idle" && run.startError !== null) {
-          end.append(el("div", `${errorText(t, run.startError)} ${t.format("error.code", { code: run.startError })}`, { role: "alert", class: "error", "data-error": run.startError }));
+          end.append(el("div", startErrorText(t, run.startError, run.startHint), { role: "alert", class: "error", "data-error": run.startError, ...(run.startHint === null ? {} : { "data-hint": run.startHint }) }));
         }
         if (phase === "idle" && run.startError === null && run.done === null) end.append(el("p", t.format("run.none")));
         if (phase === "done" && run.done !== null) {

@@ -74,3 +74,13 @@ export function errorText(texts: Texts, code: string): string {
   const id = `error.${code}`;
   return texts.has(id) ? texts.format(id) : texts.format("error.default");
 }
+
+/**
+ * U-212 (bundle A): a refused start in words: the error's text, then the CLI's hint for it when one came
+ * and the window has its words (error.hint.<hint>, e.g. why analyze-private was refused), then the code.
+ */
+export function startErrorText(texts: Texts, code: string, hint: string | null | undefined): string {
+  const id = hint == null ? null : `error.hint.${hint}`;
+  const hinted = id !== null && texts.has(id) ? ` ${texts.format(id)}` : "";
+  return `${errorText(texts, code)}${hinted} ${texts.format("error.code", { code })}`;
+}

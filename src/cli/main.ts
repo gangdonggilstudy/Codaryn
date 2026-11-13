@@ -20,9 +20,8 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { CODARYN_LANG_ENV } from "../contracts/index.js";
+import { CODARYN_LANG_ENV, RUN_EXIT_CODES } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
 import { createCodarynApp, createNodeAppEnvironment } from "../app/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
@@ -50,6 +49,7 @@ import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "./security/index.js";
 import { envValue, knownKeyValues } from "./settings.js";
 import { cleanText, hideKeys } from "./text-safety.js";
+import { askLine as readLine } from "./terminal.js";
 // N-D 4.4: the explained error with the lock hint (kept apart from the command imports above).
 import { explainedErrorText } from "./error-text.js";
 
@@ -84,16 +84,33 @@ const readText = (file: string): Promise<string> => readFile(file, "utf8");
 // SP-2: every key variable Codaryn knows.
 const currentKey = (): string[] => knownKeyValues(process.env);
 
-/** One line typed at the terminal, or null when the input ends first. `output` shows the question. */
-async function askLine(question: string, output: NodeJS.WritableStream = process.stdout): Promise<string | null> {
-  const prompt = createInterface({ input: process.stdin, output });
+/**
+ * One line from standard input after `question` on `output`; null when no line came (the input
+ * ended, also before the question; the question was closed; `signal` aborted). U-110 (review R-88
+ * M2): Ctrl+C at the question, which a terminal gives as a key rather than a signal, runs
+ * `onInterrupt` and then answers null. By default the command stops there: the questions of apply,
+ * revert, models and init come before what they would change (or before more of it).
+ */
+async function askLine(
+  question: string,
+  output: NodeJS.WritableStream = process.stdout,
+  signal?: AbortSignal,
+  onInterrupt: () => void = stopAtInterrupt,
+): Promise<string | null> {
+  const answer = await readLine(question, { input: process.stdin, output }, signal);
+  if ("line" in answer) return answer.line;
+  if ("interrupted" in answer) onInterrupt();
+  return null;
+}
+
+/** R-88 M2: Ctrl+C at the question of a command other than run: one line, then the cancelled exit code. */
+function stopAtInterrupt(): never {
   try {
-    return await prompt.question(question);
+    writeHuman(humanFor(null).messages.format("prompt.interrupted"));
   } catch {
-    return null;
-  } finally {
-    prompt.close();
+    // Human output is best effort.
   }
+  process.exit(RUN_EXIT_CODES.cancelled);
 }
 
 // A closed stderr (EPIPE) must not end a run: human output is best effort.
@@ -359,6 +376,18 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         writeProgress: (line) => {
           process.stderr.write(line);
         },
+        // U-110 (B-5): the permission question, on stderr, only when standard input and stderr are
+        // terminals; keys hidden and control characters replaced as in other human text.
+        ...(process.stdin.isTTY === true && process.stderr.isTTY === true
+          ? {
+              // R-88 M2: Ctrl+C at the question cancels the run the CLI's own way (as SIGINT, cancel.ts):
+              // the engine's signal ends the question and records it as cancelled.
+              ask: (question: string, signal: AbortSignal) =>
+                askLine(cleanText(hideKeys(question, currentKey()), true).replace(/\t/g, " "), process.stderr, signal, () => {
+                  process.emit("SIGINT");
+                }),
+            }
+          : {}),
         cancelSignal: (cancelFile) =>
           createCancelSource({
             cancelFile,

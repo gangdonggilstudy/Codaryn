@@ -56,6 +56,10 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.failed": "Failed calls: {count}",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
+  "summary.confirm_denied.user": "Denied by the person: {count} call(s) to a command whose rule asks before it runs.",
+  "summary.confirm_denied.unasked": "Denied without asking: {count} call(s) to a command whose rule asks before it runs. This run could not ask: it asks only when standard input and stderr are terminals and --quiet is not given.",
+  "summary.confirm_denied.unanswered": "Denied with no answer: {count} call(s) to a command whose rule asks before it runs (the input ended, or the time limit ended the wait).",
+  "summary.confirm_denied.cancelled": "Denied because the run was cancelled while it waited: {count} call(s) to a command whose rule asks before it runs.",
   "summary.usage": "Usage: model turns {turns} · tool calls {toolCalls} · {seconds} s",
   "summary.run_id": "Run id: {runId}",
   "summary.masking": "Masking: values registered {registered} · places masked in what the model was sent {masked}",
@@ -241,6 +245,7 @@ export const EN_MESSAGES: MessageTexts = {
 
   "prompt.yes_no_default_yes": "[Y/n]",
   "prompt.yes_no_default_no": "[y/N]",
+  "prompt.interrupted": "Stopped with Ctrl+C. Nothing more was changed.",
   "confirm.question.command": "Allow a command for this one call? With no answer it is denied. Only its executable and its number of arguments ({count}) are shown, not the arguments themselves. Executable",
 
   "language.chosen": "message language {language}, set by: {source}",

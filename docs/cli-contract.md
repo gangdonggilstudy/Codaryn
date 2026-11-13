@@ -1280,3 +1280,36 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 
 - 계획 실행은 스스로 파일을 바꾸지 않는다. 그 계획을 적용한 실행이 있고 이번 되돌리기가 되돌린 것도 건너뛴 것도 없으면 되돌리기 기록을 쓰지 않는다(목록에 "되돌림"이 붙지 않음). JSON 줄은 그대로다.
 - stderr의 안내는 `revert.plan_only` 한 줄과, 그 적용 실행을 계약의 규칙 `planApplyStateOf`(실행 목록)로 판정한 상태의 줄이다. `PLAN_APPLY_STATES_TO_REVERT`(`applied`, `unfinished`)일 때만 그 실행을 되돌리라고 한다(`revert.plan_revert_apply`, `--run <적용 실행>`). `applying`(결과가 아직 없음), `reverted`(마지막 되돌리기가 complete), `record_missing`(목록에 없거나 손상)은 그렇다고만 말한다(`revert.plan_applying`, `revert.plan_apply_reverted`, `revert.plan_apply_missing`). 목록을 읽지 못하면 그렇다고 말한다. 다섯 문구 id는 카탈로그에 있다. main `1e54ca9`의 실제 CLI(`CODARYN_LANG=ko`)로 `revert.plan_only`, `revert.plan_revert_apply`, `revert.plan_apply_reverted`가 한국어로 나오는 것을 확인했다. `revert.plan_applying`, `revert.plan_apply_missing`은 카탈로그에서만 확인했다. `--dry-run`도 같다.
+
+### 18.16 묻고 실행하는 명령 규칙 `confirm` (U-109, R-79 L-1, 설계 Q-2)
+
+- 어디서 받나: 설정 파일의 `policy.commands[i]`와 프로필의 `profiles.<이름>.policy.commands[i]`에서만 `confirm: true`를 받는다(계약 `ConfirmableCommandRule`; `parsePolicy(value, "settings")`). 사람의 설정이기 때문이다.
+- 그 밖에서는 지금처럼 알 수 없는 필드다. task 파일의 `policy.commands[i]`는 `invalid_task`, 설정의 작업 종류 정의 `workflows.<id>.policy.commands[i]`는 `invalid_config`이고 둘 다 `unknown_field`다. 작업과 함께 오는 파일이 질문을 만들 수 없게 한다.
+- 값은 `true`뿐이다. 없으면 묻지 않는 보통 규칙이다. `false`나 다른 값은 `invalid_config`(`invalid_value`)이고 메시지는 `policy.commands[i].confirm must be true when it is given`이다. 진단의 `field`는 그 규칙(`policy.commands[i]`, 프로필이면 `profiles[n].policy.commands[i]`)이다. `confirm`이 계약의 `SCHEMA_FIELD_NAMES`에 아직 없어서다.
+- 뜻(U-74, 엔진): 그 규칙에만 맞는 명령 호출은 물어서 허락받으면 그 한 번만 실행된다. 같은 실행 파일이라도 `confirm`이 없는 규칙에 맞는 호출은 묻지 않고 실행된다. 작업 종류 정의와 합칠 때(`mergeWorkflowPolicy`) 남는 규칙에도 `confirm`이 남는다.
+- 물을 수 없을 때(U-110 전의 CLI, 그리고 U-110 뒤에도 터미널이 아니거나 `--quiet`일 때)는 엔진이 질문(`confirmation_requested`)과 기본 답(`confirmation_answered`, `deny`, `default`)을 기록한 뒤 `command/confirmation_required`로 거부하고, 명령은 돌지 않는다. 모델은 그 거부를 도구 결과로 받는다. 터미널에서 묻는 것은 18.17(U-110)이다.
+- `doctor`는 그런 설정을 유효하게 읽는다(`config_file` `ok`). 묻는 규칙이 있다는 알림은 아직 없다(문안은 보고서에 제안).
+- 앱 계층의 설정 바꾸기에서 규칙의 `confirm`을 지우는 제안은 넓히기다(`confirm_removed`, U-107).
+- 시험: `tests/unit/cli/g-u109-confirm-rules.test.ts`(실제 CLI, 루프백 가짜 서버).
+
+### 18.17 터미널에서 묻는 권한 질문 (U-110, B-5, DR-3, DR-10)
+
+- `run`은 표준 입력과 stderr가 둘 다 터미널이고 `--quiet`이 아닐 때만 엔진에 질문 통로(`EngineDeps.confirm`)를 준다(`src/cli/confirm.ts`의 `terminalConfirm`). 그 밖에는 통로가 없고 18.16대로 기본 거부다. `run`에는 `--json` 옵션이 없다. stdout이 터미널이 아니어서 JSON 한 줄을 쓰는 경우도 위 조건만 본다.
+- 질문은 stderr에 한 줄이다: `confirm.question.command`(`{count}` = 인자 개수), `: `, 가린 실행 파일(`ConfirmRequest.subject`, 제어 문자는 바꿈), 한 칸, `prompt.yes_no_default_no`, 한 칸. 고른 언어로 쓰고, 렌더러가 없으면 영어다. 인자 자체는 보이지 않는다. 다른 사람용 글처럼 키 모양과 지금의 키 값을 가리고 제어 문자를 바꾼 뒤 쓴다.
+- 답은 한 줄이고 `apply`의 질문과 같은 규칙이다. 앞뒤 공백을 떼고 소문자로 바꿔 `y`, `yes`, `예`, `네`면 이번 호출 한 번만 허용(`allow_once`, `user`)한다. 그 밖의 줄(Enter 포함)은 그 사람의 거부(`deny`, `user`)다.
+- 줄이 오지 않으면 답이 없는 것이다(`dismissed`, 기록은 `deny`, `default`). 입력 끝, 터미널의 Ctrl+D(질문을 닫음), Enter 없는 마지막 줄, 묻다가 난 실패가 그렇다. 실행이 취소되거나 시간이 다 되면 엔진의 신호가 질문을 끝내고, 기록은 엔진이 정한다(`cancelled` 또는 `default`).
+  - Windows의 Ctrl+Z(R-88 I3): Node의 readline은 터미널 방식의 Windows에서 Ctrl+Z 키를 무시한다(소스로 읽음). 그래서 Ctrl+Z 뒤 Enter는 빈 줄, 곧 그 사람의 거부(`deny`, `user`)일 것이다. 결정은 같은 거부이고 `by`만 다르다.
+- 질문 중의 Ctrl+C(R-88 M2): 터미널에서 readline은 표준 입력을 raw로 두어 Ctrl+C를 신호가 아니라 키로 받는다. `askLine`은 그것을 readline의 'SIGINT'로 듣고 '끊음'으로 돌려준다(줄이나 답 없음과 다름).
+  - `run`의 권한 질문: CLI의 취소 통로(`cancel.ts`가 듣는 SIGINT)와 같은 길로 실행 전체를 취소한다. 엔진의 신호가 질문을 끝내고 기록은 `deny`, `cancelled`, 실행은 `cancelled`(종료 5)로 끝난다. 모델은 다시 부르지 않는다.
+  - `apply`·`revert`·`models`·`init`의 질문: `prompt.interrupted` 한 줄을 stderr에 쓰고 종료 5로 끝난다. 이 질문들은 바꾸기 전(또는 더 바꾸기 전)에 묻는다. 그래서 아무것도 더 바뀌지 않는다(`init`은 설정을 쓰지 않는다). `apply`의 위험한 이동 동의와 `revert`의 질문은 첫 번은 이미 끝난 뒤다(그 결과는 기록에 있다). 끝 요약은 내지 않는다.
+- 명령 권한만 묻는다. 다른 권한의 질문은 글이 없어 묻지 않고 답이 없는 것으로 돌려준다.
+- 모든 질문의 한 줄 읽기(`src/cli/terminal.ts`의 `askLine`, 답은 줄 · 답 없음 · 끊음)는 입력이 끝나면 답 없음으로 끝난다. readline의 `question()`만으로는 입력 끝에서 끝나지 않아, `apply`·`revert`·`models`·`init`의 질문도 입력 끝에서 멈춰 있었다. 이제 그 질문들도 입력 끝을 '아니오'(또는 답 없음)로 받는다.
+  - 이미 끝난 입력(R-88 L2): 입력이 한 번 끝났으면 그 뒤의 질문은 묻지 않고 곧 답 없음이다. 예전에는 끝나지 않아 종료 13으로 끝났고(결과·`result.json` 없음, 잠금 남음), 이제 실행은 결과를 내고 잠금을 푼다.
+  - 질문이 끝난 뒤(R-88 L1): 묻는 동안만 표준 입력이 프로세스를 붙잡고, 끝나면 읽기를 멈추고 놓는다(`pause`, `unref`). 예전에는 Ctrl+D·Ctrl+C로 질문을 닫으면 명령이 끝나도 입력이 열린 동안 프로세스가 끝나지 않았다(main의 `apply`도 같았다).
+- **실제 터미널로는 확인하지 못했다.** Windows 콘솔과 Unix pty로 돌려 보지 않았다. 시험과 검토 R-88은 흉내다: 미리 읽는 모듈이 흐름의 `isTTY`를 참으로 두고, 표준 입력은 파이프여서 readline이 터미널 방식으로 읽는다(Ctrl+C는 0x03, Ctrl+D는 0x04 바이트). 실제 터미널의 raw 방식(`setRawMode`)과 신호는 그대로 재현되지 않는다. 판단은 Node 소스와 이 흉내에 기댄다.
+- 진행 줄: 질문 기록마다 영어 진행 줄(`progressLine`, U-74)이 있다. 고른 언어의 진행 줄(사람용 렌더러 `src/cli/human`)은 `confirmation_answered`마다 `progress.confirmation_allowed` 또는 `progress.confirmation_denied.<by>`다(R-85 M1, nc-human 몫).
+- 끝 요약(R-85 M1): `run`은 질문 뒤 거부된 호출을 누가 정했는지(`user`, `default`, `cancelled`)와 이 실행이 물을 수 있었는지(`couldAsk`)를 `RunSummaryContext.confirmationDenied`로 렌더러에 넘긴다. 그런 거부가 없으면 필드가 없다. 그 호출은 `deniedCommandCalls`에도 들어 있다.
+  - 렌더러는 그 호출에 '규칙을 더하라'(`summary.denied_hint`)를 내지 않는다. 그 안내는 나머지 거부된 명령 호출이 있을 때만이다.
+  - 대신 0보다 큰 것마다 한 줄: `summary.confirm_denied.user`(사람이 거부), `.cancelled`(기다리는 동안 취소), `default`는 `couldAsk`면 `.unanswered`(입력 끝이나 시간 한도), 아니면 `.unasked`(이 실행은 물을 수 없었다: 터미널이 아니거나 `--quiet`).
+  - 앱 계층의 실행(GUI)은 이 필드를 아직 채우지 않는다(선택 필드라 지금 출력 그대로).
+- 시험: `tests/unit/cli/g-u110-r88-terminal.test.ts`(R-88: 끊음, 끝난 입력, 놓음; 실제 CLI의 실행 취소와 init의 멈춤, `u110-terminal-preload`로 흉내), `tests/unit/cli/g-u110-terminal-confirm.test.ts`(실행 안의 질문과 답, `--quiet`, 통로 없음), `tests/unit/cli/g-u110-terminal-line.test.ts`(한 줄 읽기, 질문 글, 답 규칙, 파이프로 넣은 `y`는 답이 되지 않음).

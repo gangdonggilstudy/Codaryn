@@ -55,6 +55,10 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.failed": "실패한 호출: {count}건",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
+  "summary.confirm_denied.user": "실행 전에 확인을 받게 된 명령의 호출 {count}건을 사람이 거부했습니다.",
+  "summary.confirm_denied.unasked": "실행 전에 확인을 받게 된 명령의 호출 {count}건을 묻지 않고 거부했습니다. 이 실행에서는 물을 수 없었습니다(표준 입력과 stderr가 모두 터미널이고 --quiet이 아닐 때만 묻습니다).",
+  "summary.confirm_denied.unanswered": "실행 전에 확인을 받게 된 명령의 호출 {count}건에 답이 없어 거부했습니다(입력이 끝났거나 시간 한도로 기다림이 끝났습니다).",
+  "summary.confirm_denied.cancelled": "실행 전에 확인을 받게 된 명령의 호출 {count}건은 답을 기다리는 동안 실행이 취소되어 거부했습니다.",
   "summary.usage": "사용: 모델 {turns}턴 · 도구 호출 {toolCalls}회 · {seconds}초",
   "summary.run_id": "실행 id: {runId}",
   "summary.masking": "가림: 등록된 가릴 값 {registered}개 · 모델에 보낸 글에서 가린 곳 {masked}개",
@@ -240,6 +244,7 @@ export const KO_MESSAGES: MessageTexts = {
 
   "prompt.yes_no_default_yes": "[Y/n] (Enter: 예)",
   "prompt.yes_no_default_no": "[y/N] (y·예·네: 예, Enter: 아니오)",
+  "prompt.interrupted": "Ctrl+C로 멈췄습니다. 더 바꾼 것은 없습니다.",
   "confirm.question.command": "명령 하나를 이번 호출에만 허용할까요? 답하지 않으면 거부합니다. 보이는 것은 실행 파일 이름과 인자 개수({count}개)뿐이며, 인자 자체는 보이지 않습니다. 실행 파일",
 
   "language.chosen": "메시지 언어 {language}, 정한 곳: {source}",

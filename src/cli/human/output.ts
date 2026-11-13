@@ -148,10 +148,21 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
    * one per language). What it remembers of one (the verifier numbers, the denied calls) starts
    * again at the next one's start record: call ids are unique within a run only.
    */
+  // U-104 (U-99b): this run's protected-material checks: how many, how many found a change, and
+  // whether the first one that found nothing was shown (the later ones are folded).
+  let integrityChecks = 0;
+  let integrityChanged = 0;
+  let integrityUnchangedShown = false;
   const startAgain = (): void => {
     verifierNumbers.clear();
     deniedCalls.clear();
+    integrityChecks = 0;
+    integrityChanged = 0;
+    integrityUnchangedShown = false;
   };
+  /** U-104: the summary's line of the checks drawn, when there were some and none found a change. */
+  const integritySummary = (): string[] =>
+    integrityChecks > 0 && integrityChanged === 0 ? [catalog.format("summary.integrity_unchanged", { count: integrityChecks })] : [];
 
   // G-A: the workflow tools (inspect_files, propose_plan) have names for people too (ALL_TOOL_NAMES).
   const toolText = (name: string): CatalogText =>
@@ -380,6 +391,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
             : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
         );
       }
+      // U-104: the protected-material checks that found nothing, folded in the progress lines.
+      out.push(...integritySummary());
       // N-23(d): files, not change records. A path's first record says whether the run created it.
       const files = new Map<string, boolean>();
       for (const change of changes) {
@@ -529,11 +542,16 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         case "integrity_checked":
           if (!isOneOf(event.phase, INTEGRITY_PHASES) || !Array.isArray(event.changed)) {
             line = null;
+          } else if (event.changed.length > 0) {
+            // A check that found a change is never folded.
+            integrityChecks += 1;
+            integrityChanged += 1;
+            line = catalog.format("progress.integrity_changed", { phase: event.phase, count: event.changed.length });
           } else {
-            line =
-              event.changed.length === 0
-                ? catalog.format("progress.integrity_unchanged", { phase: event.phase })
-                : catalog.format("progress.integrity_changed", { phase: event.phase, count: event.changed.length });
+            // U-104: the first check that found nothing is shown, later ones are folded into the summary.
+            integrityChecks += 1;
+            line = integrityUnchangedShown ? null : catalog.format("progress.integrity_unchanged", { phase: event.phase });
+            integrityUnchangedShown = true;
           }
           break;
         case "state_checked":
@@ -768,6 +786,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (verifiers.length > 0) {
         out.push(catalog.format("summary.verifiers", { passed: verifiers.filter((verifier) => verifier.outcome === "pass").length, total: verifiers.length }));
       }
+      // U-104: the protected-material checks that found nothing, folded in the progress lines.
+      out.push(...integritySummary());
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
       // U-8: what the apply tells besides its status (ApplyResult.noticeKinds), each kind once.
       // U-33 (R-56 Q-1 (a)): plan_records_unchecked by its cause. With a cause of the contract (every

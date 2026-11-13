@@ -1240,9 +1240,11 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - `--confirm <digest>`: 지금 만든 계획의 다이제스트와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `cleanup_plan_changed`(종료 2)다. store가 잠금 아래에서 계획을 다시 만들어 다이제스트가 같을 때만 지운다.
   - `--delete-discarded`: `--confirm`과 함께일 때만. 사람의 파일인 폐기 보관함 폴더는 이것이 있을 때만 지운다. 없으면 `not_confirmed`로 남는다.
   - `--include-not-reverted`(DR-44 (가)): `--confirm`과 함께일 때만. 되돌리지 않은 실행과 일부만 되돌린 실행(`not_reverted`)의 기록은 이것이 있어야 지운다. 막지는 않는다. 미리보기의 확인 머리줄에 그런 실행의 수를 적는다. 이것 없이 확인하면 store가 그 기록을 `not_reverted_not_confirmed`로, 남는 적용이 쓰는 계획 실행을 `used_by_kept_apply`로 남기고 나머지를 지운다(사람의 선택이라 종료 0). 남은 `cleanup-…` 폴더(DR-44 (라))는 모든 계획에 `leftover` 항목으로 들어가 요약·미리보기·완료 줄에 보이고, 확인하면 지운다. 옮긴 뒤 다 지우지 못하면 `partly_removed`(종료 1)이고 지웠다고 보고·기록하지 않는다.
-  - 끝 줄은 확인할 것을 말한다(R-34 I-3): 지울 실행 기록이 없고 폐기 보관함만 있으면 `--confirm <digest> --delete-discarded`를 말한다.
-  - 권하는 명령에는 `--include-not-reverted`를 넣지 않는다(R-34b P-3). 되돌리지 않은 실행이 있으면, 사람이 그 인자를 스스로 붙여야 그 기록을 지우고 지우면 그 실행을 되돌릴 수 없게 된다는 것을 따로 한 줄로 알린다.
-  - U-3(R-34c L-1): 따로 알리는 줄은 머리줄과 같이 세 가지(되돌리지 않은 실행, 일부만 되돌린 실행, 기록을 확인할 수 없는 실행)를 말한다. 기록을 확인할 수 없는 실행의 경고는 `records_unreadable`이다.
+  - 끝 줄(U-86, R-34 I-3을 대신함)은 붙여 쓸 명령을 둘까지 말한다. 둘 다 "아무것도 지우지 않았다"로 시작하고, 옵션은 같은 줄 끝에 한 칸 띄어 붙는다.
+    - `cleanup.command.confirm`: `--confirm`만으로 지우는 묶음에 항목이 있을 때. `--confirm <digest 앞 12자>`.
+    - `cleanup.command.all`: 다른 옵션이 필요한 항목이 있을 때. `--confirm <digest 앞 12자>`와, 어떤 항목이 필요로 하는 옵션을 모두 `CLEANUP_CONFIRM_FLAGS` 순서(`--include-not-reverted`, `--delete-discarded`)로.
+    - 모든 항목이 남는 것이면 명령이 없다.
+  - 권하는 명령에 `--include-not-reverted`가 들어갈 수 있다. R-34b P-3(넣지 않고 따로 한 줄로 알림)을 U-86이 바꿨다. 그 옵션이 필요한 항목은 `--include-not-reverted`만 필요한 묶음이나 두 옵션이 다 필요한 묶음에 들고, 그 묶음의 머리 줄이 잃는 것을 말한다(되돌리지 않은 실행, 일부만 되돌린 실행, 기록을 확인할 수 없는 실행. 지우면 되돌릴 수도 손으로 되살릴 수도 없음). 기록을 확인할 수 없는 실행의 경고는 `records_unreadable`이다.
   - U-3: 남은 폴더 이름 꼴이지만 정리의 표지가 없는 폴더는 `StateSummary.unknownFolders`가 있을 때 요약에 `cleanup.summary.unknown_folders` 한 줄로 보이기만 한다. 항목이 아니고, 어떤 확인으로도 지우지 않는다.
 - 지우지 않는 것(store가 막음): `parked`, 잠금, `.gitignore`, 진행 중인 실행(`lock_held`), 결과가 없는 실행(`no_result`), 선택되지 않은 적용 실행이 쓰는 계획 실행(`plan_used_by_apply`: 그 적용의 되돌리기에 필요하다). 변경 표시가 있는 실행은 막지 않고 경고한다(P-5).
 - 고르기: 실행 기록은 `--older-than`, `--run`, `--reverted`. 폐기 보관함은 `--discarded-older-than`, `--discarded-run`. 한 부분의 조건을 모두 만족해야 고른다. 조건이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확한 이름이다(`latest` 없음).

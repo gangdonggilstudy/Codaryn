@@ -20,6 +20,8 @@ export { MAX_WORKSPACE_DIR_ENTRIES, WORKSPACE_PAGE_SIZE, isWorkspaceDir, listWor
 export type { WorkspaceDirOptions, WorkspaceDirSource } from "./workspace-dir.js";
 export { MAX_RUN_EVENTS_PAGE, MAX_RUN_EVENTS_PAGE_BYTES, RUN_EVENTS_PAGE_SIZE, RUN_EVENT_TYPES, listRunEventsIn, runEventsArguments } from "./run-events.js";
 export type { RunEventsDeps, RunEventsSource } from "./run-events.js";
+export { checkApplyArguments, checkApplyIn } from "./check-apply.js";
+export type { ApplyCheckOperations, ApplyCheckSource } from "./check-apply.js";
 export type {
   AppliedActionRecord,
   ApplyJournalEvent,
@@ -49,6 +51,7 @@ export type {
   ChangedFileView,
   ChangesOutput,
   ChangesRequest,
+  CheckApplyRequest,
   CodarynApp,
   ConfirmAnswer,
   ConfirmRequest,
@@ -65,6 +68,7 @@ export type {
   ListWorkspaceDirRequest,
   StateSummaryRequest,
   StateSummaryView,
+  PlanCheck,
   PlanRequest,
   ReadSettingsRequest,
   ReportMarkdown,

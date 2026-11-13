@@ -87,6 +87,12 @@ export interface SearchFilesPayload {
   /** Sorted by path in code unit order. */
   readonly entries: readonly SearchEntry[];
   readonly truncated: boolean;
+  /**
+   * U-203 (bundle A, R-3, R-4): true when an unreadable path (PolicyConfig.unreadablePaths) lies in
+   * the searched folder, whose entries are left out, names included. It follows the policy's entries
+   * alone, never what exists there. Absent otherwise.
+   */
+  readonly withheld?: true;
 }
 
 export interface WriteFilePayload {
@@ -537,6 +543,8 @@ export interface InspectFilesPayload {
   readonly next: string | null;
   /** True when `hash` was asked and some files were left without `sha256` (byte budget). */
   readonly hashesIncomplete: boolean;
+  /** U-203 (R-3, R-4): as SearchFilesPayload.withheld; entries under unreadable paths are not listed, hashed or paged. */
+  readonly withheld?: true;
 }
 
 export interface WorkflowToolArgsByName {

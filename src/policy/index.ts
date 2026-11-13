@@ -9,9 +9,17 @@
  * misses every entry's text may still lie under an entry's real path, and one that matches an
  * entry's text may still lead elsewhere through a link below it. A protected path is reported first.
  * Review V-3 M-1: an entry allows only after its own real path was found (path-set.ts, `misses`).
+ *
+ * U-203 (bundle A, A-3; R-1, R-3, R-5, R-8): unreadable paths (PolicyConfig.unreadablePaths), a
+ * deny list judged as the protected paths are (the text first, then the real path; an unusable list
+ * or entry covers everything). Under them every access but `aggregate` (query_table) is denied as
+ * `path`/`unreadable_path`: a read, a listing's start, a command's cwd and a write (it is a
+ * protected path as well), reported before a protected path. With any unreadable entry every
+ * command is denied (`command`/`command_not_allowed`): a command can read anything (R-5, which the
+ * resolution refuses first, A-6).
  */
 
-import { BUILTIN_TOOLS, PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE } from "../contracts/index.js";
+import { BUILTIN_TOOLS, PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, unreadablePathsOf } from "../contracts/index.js";
 import type {
   CommandRule,
   CreatePolicyGate,
@@ -134,10 +142,20 @@ function compileWritablePathSets(sets: readonly WritablePathSet[] | undefined): 
   );
 }
 
-export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writablePathSets }) => {
+export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writablePathSets, unreadablePaths }) => {
   const tokenLike = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
   // Only the config decides what is protected. Writes are denied; reads and `cwd` are not.
   const protectedPaths = compileProtectedPaths(config.protectedPaths);
+  // U-203 (R-1, R-3): unreadable paths; present at all (even unusable), no command may run (R-5).
+  // Review R-102 M-1: the run's own list (PolicyGateOptions.unreadablePaths, every source united),
+  // with the policy's list as well, which can only protect more. A value that is not a list makes
+  // the whole set unusable: it covers everything.
+  const unreadableGiven: readonly unknown[] = [unreadablePaths, config.unreadablePaths];
+  const unreadableValue: unknown = unreadableGiven.some((value) => value !== undefined && !Array.isArray(value))
+    ? "not a list"
+    : unreadablePathsOf(unreadableGiven as readonly (readonly string[] | undefined)[]);
+  const unreadable = compilePathSet(unreadableValue, { match: "prefix", onUnusable: "covers" });
+  const unreadablePresent = !Array.isArray(unreadableValue) || unreadableValue.length > 0;
   const writable = compileWritablePathSets(writablePathSets);
 
   /** True when every writable list covers the resolved path (no list: no such limit). */
@@ -180,7 +198,7 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writable
   function checkFixed(requires: ToolRequirements, args: unknown, stage: "requested" | "effective"): Denial[] {
     const denials: Denial[] = [];
     if (requires.command) {
-      const denial = checkCommand(args, stage);
+      const denial = unreadablePresent ? deny("command", "command_not_allowed") : checkCommand(args, stage);
       if (denial !== null) {
         denials.push(denial);
       }
@@ -226,6 +244,9 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writable
           const outcome = lexicalCheck(workspace.root, value);
           if (!outcome.ok) {
             denials.push(deny("path", outcome.code));
+          } else if (access !== "aggregate" && unreadable.covers(outcome.relative)) {
+            // U-203 (R-3): only query_table's `aggregate` reaches under an unreadable path.
+            denials.push(deny("path", "unreadable_path"));
           } else if (access === "write" && protectedPaths.covers(outcome.relative)) {
             denials.push(deny("path", "protected_path"));
           }
@@ -250,6 +271,9 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writable
           if (outcome.ok) noteJudged(workspace, value, access, outcome.path);
           if (!outcome.ok) {
             denials.push(deny("path", outcome.code));
+          } else if (access !== "aggregate" && (await unreadable.coversEffective(outcome.path.relative, workspace))) {
+            // U-203 (R-3): after links are resolved, and each entry's real path too.
+            denials.push(deny("path", "unreadable_path"));
           } else if (access === "write" && (await protectedPaths.coversEffective(outcome.path.relative, workspace))) {
             // Compared after links are resolved, so a link cannot lead around a protected path,
             // and each entry is resolved too, so a link entry protects its real path (T-13).

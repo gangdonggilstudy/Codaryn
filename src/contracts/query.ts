@@ -22,7 +22,8 @@
  */
 
 import { AGGREGATE_OPS } from "./verify.js";
-import type { AggregateOp, TableFormat } from "./verify.js";
+import type { AggregateOp, TableFormat, VerifierConfig } from "./verify.js";
+import type { PolicyConfig } from "./task.js";
 import type { ToolDefinition, ToolDescriptor } from "./tool.js";
 
 /** Q-4: the group size k when the user's settings set none. */
@@ -268,3 +269,40 @@ export const ANALYZE_PRIVATE_WORKFLOW_ID = "analyze-private";
  */
 export const PRIVATE_DATA_WORKFLOW_PROBLEMS = ["unreadable_with_commands", "unreadable_paths_required"] as const;
 export type PrivateDataWorkflowProblem = (typeof PRIVATE_DATA_WORKFLOW_PROBLEMS)[number];
+
+/**
+ * U-203 (A-3, R-2): the union of the sources' unreadable paths (config file, profile, definition,
+ * task file), in that order, each entry once: ResolvedTaskSpec.unreadablePaths, which the CLI and
+ * the app set with it (A-6; R-102 M-1), the config file's own entries also in a task file's run and
+ * under a profile. Pure.
+ */
+export function unreadablePathsOf(sources: readonly (readonly string[] | undefined)[]): readonly string[] {
+  return [...new Set(sources.flatMap((source) => source ?? []))];
+}
+
+/**
+ * U-203 (A-3, R-3): what the integrity checks watch: the policy's protected paths and the run's
+ * unreadable paths (ResolvedTaskSpec.unreadablePaths, review R-102 M-1), each once
+ * (IntegrityCheckerOptions.protectedPaths). Pure; the CLI and the app call it (A-6).
+ */
+export function integrityPathsOf(protectedPaths: readonly string[] | undefined, unreadablePaths: readonly string[] | undefined): readonly string[] {
+  return unreadablePathsOf([protectedPaths, unreadablePaths]);
+}
+
+/**
+ * U-203 (A-3, R-5): the resolution's refusal of unreadable paths beside commands: a command rule
+ * (field `policy.commands`) or a `command` verifier (field `verifiers[i]`, the first) while the run
+ * has any unreadable path (ResolvedTaskSpec.unreadablePaths, every source united, review R-102 M-1).
+ * Null otherwise. Pure; the CLI resolves with it once the problem joins WORKFLOW_PROBLEMS (A-6). The
+ * gate also denies every command meanwhile.
+ */
+export function privateDataProblem(
+  unreadablePaths: readonly string[] | undefined,
+  policy: Pick<PolicyConfig, "commands">,
+  verifiers: readonly VerifierConfig[],
+): { readonly problem: PrivateDataWorkflowProblem; readonly field: string } | null {
+  if ((unreadablePaths ?? []).length === 0) return null;
+  if (policy.commands.length > 0) return { problem: "unreadable_with_commands", field: "policy.commands" };
+  const index = verifiers.findIndex((verifier) => verifier.kind === "command");
+  return index === -1 ? null : { problem: "unreadable_with_commands", field: `verifiers[${index}]` };
+}

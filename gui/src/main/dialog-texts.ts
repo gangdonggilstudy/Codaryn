@@ -50,6 +50,12 @@ const KO = {
   "consent.keep": "동의하지 않음",
   "revertConsent.message": "이 드라이브는 하드 링크를 쓸 수 없어 파일 {count}개를 되돌리지 못했습니다. 이번 되돌리기 한 번에만 동의할까요? (실행 {runId})",
   "revertConsent.detail": "되돌리는 도중 원래 자리에 같은 이름의 파일이 새로 생기면 그 파일을 덮어쓸 수 있습니다. 동의하지 않으면 아무것도 바뀌지 않습니다. 동의는 되돌리기 기록에 남습니다.",
+  // U-124 (3.6, DR-3): the in-run permission question, with the CLI's meaning (confirm.question.command).
+  "permission.title": "권한 확인",
+  "permission.message": "명령 하나를 이번 호출에만 허용할까요? 답하지 않으면 거부합니다.",
+  "permission.detail": "보이는 것은 실행 파일 이름과 인자 개수({count}개)뿐이며, 인자 자체는 보이지 않습니다.\n실행 파일: {subject}",
+  "permission.allowOnce": "이번 호출만 허용",
+  "permission.deny": "거부",
   "revertConsent.agree": "이번 되돌리기에 동의",
   "revertConsent.keep": "동의하지 않음",
   "widen.message": "이 설정 변경은 실행이 할 수 있는 일을 넓힙니다. 설정 파일에 쓸까요?",
@@ -100,6 +106,11 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "consent.keep": "Do not agree",
   "revertConsent.message": "This drive cannot use hard links, so {count} files were not put back. Agree for this one revert only? (run {runId})",
   "revertConsent.detail": "If a file with the same name appears at the original place meanwhile, it could be replaced. Without your agreement nothing changes. The agreement is kept in the revert's record.",
+  "permission.title": "Permission question",
+  "permission.message": "Allow a command for this one call? With no answer it is denied.",
+  "permission.detail": "Only its executable and its number of arguments ({count}) are shown, not the arguments themselves.\nExecutable: {subject}",
+  "permission.allowOnce": "Allow this call only",
+  "permission.deny": "Deny",
   "revertConsent.agree": "Agree for this revert",
   "revertConsent.keep": "Do not agree",
   "widen.message": "This settings change lets runs do more. Write it to the config file?",
@@ -134,8 +145,41 @@ export const WIDENING_KINDS = [
   "provider_changed",
   "profile_changed",
   "workflow_changed",
+  "confirm_removed",
   "other",
 ] as const;
+
+/**
+ * U-124: the widening kinds the app layer gives (SettingsWidening) that the dialog can name. A
+ * proposal with any other kind is not written: the person could not be told what it widens.
+ */
+export const KNOWN_WIDENING_KINDS: readonly string[] = WIDENING_KINDS.filter((kind) => kind !== "other");
+
+/** U-124: whether a proposal names a widening the dialog cannot name (then it is not written). */
+export function unnamedWidening(widening: readonly { readonly kind: string }[]): boolean {
+  return widening.some((item) => !KNOWN_WIDENING_KINDS.includes(item.kind));
+}
+
+/**
+ * U-124 (3.6, DR-3): the OS dialog of a permission question: the CLI's meaning, the engine's masked
+ * executable and the number of arguments only. Deny is the default button and what Esc gives.
+ */
+export function permissionDialogOptions(
+  language: DialogLanguage,
+  question: { readonly subject: string; readonly argumentCount: number },
+): { readonly type: "question"; readonly title: string; readonly message: string; readonly detail: string; readonly buttons: string[]; readonly defaultId: number; readonly cancelId: number; readonly noLink: true } {
+  const deny = 1;
+  return {
+    type: "question",
+    title: dialogText(language, "permission.title"),
+    message: dialogText(language, "permission.message"),
+    detail: dialogText(language, "permission.detail", { count: question.argumentCount, subject: question.subject }),
+    buttons: [dialogText(language, "permission.allowOnce"), dialogText(language, "permission.deny")],
+    defaultId: deny,
+    cancelId: deny,
+    noLink: true,
+  };
+}
 
 const WIDEN_KO: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   command_added: "허용 명령 추가",
@@ -152,6 +196,7 @@ const WIDEN_KO: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   provider_changed: "제공자 바꿈(작업 내용이 다른 API로 감)",
   profile_changed: "프로필 바꿈",
   workflow_changed: "작업 종류 정의 바꿈",
+  confirm_removed: "묻던 명령을 묻지 않고 허용",
   other: "그 밖의 넓히기",
 };
 
@@ -170,6 +215,7 @@ const WIDEN_EN: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   provider_changed: "the provider changed (work goes to another API)",
   profile_changed: "a profile changed",
   workflow_changed: "a task type definition changed",
+  confirm_removed: "a command that was asked about runs without asking",
   other: "another widening",
 };
 

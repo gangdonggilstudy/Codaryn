@@ -12,6 +12,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { BrowserWindow, Menu, Notification, app, clipboard, dialog, nativeTheme, screen, session, shell } from "electron";
 import { fitBounds } from "./window-bounds.js";
+import type { QuestionAnswer } from "./runs.js";
+import type { PermissionQuestion } from "../shared/protocol.js";
 import type { MessageBoxOptions, OpenDialogOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
 import type { OpenReply } from "../shared/ipc.js";
@@ -31,7 +33,7 @@ import { SettingsProposals } from "./settings-proposals.js";
 import { CleanupPreviews } from "./cleanup-previews.js";
 import { saveDialogOptions } from "./save-file.js";
 import { cleanupQuestions } from "../shared/cleanup.js";
-import { WIDENING_KINDS, applyFormText, cleanupDiscardedDetail, endNotice, formatBytes, widenText } from "./dialog-texts.js";
+import { WIDENING_KINDS, applyFormText, permissionDialogOptions, cleanupDiscardedDetail, endNotice, formatBytes, widenText } from "./dialog-texts.js";
 import { ModelEntries, ModelListLimit } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
@@ -68,6 +70,8 @@ export interface GuiOptions {
   readonly answerOpenDialog?: (kind: "task" | "vars") => Promise<string | null>;
   /** Smoke tests only: receives what would be copied instead of the OS clipboard (U-62). */
   readonly writeClipboard?: (text: string) => void;
+  /** Smoke tests only: answers a permission question instead of the OS dialog (U-124); the signal aborts when the engine ended it. */
+  readonly answerPermission?: (question: PermissionQuestion, signal: AbortSignal) => Promise<QuestionAnswer>;
   /** Smoke tests only: receives the path "show in folder" would select instead of the OS file manager (U-66). */
   readonly showItemInFolder?: (path: string) => void;
   /** Smoke tests only: whether the window counts as active (focus cannot be taken away reliably in a test). */
@@ -199,6 +203,20 @@ export function startGui(options: GuiOptions): void {
   const runs = new RunManager({
     send: (channel, payload) => {
       if (window !== null && !window.isDestroyed()) window.webContents.send(channel, payload);
+    },
+    // U-124 (3.6, DR-3): the run's permission question, asked by this process's OS dialog. The window
+    // cannot answer. Deny is the default button and what Esc gives; no window means no answer
+    // (dismissed). The text is the engine's masked executable and the number of arguments only.
+    ask: async (question, signal) => {
+      if (options.answerPermission !== undefined) return options.answerPermission(question, signal);
+      if (window === null || window.isDestroyed()) return "dismissed";
+      const reply = await dialog.showMessageBox(window, { ...permissionDialogOptions(language, question), signal });
+      if (signal.aborted) return "dismissed";
+      return reply.response === 0 ? "allow_once" : "deny";
+    },
+    answer: async (token, id, decision) => {
+      const state = await hostState;
+      if ("host" in state) await state.host.call("answerQuestion", { run: token, id, decision }, 10_000);
     },
     labels: async (status, reason) => {
       const state = await hostState;

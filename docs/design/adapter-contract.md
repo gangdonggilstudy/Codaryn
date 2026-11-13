@@ -483,7 +483,7 @@ confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
    - 둘 다 실행 이벤트로 관찰자에게 간다(DR-15). 순서는 `confirmation_requested` 이벤트 → `confirm` 부름 → `confirmation_answered` 이벤트다(시험).
    - 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다.
 - 질문 글은 가림본이다. 화면을 위해 복원하지 않는다. `subject`는 엔진이 이미 제어·보이지 않는 문자를 빼고 키 모양을 가렸다(U-106). 실행 사건 목록(5.13)은 그래도 다른 글처럼 다시 가리고 정리한다.
-- 남은 단위: B-5 CLI 터미널 질문, B-6 GUI 대화상자. 통로 단위의 시험에 "기다리는 동안 프로세스가 산다"를 넣는다(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다).
+- 두 단위는 끝났다: B-5 CLI 터미널 질문은 U-110(병합 `15e49a4`), B-6 GUI 대화상자는 U-124(병합 `aa723d2`, 메인 프로세스의 OS 대화상자, 기본과 Esc는 거부, [독립 GUI 설계](standalone-gui.md) 3.6)다. "기다리는 동안 프로세스가 산다"(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다)는 CLI 쪽 시험 `tests/unit/cli/g-u110-terminal-line.test.ts`가 본다. GUI의 연기 시험은 대화상자 대신 답한다(사람 점검은 [수동 점검](../manual-checks.md) M-3.11).
 
 ### 5.10 오류 모델 [구현 A-1]
 
@@ -716,6 +716,78 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
 - **글이 없다.** 응답은 순번, 코드, 수, 다이제스트뿐이다. 경로는 계획 보기(가림본)의 순번으로 짝짓는다.
 - **동의도 약속도 아니다.** 점검 결과는 DR-21 동의를 만들지 않는다. 동의는 지금처럼 사람의 입력으로만 만들어 `applyPlan`의 `unsafeMoveConsent`로 간다. 적용은 사전 점검을 다시 하므로, 그 사이에 파일이 바뀌면 `plan_stale`로 끝난다.
 
+### 5.15 작업 공간 텍스트 파일 읽기·쓰기 [구현 U-172] (DR-72 (나), text-editing-ux 5)
+
+GUI에서 사람이 작업 공간의 텍스트 파일을 열어 보고, 가릴 것이 없는 파일만 고치게 한다. 첫 판의 범위는 DR-72다. 코드는 `src/app/workspace-text.ts`, 시험은 `tests/unit/app/u172-workspace-text.test.ts`다.
+
+```ts
+readWorkspaceText({ settings: TaskForm, path }) → WorkspaceText
+  // { kind: "workspace_text", status: "opened", path, text, masking: "current_secrets", masked, protected,
+  //   lineEnding: "lf" | "crlf" | "none" | "mixed", bom, digest, bytes, editable, readOnlyReasons }
+  // 또는 { kind: "workspace_text", status: "not_found" | "not_file" | "refused" | "too_large" | "not_text" | "unreadable" | "mask_failed", path }
+writeWorkspaceText({ settings: TaskForm, path, text, baseDigest }) → WorkspaceTextWritten
+  // { kind: "workspace_text_write", status, path, digest, readOnlyReasons, textProblems, lockLeft }
+  // status: written | unchanged | conflict | workspace_locked | not_editable | text_refused | path_changed
+  //       | not_found | not_file | refused | too_large | not_text | unreadable | mask_failed | write_failed
+```
+
+- **설정.** 5.12와 같은 읽기 준비로 작업 공간, 지금 등록한 비밀, 키 값, 보호 경로를 얻는다. 설정이 이름한 설정·task·변수 파일의 경로도 함께 얻는다(설정 파일은 `prepareTask`와 같은 순서: `--config` → `CODARYN_CONFIG` → 기본 위치).
+- **인자.** 맞지 않으면 아무것도 읽거나 잠그기 전에 `invalid_arguments`다.
+  - `path`: 5.12의 `dir`과 같은 상대 조각이고, 뿌리(`""`)는 안 된다.
+  - 쓰기의 `text`: 문자열이고 UTF-16으로 온전해야 한다(짝 없는 대리 문자 안 됨). `baseDigest`: 64자 소문자 16진.
+- **파일 열기**(읽기와 쓰기가 같다).
+  - 뿌리의 `.codaryn`(대소문자 무관)은 `refused`다. 이어서 엔진의 작업 공간 규칙(`Workspace.resolve`)을 거친다. 뿌리 밖, 상태 디렉터리, 규칙이 거부하는 이름(Windows 장치 이름 등)은 `refused`다.
+  - 조각마다 `lstat`으로 본다. 뿌리, 모든 폴더, 파일 어디에 링크나 junction이 있어도 `refused`다. 작업 공간 안을 가리키는 junction도 따라가지 않는다(시험). 일반 파일만 연다(`not_file`).
+  - **검사 뒤 바꿔치기**(V-1 H-1, R-100 L-1). 검사한 뒤 부모 폴더를 junction으로 바꾸면, 경로 문자열로 다시 여는 쪽은 그것을 따라간다. 그래서 다음 순서로 연다.
+    1. 순회에서 각 대상의 신원(장치, 파일 id. 64비트라 bigint로)을 기억한다.
+    2. 파일을 연다. 열린 손잡이의 신원(`fstat`)이 순회한 파일과 같아야 한다.
+    3. 경로를 다시 순회해 모든 신원이 같아야 한다.
+    4. 그다음에야 그 손잡이로 바이트를 읽는다.
+    - 열기 전의 바꿔치기는 손잡이가 다른 파일이 되어서 잡힌다. 1차 순회 도중이나 열린 뒤의 바꿔치기는 2차 순회가 달라져서 잡힌다. 어느 쪽이든 `refused`이고, 바꿔친 경로로 읽은 것은 주지 않는다.
+    - Windows에서는 파일이 열려 있는 동안 그 폴더의 이름을 바꿀 수 없다. 그래서 열린 뒤의 바꿔치기는 아예 되지 않는다(시험: 그때는 `unreadable`).
+  - 읽기 판정은 엔진 `readText`와 같다. `MAX_READ_BYTES`(256 KiB)를 넘으면 `too_large`, UTF-8이 아니거나 NUL이 있으면 `not_text`다. 열지 못한 파일은 글을 주지 않는다.
+- **보이는 글.** BOM을 떼고 CRLF를 LF로 바꾼 뒤, 5.12의 이름과 같은 순서로 가린다. 키 모양과 지금의 키 값(`hideKeys`), 지금 등록한 값(게이트웨이의 `mask`)을 글 그대로에서 찾는다. 그다음 `cleanText`(LF와 TAB은 남김)를 거친다.
+  - `masked`: 가리기가 글을 바꿨다.
+  - 편집할 수 있는 파일의 `text`는 파일 글 그대로다(BOM과 CRLF만 다름). 그래서 어댑터가 한 번 더 `cleanText`·키 숨김을 해도 바뀌지 않는다.
+- **편집할 수 있는 조건.** 아래 까닭이 하나도 없을 때만 `editable: true`다. 까닭은 이 순서로 `readOnlyReasons`에 모두 담긴다.
+  - `masked`: 등록 값, 키 값, 키 모양이 들어 있다. 보이는 글이 파일 글이 아니다(DR-72: 가리면 달라지는 파일은 읽기만).
+  - `control_characters`: 제어 문자, 줄·문단 구분 문자, 양방향 제어 문자가 `?`로 보인다.
+  - `mixed_line_endings`: CRLF와 LF가 섞였거나 CR만 있는 줄이 있다. 입력란은 모든 줄을 LF로 주므로 줄 끝 하나로 되돌릴 수 없다.
+  - `protected`: 효력 있는 정책의 보호 경로다. 5.12와 같은 판정(글자 기준, 실경로 기준)이고, 판정하지 못하면 보호로 본다(첫 판은 읽기만).
+  - `settings_file`: 설정이 이름한 설정·task·변수 파일이다. 지금 규칙으로는 그런 파일이 작업 공간 안에 있으면 설정 자체가 거부된다(`input_inside_workspace`, S-1). 그래서 앱으로는 나올 수 없지만 겹 방어로 둔다(시험은 `readWorkspaceTextIn`으로 본다).
+  - `read_only`: 파일 자체를 쓸 수 없다(읽기 전용 속성, 권한).
+  - `hard_link`: 이름이 둘 이상이다. 원자적 쓰기(이름 바꾸기)는 두 이름을 갈라 놓으므로 쓰지 않는다.
+  - `workspace_locked`: 지금 실행·적용·되돌리기가 이 작업 공간을 잡고 있다(`inspectLock`, 이 프로세스나 다른 프로세스).
+- **읽기는 잠그지 않고 아무것도 만들지 않는다.** 상태 디렉터리도 만들지 않는다. `digest`는 읽은 바이트의 SHA-256이고, 쓰기의 기준이다.
+- **쓰기**(창을 믿지 않는다).
+  1. 작업 공간 잠금(실행이 잡는 것)을 잡는다. 잡혀 있으면 `workspace_locked`이고 아무것도 판정하거나 쓰지 않는다. 상태 디렉터리가 없으면 잠금이 만든다(실행과 같다).
+  2. 잠금 아래에서 파일을 위처럼 열고, 지금의 설정으로 다시 판정한다. 바이트가 `baseDigest`가 아니면 `conflict`, 편집할 수 없으면 `not_editable`과 그 까닭이다. 열지 못하면 읽기의 상태(`not_found` 등)다.
+  3. 새 글을 본다(`textProblems`). 보이면 달라질 글은 쓰지 않는다: 줄 끝과 BOM을 되돌린 뒤 256 KiB 초과(`too_large`), CR이나 다른 제어·구분·양방향 문자(`control_characters`), 가리기가 바꿀 값(`masked`, 사람이 키를 붙여 넣은 경우). 그러면 `text_refused`다.
+  4. 줄 끝을 되돌린다. CRLF 파일이면 LF마다 CRLF, 그 밖(`lf`, `none`)은 LF다. BOM이 있던 파일은 BOM을 붙인다.
+  5. 파일과 같은 글이면 `unchanged`이고 쓰지 않는다.
+  6. 원자적으로 쓴다(V-1 H-1: 엔진 `writeText` 대신 단계마다 확인하는 자기 쓰기).
+     - 폴더들의 신원이 열 때와 같은지 본다. 다르면 `refused`다. 파일이 바뀌었으면(신원이 다르면) `conflict`다.
+     - 그 폴더에 새 임시 파일을 만든다(배타 생성이라 있는 파일을 덮지 않는다).
+     - 다시 본다: 폴더 신원과, 임시 파일이 그 자리에 있는지. 다르면 `refused`이고 임시 파일을 지운다.
+     - 대상을 연 신원의 손잡이로 다시 읽어 해시를 본다. 제자리에서 고쳐졌으면 `conflict`다.
+     - 이름을 바꾼다.
+     - 바꾼 직후 폴더 신원을 다시 보고, 그 자리의 파일이 임시 파일인지 본다. 아니면 `path_changed`다.
+     - 쓰지 못하면 `write_failed`다. 쓰면 `written`과 새 `digest`(다음 저장의 기준)다.
+     - 첫 확인, 임시 파일 자리 확인, 다시 읽은 해시는 겹으로 막는다. 남아 있는 바꿔치기는 셋 중 하나만 있어도 막힌다. 시험은 셋을 함께 없앤 변이로 본다.
+  7. 잠금을 푼다(한 번 더 해 본다). 풀기가 실패하거나 store가 `false`(이미 이 호출의 잠금이 아님)를 주면 `lockLeft: true`로 알린다(V-1 L-1).
+- **닫을 수 없는 틈**(정직하게 적는다).
+  - Node에는 폴더 손잡이 기준의 이름 바꾸기가 없다(POSIX의 `renameat`, Windows의 손잡이 이름 바꾸기). 그래서 마지막 확인과 이름 바꾸기 사이의 순간은 경로로 지나간다.
+  - 그 순간에 폴더를 junction으로 바꾸고 임시 파일까지 그리로 옮기는 행위자가 있으면, 이름 바꾸기가 그쪽 파일을 바꾼다. 바로 뒤의 확인이 그것을 보고 `path_changed`로 알린다. 막지는 못하고 알린다(시험이 이 경우를 그대로 고정한다).
+  - 이때 쓰인 글은 사람이 쓴 글이다. 등록 값이나 키는 `text_refused`가 막으므로 들어 있지 않다.
+  - 첫 확인과 임시 파일 만들기 사이의 순간에 바꿔치면, 임시 파일이 그쪽에 생길 수 있다(배타 생성이라 덮지는 않는다). 다음 확인이 찾아 지운다. 그 사이에 다시 되돌렸다면 남을 수 있다.
+  - 이런 행위자는 같은 사용자 권한으로 같은 때에 작업 공간 폴더를 바꾸는 프로그램이다. 쓰는 동안은 실행이 잠금으로 막혀 있다.
+- **R-100의 정보 반영.**
+  - I-2: 가림 토큰처럼 생긴 글(`[[CODARYN_SECRET:…]]`)은 새 글로 쓸 수 없다(`text_refused`, `masked`). 게이트가 그 꼴을 바꾸기 때문이다. 의도다.
+  - I-5, L-2: 쓰기의 잠금 id는 실행 id 꼴(`createRunId`)이다. 쓰는 동안이나 잠금이 남았을 때 `doctor`와 `--run latest`는 그것을 실행 중으로 말한다. 풀지 못한 잠금(`lockLeft`)은 주인 pid가 이 프로세스라 앱이 살아 있는 동안 "살아 있는 주인"으로 남는다. 그 거둠은 store의 U-176 몫이다.
+- **실행 기록에 넣지 않는다.** 실행 디렉터리, journal, 스냅숏을 만들지 않는다. 그래서 Codaryn의 되돌리기는 이 저장을 되돌리지 않고, 실행이 바꾼 파일을 사람이 고쳤으면 그 실행의 되돌리기가 이 파일을 건너뛴다(`changed_since_run`). 저장 전에 알리는 것은 GUI 몫이다(DR-72).
+- **한계.** 이름 바꾸기로 쓰므로 POSIX에서 파일 권한은 기본값이 된다. 에이전트의 쓰기(엔진 `writeText`)와 같다. 첫 판은 파일 감시가 없다. 검사 뒤 바꿔치기의 막음은 Windows에서만 시험했다(POSIX의 `O_NOFOLLOW`·`O_NONBLOCK` 열기, 열린 뒤 바꿔치기는 시험하지 못함).
+- **계약 층 형식.** 새로 필요한 것이 없어 앱 계층 형식(`src/app/types.ts`)만 두었다. `MaskedText`, `ContentHash`, `MAX_READ_BYTES`는 계약 층의 것을 쓴다.
+
 ## 6. 프로세스 밖 어댑터용 줄 프로토콜 [DR-20으로 추진하지 않음 — 참고용]
 
 > 사용자 결정 DR-20으로 이 절은 추진하지 않는다. GUI는 같은 프로세스 어댑터(엔진 전용 프로세스)로 5절 함수를 직접 부른다. 아래는 결정 전의 설계와 구현 기록으로 남긴다.
@@ -820,6 +892,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 작업 공간 목록(5.12) | 종류·순서·보호·`state`, 등록 값·키 모양·제어 문자 이름이 가려지고 `name: null`, 링크·junction과 그 안의 경로는 `refused`, `not_found`·`not_dir`, 맞지 않는 인자, 500개씩의 쪽과 숫자 순서, 상한을 넘으면 `too_large`, 상태 디렉터리를 만들지 않음, 설정 오류 |
 | 실행 사건 목록(5.13) | 끝난 실행의 레코드가 그 실행의 이벤트와 같음(`at` 제외), 꼴이 맞지 않는 줄(JSON 아님, 배열, 다른 실행, 다음 번호 아님, 시각 아님, 모르는 종류, 다른 실행 종류의 종류, 비밀을 담은 필드 이름, 끝나지 않은 꼬리)이 빠지고 셈, 그 뒤 맞는 줄은 가려서 줌, 지금 등록한 값과 키 모양을 가림, 적용 실행(시작 레코드 빠짐, 번호 유지), 기록 변경 표시, 도는 중(`incomplete`), 없음·손상·맞지 않는 인자, 종류 필터와 쪽, 2 MiB 끊기와 큰 레코드 혼자, 잠금 없음·journal 그대로, 설정 오류 |
 | 적용 전 점검(5.14) | 적용할 수 있는 계획에서 아무것도 남거나 바뀌지 않고(작업 공간 전체 비교) 그 뒤 적용이 됨, 실제 적용의 `plan_checked`와 행동마다 같음(`source_changed`, `destination_exists`, `denied`), 하드 링크 없음의 `unsafeMoves`, 실행기가 거두지 못한 시험 링크를 거둠, 거두지 못한 것은 `probesLeft`, 점검 중 잠금과 잡힌 잠금의 `workspace_locked`, 풀지 못한 잠금은 `lockLeft`, 적용의 거부(인자, 다이제스트, 없음, 작업 종류, DR-28, 기록 변경, 이미 적용, 적용 실행), 설정 오류 |
+| 텍스트 파일 읽기·쓰기(5.15) | LF·CRLF+BOM 파일의 글·줄 끝·BOM·다이제스트, 등록 값·키 모양이 가려지고 `masked`, 제어·양방향 문자와 섞인 줄 끝, 보호·읽기 전용 속성·하드 링크·잡힌 잠금은 각 까닭으로 읽기만, 설정 파일(앱으로는 설정 거부, 판정은 `settings_file`), 링크·안쪽 junction·상태 디렉터리·장치 이름은 `refused`, `not_found`·`not_file`·`too_large`·`not_text`, 맞지 않는 인자, 읽기는 상태 디렉터리를 만들지 않음. 쓰기: 쓰고 새 다이제스트, CRLF와 BOM 되돌림, 바뀐 파일은 `conflict`, 잡힌 잠금은 `workspace_locked`, 가린·보호 파일은 자기 다이제스트로도 `not_editable`, 새 글의 등록 값·키 모양·CR·제어 문자·크기는 `text_refused`, 같은 글은 `unchanged`, 링크 너머 파일은 그대로, 풀지 못한 잠금은 `lockLeft`, 실행 기록·임시 파일·잠금이 남지 않음. V-1(`u172-v1-races.test.ts`): 검사 뒤 폴더를 junction으로 바꿔치면(1차 순회 도중, 열기 전, 열린 뒤, 판정 뒤, 임시 파일 전) 읽기는 바깥·상태 디렉터리 글 없이 `refused`, 쓰기는 바깥 파일을 바꾸지 않고 `refused`, 바꿔쳤다 되돌린 경우는 손잡이 신원이 거부, 이름 바꾸기 직전의 바꿔치기는 `write_failed`, 임시 파일까지 옮긴 경우는 `path_changed`(남는 틈), `false`를 준 잠금 풀기는 `lockLeft` |
 
 - 시험의 힘을 변이로 확인했다. 아래 셋은 각각 관련 시험이 실패했고, 되돌린 뒤 통과했다.
   - 변수 파일을 사본 대신 호출자 env에 적재

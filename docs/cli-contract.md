@@ -620,7 +620,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 그 점검이 다른 경고나 문제를 말하면 그 글을 두고 이 문구를 `notes`에 붙인다. 명령 검증기는 세지 않는다.
 - **사람과 모델에게 알리는 것**
   - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
-  - 끝 요약에는 그 거부 수와 안내가 `summary.denied` 바로 뒤에 있다(U-198의 `summary.denied_not_writable`과 `summary.denied_not_writable_hint`; CLI가 `RunSummaryContext.deniedNotWritable`로 넘긴다, Codex V-14 L-1).
+  - 끝 요약에는 그 거부 수만 `summary.denied` 바로 뒤에 있다(U-198의 `summary.denied_not_writable`; CLI가 `RunSummaryContext.deniedNotWritable`로 넘긴다, Codex V-14 L-1).
+    - 파일을 허용하는 법은 위의 진행 줄이 한 번 말한다. 끝 요약의 안내 줄(`summary.denied_not_writable_hint`)은 U-221이 뺐다. 같은 글이 두 번 나오던 것이다. 문구는 카탈로그에 남아 있고 U-227이 글을 확정했다.
   - run 계획을 수행한 실행이면 그 거부는 계획 밖 쓰기로 센다(`deniedNotPlanned`, 18.4). 그때는 위의 진행 줄을 내지 않는다.
   - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
 - **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
@@ -632,7 +633,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **형식(R-1):** 보호 경로(13절)와 같은 형식이고 같은 검사(`checkProtectedPaths`)를 쓴다. 잘못된 항목은 `policy.unreadablePaths[i]`처럼 자리만 말한다. 판정도 보호 경로와 같다. 글자를 먼저 보고 그다음 실경로를 보며(U-203), 쓸 수 없는 항목은 모두를 덮는다(fail closed).
 - **둘 수 있는 곳:** task 파일, 설정 파일, 프로필, 설정 파일의 작업 종류 정의. 넷 모두 `policy` 안이다.
 - **더하기만 한다(R-2).**
-  - 실행의 목록(`ResolvedTaskSpec.unreadablePaths`)은 원천마다의 항목을 합친 것이다. 순서는 config, profile, definition, task이고 항목마다 한 번이다(`unreadablePathsOf`, `src/cli/unreadable.ts`).
+  - 실행의 목록(`ResolvedTaskSpec.unreadablePaths`)은 원천마다의 항목을 합친 것이다. 순서는 config, profile, definition, task이고 항목마다 한 번이다(`unreadablePathsOf`, `src/app/input/unreadable.ts`).
   - 설정 파일 자신의 항목과 프로필의 항목은 task 파일로 실행할 때도 걸린다. 그래서 task 파일 하나로 설정의 읽기 제외를 뺄 수 없다.
   - 아무 원천에도 없으면 필드가 없고 실행은 전과 같다.
   - `task.policy.unreadablePaths`는 한 원천의 목록이다. 실행이 쓰는 것은 합친 목록이다(검토 R-102 M-1).
@@ -642,10 +643,10 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 아무 원천도 정하지 않으면 필드가 없고 `query_table`은 기본값 5(`DEFAULT_MIN_GROUP_SIZE`)를 쓴다.
   - 조립이 실행의 k를 도구 실행기에 넘긴다(`ToolRunnerOptions.minGroupSize`, U-210 둘째 몫). k는 읽기 제외 아래의 표에만 걸린다. 다른 표는 다섯 연산을 모두 쓰고 묶음을 모두 준다(k 1).
 - **거는 곳**
-  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`, U-223: `data_checks`의 근거에 그 아래 원본에서 읽은 수를 쓰지 않는다).
+  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`와, U-258부터 실행의 k `minGroupSize`. 아래의 `data_checks` 항목).
   - 이동 계획의 적용: 적용 task의 목록을 게이트, 무결성 확인, 이동 뒤 검증기 실행기에 건다.
   - 승인된 계획을 수행하는 실행: 엔진이 계획 파일 목록을 더해 만드는 게이트(`ApprovedPlanParts.policyFor`)도 실행의 목록을 받는다(검토 R-108 H-1). 전에는 그 게이트만 목록 없이 만들어져, task 파일 아래에서 설정·프로필이 준 항목 밑의 `read_file`이 계획 수행 중에 허용되었다.
-  - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/cli/unreadable.ts`)가 준다. 실행의 조립과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
+  - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/app/input/unreadable.ts`)가 준다. 실행의 조립과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
   - 그 아래의 읽기, 목록의 시작, 쓰기는 `path`/`unreadable_path`로 거부된다(U-203). 모델에게는 `REFUSAL_HINTS.unreadable_path`가 간다.
 - **명령 금지(R-5)**
   - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
@@ -665,11 +666,19 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 진행 줄은 무엇을 물었는지만 말한다(`progress.query_table`, `_whole`, `_describe`와 연산 코드, U-207). 경로, 열 이름, 묶음 키, 행 수, 집계 값은 없다.
 - **카나리(ne-verify U-232의 틀):** `g-u210-canary-cli`가 그 틀의 작업 공간(세 형식의 표, 칸마다 표지, 묶음 키 표지, 줄마다 표지인 메모, 이름이 표지인 파일과 폴더)에서 analyze-private를 대본 모델과 모의 Anthropic API로 돌린다. 행·이름·k 미만 묶음 키가 모델로 간 것, 기록, 사람용 출력 어디에도 없고(`leaksOf`가 빔), 한 열로 묶은 k 이상 묶음의 키는 모두 모델에게 간다(양성 대조).
 - **끝에서 끝까지(U-210 둘째 몫의 시험):** 실제 CLI를 대본 모델과 127.0.0.1의 모의 Anthropic API로 돌린다. 표의 칸마다 실행 때 만든 표지를 두고, 행의 표지와 k 미만 묶음의 키가 도구 결과, 기록(`.codaryn` 아래 전부), 모델 요청 본문, 사람용 출력(stdout, stderr) 어디에도 없음을 확인한다. k 이상 묶음의 키, 열 이름, 수는 모델에게 간다.
-- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)이 게이트·도구 실행기·무결성 확인에 목록을 넘기는 일은 p5a의 몫이고 아직 하지 않았다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)도 p5a의 몫이다.
+- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 실행 조립은 CLI의 `createAssemble`이고(`src/app/assemble.ts`, U-237), 적용 점검(`src/app/check-apply.ts`)과 run 계획 보기(`src/app/changes-plan.ts`)는 `runGuards`의 게이트를 쓴다. 그래서 GUI에서 시작한 실행도 같은 게이트·도구 실행기·검증기·무결성 대상을 받는다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-204, U-212).
 - **작업 종류(U-210 둘째 몫, P-1~P-3):** `analyze-private`가 내장이고 `analyze`도 `query_table`을 준다(18.1).
-- **`data_checks`의 근거(R-6, U-223):** 원본이 읽기 제외 아래면 근거에 다시 계산한 수, 칸 수, 뺀 행 수를 쓰지 않고 "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다. 판정은 같다. 그래서 재수정이 작은 묶음의 값을 모델에게 실어 가지 못한다. 실제 CLI의 실행과 이동 계획 적용에서 시험한다(`g-u210-verifier-unreadable`).
+- **`data_checks`의 근거와 판정(R-6, U-223, U-258).** 사람에게 하는 설명은 [개인정보 문서](privacy.md) 13절의 "검증기가 알려 주는 것"과 15절의 표다. 재수정이 작은 묶음의 참값이나 자리, 모델이 추측한 값의 맞음·틀림을 모델에게 실어 가지 못하게 한다.
+  - 원본이나 대상이 읽기 제외 아래면 근거에 그 표에서 읽은 수(다시 계산한 값, 칸 수, 행 수)를 쓰지 않는다. "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다(U-223).
+  - 원본이 읽기 제외 아래면 실행의 k로 다음을 지킨다(U-258).
+    - 근거에 원본의 행 번호(묶음의 이름표, 수가 아닌 칸, 해석되지 않는 자리)와 숨긴 묶음의 키를 쓰지 않는다.
+    - 묶음 비교(`aggregate_match`의 `groupBy`)는 원본의 k행 이상인 묶음만 맞댄다. `query_table`이 모델에게 보이는 묶음이다. 결과에 그 밖의 키가 있으면 틀림이고, 그런 행의 수만 말한다. 숨긴 묶음의 키와 원본에 없는 키는 같은 글이다. 빠진 묶음도 수로만 말한다. k칸 미만으로 만든 값의 묶음은 숨긴 묶음처럼 뺀다.
+    - `query_table`이 주지 않는 값의 규칙은 맞대지 않는다: min·max, k행 미만이거나 k칸 미만으로 만든 표 전체의 값, 행 수가 k 미만인 표의 행 수(`rows.sameAs`). 근거는 `not compared: query_table does not give this value to the model`이다.
+  - 규칙이 검사하는 표(집계의 대상, `table_shape`의 표)가 읽기 제외 아래면, 그 파일이 있든 없든 맞대지 않는다. 근거는 `not compared: a verdict on a table under unreadable paths would tell the model about it`이다.
+  - 맞대지 않은 규칙은 결정 못 함이다. 검증의 한계 목록에 `N of M rules were not compared: …`가 붙는다. 검증 결과는 틀린 규칙이 하나라도 있으면 `fail`, 아니면 결정 못 한 규칙이 하나라도 있으면 `inconclusive`이다. 그래서 맞대지 않은 규칙만 있는 검증은 `inconclusive`이고 통과가 아니다.
+  - 시험: 실제 CLI의 실행과 이동 계획 적용(`g-u210-verifier-unreadable`), 검증기(`tests/unit/verify/u223-data-checks-unreadable.test.ts`, `u258-data-checks-small-groups.test.ts`).
 - **revert(Codex V-23의 참고, 그대로 둠):** `codaryn revert`는 실행이 남긴 스냅샷으로 그 실행이 바꾼 파일을 되돌린다. 지금 설정의 읽기 제외는 보지 않는다. 모델이 끼지 않는 사람의 동작이고, 실행 중에는 읽기 제외 아래의 쓰기가 거부되므로 그 실행의 스냅샷에는 그 아래 파일이 없다. 실행 뒤에 목록에 더한 경로의 파일은 되돌릴 수 있다.
-- **아직 없는 것:** 앱 계층의 연결과 설정 넓히기(R-7, p5a), GUI의 읽기 제외 편집과 `analyze-private` 안내(P-4, p5u-gui).
+- **아직 없는 것:** GUI 설정 화면의 읽기 제외 편집. 설정 파일을 손으로 고친다([개인정보 문서](privacy.md) 13절).
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 
@@ -1407,7 +1416,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - task 파일의 `model: { provider: "openai", model?, maxOutputTokens? }`의 출력 토큰은 그 제공자의 범위로 검사한다.
 - 고른 제공자가 API 제공자이면 `limits.maxTotalTokens`는 숫자여야 한다(11절 "한도"의 anthropic 규칙과 같다). 오류 글은 제공자 이름을 적는다.
 
-### 19.3 해석 (`resolveApiSettings`, `src/cli/settings.ts`)
+### 19.3 해석 (`resolveApiSettings`, `src/app/input/settings.ts`)
 
 모두 고른 제공자 몫으로 해석한다. 그 제공자의 설정은 `providers.<이름>`이고, anthropic은 그것이 없으면 최상위 필드다(`providerSettingsOf`). 다른 제공자의 항목은 읽지 않는다.
 
@@ -1427,7 +1436,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   | openai | `CODARYN_OPENAI_MODEL` | `CODARYN_OPENAI_API_BASE_URL` |
 
   - `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 SP-4 전과 같이 anthropic 전용이다. SP-4에서 "고른 제공자에 적용"이라 했던 규칙은 이것으로 바뀌었다. 그래서 한 제공자용 값이 다른 제공자로 가지 않는다(R-19 I-4도 해소).
-  - OpenAI 변수 이름은 계약 담당이 상수로 낼 때까지 CLI(`PROVIDER_SETTING_ENVS`, `src/cli/security/env.ts`)에 적어 둔다.
+  - 변수 이름은 계약의 상수다. 제공자 표 `API_PROVIDERS`의 `modelEnv`·`baseUrlEnv`이고(`CODARYN_OPENAI_MODEL_ENV`, `CODARYN_OPENAI_API_BASE_URL_ENV`, 목록 `API_MODEL_ENVS`·`API_BASE_URL_ENVS`, `src/contracts/config.ts`), 입력 층(`src/app/input/security/env.ts`, 이행 C-3a에서 `src/cli/security/`에서 옮김)은 그 표에서 읽는다(DR-34, `687e8f3`). U-273: 예전 글이 가리키던 `PROVIDER_SETTING_ENVS`는 없다.
   - 변수 파일이 새로 설정한 이 네 변수의 값은 가릴 값으로 등록하지 않는다(설정 값이다).
 - 빠진 키·모델·출력 토큰은 `provider_not_configured`이고, 글은 그 제공자의 키 변수와 설정 위치(`providers.openai.model` 등)를 적는다.
 - `resolveAnthropicSettings`, `resolveListSettings`, `resolveConnection`은 예전 이름과 인자로 남는다. 제공자를 주지 않으면 anthropic이고, 결과는 SP-4 전과 같다(고정 시험 SP-0 P-7).

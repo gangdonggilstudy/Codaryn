@@ -97,13 +97,13 @@ import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
 import { argumentsError, cliError, prepareTask, runPrepared, withHint } from "./run.js";
 import type { CliEnvironment, PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
-import { createRunId } from "./run-id.js";
-import { goalHoldsKey } from "./security/index.js";
-import { envValue, knownKeyValues } from "./settings.js";
-import type { KnownKeys } from "./security/index.js";
+import { createRunId } from "../app/input/run-id.js";
+import { goalHoldsKey } from "../app/input/security/index.js";
+import { envValue, knownKeyValues } from "../app/input/settings.js";
+import type { KnownKeys } from "../app/input/security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
-import { cleanText, hideKeys } from "./text-safety.js";
-import { runGuards } from "./unreadable.js";
+import { cleanText, hideKeys } from "../app/input/text-safety.js";
+import { runGuards } from "../app/input/unreadable.js";
 import { FINAL_MESSAGE_MAX_LINES, builtinReviewItemText, changesApplyQuestion, changesApprovalText, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
 import type { LoadedChangesPlan } from "./human/index.js";
 
@@ -1026,12 +1026,12 @@ function observeApply(
   const render = write === undefined || human?.applyProgressLine === undefined ? undefined : human.applyProgressLine.bind(human);
   return {
     async append(event: ApplyJournalEntry) {
-      await journal.append(event);
+      const stored = await journal.append(event);
       // R-9 I-4: a start record is stored for the revert only. It is not a shown record
       // (ApplyJournalEvent): neither the observer nor the renderer gets it.
-      if (event.type === "plan_item_started") return;
+      if (event.type === "plan_item_started") return stored;
       observe(event);
-      if (write === undefined) return;
+      if (write === undefined) return stored;
       const lines: string[] = [];
       try {
         const line = render === undefined ? null : render(event);
@@ -1049,6 +1049,7 @@ function observeApply(
           // Progress is best effort.
         }
       }
+      return stored;
     },
     close: () => journal.close(),
   };

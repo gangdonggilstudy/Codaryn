@@ -92,7 +92,7 @@ function isUnsafeCodePoint(cp: number): boolean {
  * One line for a terminal. Key-shaped text is hidden first, and unsafe characters inside it do not
  * break it up (N-23 h, review R-2 L-5): the key search runs on the text without them, and the whole
  * stretch, unsafe characters included, becomes HIDDEN_KEY. Then every other unsafe character (line
- * breaks included) becomes REPLACEMENT. The same character rules as `src/cli/text-safety.ts`.
+ * breaks included) becomes REPLACEMENT. The same character rules as `src/app/input/text-safety.ts`.
  */
 export function cleanLine(text: string): string {
   const chars = Array.from(text);

@@ -12,12 +12,12 @@
 import { LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_EXIT_CODES, RUNS_MAX_LIMIT } from "../contracts/index.js";
 import type { RunListing, RunsOutput } from "../contracts/index.js";
 import { listRuns as storeListRuns } from "../store/index.js";
-import { RUN_ID_PATTERN } from "../cli/args.js";
+import { RUN_ID_PATTERN } from "../contracts/index.js";
 import { resolveWorkspaceRoot } from "../cli/runs.js";
 import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "../cli/run-ref.js";
-import { knownKeyValues } from "../cli/settings.js";
-import { hideKeys } from "../cli/text-safety.js";
-import type { KnownKeys } from "../cli/security/index.js";
+import { knownKeyValues } from "./input/settings.js";
+import { hideKeys } from "./input/text-safety.js";
+import type { KnownKeys } from "./input/security/index.js";
 import { copyEnvironment } from "./environment.js";
 import { appError, fromCliError } from "./errors.js";
 import type { AppCallOutcome, AppEnvironment, AppError, ListRunsRequest, ResolvedRun, ResolveRunRequest } from "./types.js";

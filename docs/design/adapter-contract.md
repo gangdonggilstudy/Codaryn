@@ -2,7 +2,7 @@
 
 CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 것은 다음과 같다.
 
-> **DR-20(사용자 결정, 2026-11-12): VS Code 확장은 개발하지 않는다.** 독립 GUI 하나만 만들고(Electron, Windows 11 64비트 먼저), 플러그인과 같은 편의성을 그 GUI가 갖는다. GUI는 Electron의 **엔진 전용 프로세스가 앱 계층 함수를 직접 부르는 형태**가 기준이다(standalone-gui 5.1). 그래서 이 문서의 VS Code 확장과 프로세스 밖 줄 프로토콜(6절, AC-D7~D9) 서술은 **추진하지 않는다**. 내용은 참고용으로 남긴다. 이미 커밋된 `src/cli/protocol/`(`3c09b58`)와 `vscode/src/core`(`11d5676`)는 지우지 않았다. 사용자 결정 DR-66(2026-11-13)으로 그 코드와 그 시험을 지웠다(U-81, 설계 차이 조사 [D-1](../reviews/2026-11-13-adapter-design-gap-survey.md)).
+> **DR-20(사용자 결정, 2026-11-12): VS Code 확장은 개발하지 않는다.** 독립 GUI 하나만 만들고(Electron, Windows 11 64비트 먼저), 플러그인과 같은 편의성을 그 GUI가 갖는다. GUI는 Electron의 **엔진 전용 프로세스가 앱 계층 함수를 직접 부르는 형태**가 기준이다(standalone-gui 5.1). 그래서 이 문서의 VS Code 확장과 프로세스 밖 줄 프로토콜(6절, AC-D7~D9) 서술은 **추진하지 않는다**. 내용은 참고용으로 남긴다. 이미 커밋된 `src/cli/protocol/`(`3c09b58`)와 `vscode/src/core`(`11d5676`)는 DR-20 때는 남겨 두었다가, 사용자 결정 DR-66(2026-11-13)으로 그 코드와 그 시험을 지웠다(U-81, 설계 차이 조사 [D-1](../reviews/2026-11-13-adapter-design-gap-survey.md)).
 - 실행 시작, 진행 이벤트 구독, 취소, 결과, 보고서, 되돌리기
 - 계획 확인·적용·사람 확인, 변경 비교
 - 권한 확인 질문, 오류 모델
@@ -16,8 +16,8 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
   - 이 문서와 지금 앱 계층의 대조는 [설계 차이 조사](../reviews/2026-11-13-adapter-design-gap-survey.md)(main 86a9470)에 있다.
   - 이 판은 그 조사의 낡은 곳을 고쳤다(U-72).
 - 계약(`src/contracts`)은 그 뒤 여러 단위가 바꾸었다. 계약 변경은 역할 1(계약 담당)이 만든다.
-  - 앱 계층의 요청·응답 타입은 지금도 `src/app/types.ts`에 있다.
-  - 그것을 `src/contracts/app.ts`로 옮기는 일(7.2 이행 1)은 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다(7.2).
+  - 앱 계층의 요청·응답 타입은 `src/contracts/app.ts`에 있다(7.2 이행 1a, U-254). `src/app/types.ts`는 다시 내보내기만 한다.
+  - 남은 이행(1b~5)은 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다(7.2).
 - 실제 API는 호출하지 않았다. 앱 계층의 시험은 대본 모델과 가짜 값만 쓴다.
 
 표기
@@ -62,7 +62,7 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
 | 결과 저장과 잠금 해제 | `finish(result)`가 result.json을 쓰고 잠금을 푼다 | `src/cli/assemble.ts:176-182`, `src/cli/run.ts:394-401` |
 | 프로세스 사실의 주입 | env, cwd, 파일 읽기, 변수 파일 적재, 시계, 난수, 진행 출력, 취소 신호를 `CliEnvironment`로 받는다 | `src/cli/run.ts:62-99` |
 | 프로세스 전역 사용 | `process.loadEnvFile`(process.env를 바꿈), SIGINT·SIGTERM 처리기, `import.meta.url`로 설치 위치, stderr·stdout·exitCode | `src/cli/main.ts:101`, `:129`, `:140-148`, `:68`, `:137-139`, `:153-155` |
-| 환경 이름 조회 | `io.env[이름]`으로 직접 찾는다. Windows에서 대소문자를 무시하는 것은 `process.env`의 성질에 기댄 것이다(R-1 M-3) | `src/cli/run.ts:337`. 접어서 비교하는 곳은 S-4뿐(`src/cli/security/env.ts:51`) |
+| 환경 이름 조회 | `io.env[이름]`으로 직접 찾는다. Windows에서 대소문자를 무시하는 것은 `process.env`의 성질에 기댄 것이다(R-1 M-3) | `src/cli/run.ts:337`. 접어서 비교하는 곳은 S-4뿐(`src/cli/security/env.ts:51`. 지금은 `src/app/input/security/env.ts`의 `fold`, 이행 C-3a) |
 | 명령의 부모 환경 | 실행기는 `parentEnv`가 없으면 `process.env`를 쓴다. 조립은 넘기지 않는다(R-1 M-3) | `src/tools/command-runner.ts:263`, `src/cli/assemble.ts:145` |
 | 진행 이벤트 | journal을 감싸 기록 뒤에 사람용 한 줄을 stderr에 쓴다. 줄 전체를 다시 가리고 모르는 도구 이름을 바꾼다 | `src/cli/progress.ts:18-20`, `:65-81`, `src/cli/run.ts:390-393` |
 | 기록 형식 | `JournalEvent`, 저장 줄은 `seq`·`at`·`runId`를 더한 `JournalRecord`. `append`는 값을 돌려주지 않는다 | `src/contracts/journal.ts:31-124`, `src/store/index.ts:35-39` |
@@ -114,9 +114,9 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
   - 그 밖의 파일은 쓰지 않는다.
 - 의존 방향
   - 목표: `cli` → `app` → (`engine`, `store`, `tools`, `policy`, `privacy`, `verify`, `workspace`, `model`) → `contracts`.
-  - 지금(86a9470): 두 방향이다.
-    - `app` → `cli`: 앱 계층이 CLI 모듈 23개를 부른다. 검사를 복사하지 않으려고 그렇게 했다(AC-D16).
-    - `cli` → `app`: `src/cli/changes.ts`, `main.ts`, `protocol/*`가 앱 계층을 부른다.
+  - 지금(이행 C-3b 뒤, U-282. U-272가 main 6ef6e3a의 코드에서 센 수에서 C-3a·C-3b가 옮긴 것을 뺐다): 두 방향이다.
+    - `app` → `cli`: 앱 계층의 8파일이 CLI 모듈 15개를 부른다. 검사를 복사하지 않으려고 그렇게 했다(AC-D16). 실행의 조립도 CLI의 `createAssemble` 한 벌을 앱이 감싼다(U-237, 4절). 입력 층은 `src/app/input/`에 있다: 보안 검사·글 정리·설치 확인·실행 id·모델 글 꼴(C-3a), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b). 옛 자리(`src/cli/security/index.ts`, `src/cli/settings.ts` 등)는 시험과 고정 파일, GUI가 경로로 부르는 곳을 위한 다시 내보내기다.
+    - `cli` → `app`: `src/cli/changes.ts`와 `main.ts` 두 파일이 앱 계층의 명령을 부른다. 전에 있던 `protocol/*`는 DR-66으로 지웠다(U-81). C-3a 뒤로는 CLI의 다른 모듈도 `src/app/input/`과 `src/app/model-text.ts`를 가져온다(목표 방향).
   - 목표로 가는 이행 1~5(7.2)는 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다. 그때까지 AC-D16이 그대로 유효하다.
 - 이름은 `src/app`이다(AC-D1 채택).
 
@@ -125,7 +125,7 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
 어댑터가 프로세스 사실을 넣는다. 앱 계층은 프로세스 전역(`process.env`, 신호, stdout)을 직접 만지지 않는다.
 
 ```ts
-// src/app/types.ts (DR-65: 기능 뒤 7.2 이행 1에서 src/contracts/app.ts로 옮긴다)
+// src/contracts/app.ts (7.2 이행 1a, U-254. src/app/types.ts가 다시 내보낸다)
 export interface AppEnvironment {
   /** 환경 변수. 호출마다 복사한다. 이 객체는 바꾸지 않는다. */
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -232,10 +232,11 @@ export interface RunObserver {
    - 시작은 `handle.runId`로, 끝은 `done`으로 안다. `run_finished`를 끝으로 쓰지 않는다. 그 직후에는 result.json이 아직 없을 수 있다(R-1 L-3).
 4. 관찰자의 예외와 느림은 실행 결과를 바꾸지 않는다.
 5. **모든 글 필드를 실행의 게이트로 다시 가린다(DR-15).** 같은 게이트로 이미 가린 글은 그대로 남는다(멱등).
-   - 그 전에 내장 도구가 아닌 이름은 `(unknown tool)`로 바꾼다(R-1 L-1). 대상은 `tool_decision`, `tool_result`, `model_response`와 `model_request` 안의 이전 호출·결과다.
+   - 그 전에 어느 도구 목록에도 없는 이름은 `(unknown tool)`로 바꾼다(R-1 L-1). 대상은 `tool_decision`, `tool_result`, `model_response`와 `model_request` 안의 이전 호출·결과다.
+   - U-250(이행 계획 P-2, R-80 I-1): 그 목록은 실행에 줄 수 있는 모든 도구다(`ALL_TOOL_NAMES`: 내장 넷과 작업 종류 도구 `inspect_files`, `propose_plan`, `propose_changes`, `query_table`). CLI의 진행 줄이 이름을 보이는 것과 같다. 전에는 내장 넷만 남겨 작업 종류 도구가 `(unknown tool)`로 보였다. 목록에 없는 이름(대소문자나 공백이 다른 것 포함)과 가릴 값은 그대로다. 지난 실행의 이벤트 쪽(`listRunEvents`)도 같은 함수(`sanitizeRecord`)를 쓴다. 시험 `tests/unit/app/u250-event-tool-names.test.ts`.
    - 가릴 수 없는 글이 하나라도 있으면 그 이벤트는 보내지 않는다(`seq`가 비어 보인다).
    - 엔진도 목록 밖 도구 이름과 안전하지 않은 호출 id를 기록할 때 바꾼다(AC-D15, G-A 브랜치 `0824dde`). 앱 계층의 다시 가림은 그 뒤에도 남긴다(DR-13).
-6. 글에는 제어 문자가 있을 수 있다. 화면에 내기 전에 어댑터가 정리한다(`src/cli/text-safety.ts:25`와 같은 규칙).
+6. 글에는 제어 문자가 있을 수 있다. 화면에 내기 전에 어댑터가 정리한다(`src/app/input/text-safety.ts`의 `cleanText`와 같은 규칙).
 7. 사람용 문장은 이벤트에 없다. 어댑터가 N-4 문구 카탈로그로 만든다.
 
 - 첫 판(A-1 `f1e796b`~`6aa3f44`)은 append 뒤 journal 파일에 새로 붙은 줄을 읽어 이벤트를 만들었다. 끼워 넣은 줄이 가리지 않은 채 관찰자에게 갔다(R-4 H-1, 재현됨). `1c86ec6`에서 위 1·2·5로 고쳤다.
@@ -276,7 +277,7 @@ export interface RunObserver {
   - 글 줄은 `maxRows`(기본 `MODEL_TEXT_MAX_ROWS` = CLI의 `FINAL_MESSAGE_MAX_LINES`, 20)까지이고, 나머지는 마지막 `… (+N)` 줄 하나로 센다. 그래서 많아야 `maxRows + 1`줄이다. 보일 것이 없으면 줄이 없다.
   - 그리기만 하고 등록 값은 가리지 않는다. 받는 글은 이미 가린 것(`PlanOutput.summary`처럼)이어야 한다.
   - 시험(`tests/unit/app/u42-model-text-rows.test.ts`)이 앱 계층으로 만든 실제 계획의 요약과 긴 글·키 값에서 CLI `renderPlan`의 줄과 같음을 고정한다.
-  - GUI의 엔진 호스트는 CLI 모듈(`cli/human/format.js`)을 경로로 읽는 대신 이것을 쓸 수 있다. 그 전환은 GUI 담당의 몫이다.
+  - GUI는 빌드의 `cli/human/format.js`를 경로로 읽는 대신 이것을 쓸 수 있다. 그 자리는 이행 C-3a 뒤로 `src/app/input/format.ts`를 다시 내보내는 옛 자리다. 그 전환은 GUI 담당의 몫이다.
 - `report`와 `revert`의 run id 자리에 `"latest"`를 쓸 수 있다(N-7). 보고서는 CLI의 `runReport`가 store의 `listRuns`로 고른다.
 - `listRuns({ workspace, limit? })` → `RunsOutput`, `resolveRun({ workspace, run })` → `{ runId, latest, startedAt, damaged }` [구현 DR-14].
   - 어떤 실행이 손상인지, `latest`가 어느 실행인지는 store와 CLI(`listRuns`, `latestRunId`, `resolveRunRef`)가 정한다(N-18, N-23, N-26). 앱 계층은 고르지 않는다.
@@ -534,7 +535,7 @@ confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
    - `confirmation_requested { id, kind: "permission", callId, tool, permission, subject, argumentCount }`는 묻기 전에 남긴다.
    - `confirmation_answered { id, decision: "allow_once" | "deny", by: "user" | "default" | "cancelled" }`
    - 둘 다 실행 이벤트로 관찰자에게 간다(DR-15). 순서는 `confirmation_requested` 이벤트 → `confirm` 부름 → `confirmation_answered` 이벤트다(시험).
-   - 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다.
+   - 질문의 `tool`도 `tool_decision`처럼 어느 도구 목록에도 없는 이름이면 `(unknown tool)`이다(U-250).
 - 질문 글은 가림본이다. 화면을 위해 복원하지 않는다. `subject`는 엔진이 이미 제어·보이지 않는 문자를 빼고 키 모양을 가렸다(U-106). 실행 사건 목록(5.13)은 그래도 다른 글처럼 다시 가리고 정리한다.
 - 두 단위는 끝났다: B-5 CLI 터미널 질문은 U-110(병합 `15e49a4`), B-6 GUI 대화상자는 U-124(병합 `aa723d2`, 메인 프로세스의 OS 대화상자, 기본과 Esc는 거부, [독립 GUI 설계](standalone-gui.md) 3.6)다. "기다리는 동안 프로세스가 산다"(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다)는 CLI 쪽 시험 `tests/unit/cli/g-u110-terminal-line.test.ts`가 본다. GUI의 연기 시험은 대화상자 대신 답한다(사람 점검은 [수동 점검](../manual-checks.md) M-3.11).
 
@@ -916,7 +917,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 - Windows에서 부모가 보낸 SIGINT는 자식의 처리기를 거치지 않고 강제 종료가 된다고 알려져 있다 [추정, 확인하지 않음]. 그래서 취소는 파일 방식이다(AC-D9).
 - 이 프로토콜은 로컬 웹 서버가 아니다. 듣는 소켓이 없고, 자식은 실행 하나가 끝나면 끝나며, 부모(어댑터)보다 오래 살지 않는다(DR-8).
 
-구현 상태 [구현 A-3, 연결 전]
+구현 상태 [지운 코드의 기록: A-3 `3c09b58`, 연결 전에 DR-66으로 지움(U-81)]
 - CLI 쪽은 `src/cli/protocol/`에 있다(`3c09b58`).
   - 줄 만들기: `startedLine`, `eventLine`, `confirmLine`.
   - 답 읽기: `parseAnswerLine`, `AnswerBook`, `readAnswers`. 위의 무시 규칙, EOF 규칙, 취소 우선을 지킨다.
@@ -943,23 +944,23 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 
 ### 7.2 단계와 지금의 상태
 
-- 상태 열은 main 86a9470 기준이다(설계 차이 조사).
+- 상태 열은 main 6ef6e3a 기준이다(U-272가 코드로 다시 확인. 처음은 설계 차이 조사의 main 86a9470).
 - 이행 1~5는 동작을 바꾸지 않는 구조 이동이다. 사용자 결정 DR-65(2026-11-13)로 한다.
   - 기능(실행 중 권한 확인 질문 5.9, GUI 남은 항목, 사용성 지적) 뒤에 직렬로 한다.
   - 이행 단위마다 고정 출력(sp0, 통합 시험)이 글자까지 같아야 병합한다(7.1).
 - 이행 6은 DR-20으로 추진하지 않는다. 남은 코드는 사용자 결정 DR-66으로 지웠다(U-81).
-- 이행 8은 PM이 다음에 하기로 했다(조사 B, 5.9).
+- 이행 8(권한 질문)은 구현됐다(5.9, 아래 표).
 
 | 이행 | 내용 | 바뀌는 파일 | 지금의 상태 |
 | --- | --- | --- | --- |
-| 1 계약 | `src/contracts/app.ts`(4·5절 타입), `Journal.append` 반환값(AC-D3), 질문 사건 타입 | `src/contracts/**`, `docs/cli-contract.md`(역할 1) | 없음. 타입이 `src/app/types.ts`에 있고, `Journal.append`는 `Promise<void>`다(앱 계층이 `seq`를 스스로 센다). DR-65: 기능 뒤 |
-| 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 없음. 조립은 앱 계층의 것이 생겼다(DR-4). 실행 전 검사는 아직 `runCli` 호출이다. DR-65: 기능 뒤 |
+| 1 계약 | `src/contracts/app.ts`(4·5절 타입), `Journal.append` 반환값(AC-D3), 질문 사건 타입 | `src/contracts/**`, `docs/cli-contract.md`(역할 1) | 일부. 4·5절 타입은 `src/contracts/app.ts`에 있다(1a, U-254). `src/app/types.ts`는 다시 내보내기만 한다. 질문 사건 타입은 계약에 있다(U-74). 남은 것: `Journal.append`는 아직 `Promise<void>`다(1b, AC-D3. 앱 계층이 `seq`를 스스로 센다) |
+| 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 일부. 입력 층이 `src/app/input/`에 있다: 보안 검사, 글 정리, 설치 확인, 실행 id, 모델 글 꼴(C-3a, U-280), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b, U-282). 조립은 CLI의 `createAssemble` 한 벌이고, 앱 계층은 그것에 DR-4의 환경 사본 등 앱의 고리를 주어 감싼다(U-237). 앱으로 옮기는 일은 이행 계획서의 C-4다. `prepareTask`(C-5)와 실행 수명(C-6a)은 아직 CLI다. 실행 전 검사는 아직 `runCli` 호출이다 |
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 일부. 앱 계층 쪽은 됐다(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않는다. DR-65: 기능 뒤 |
 | 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 일부. 앱 함수는 모두 있다: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI 명령 가운데 앱 함수를 부르는 것은 `changes`뿐이다(`main.ts`가 연결). 나머지는 거꾸로 앱이 CLI를 감싼다. store의 스냅샷 읽기는 `readRunOriginals`로 있다. DR-65: 기능 뒤 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | 일부. 앱 계층이 CLI의 `runDoctor`·`runModels`를 감싼다(`doctor`, `listModels`, `selectModel`). DR-65: 기능 뒤 |
-| 6 줄 프로토콜 (DR-20으로 추진하지 않음) | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | 추진 안 함. CLI 쪽 모듈과 VS Code 코어 왕복 시험은 남아 있고(`3c09b58`) 연결되지 않았다. DR-66으로 지웠다(U-81) |
-| 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 구현됨. `plan`, `applyPlan`, `review`가 있다(5.6). 타입은 G-A의 것이다(`src/app/general-tasks.ts`가 되풀이, DR-17) |
-| 8 권한 질문 | 정책 "확인 필요", `EngineDeps.confirm`, 답 뒤 재판정, 질문 사건, CLI 터미널 질문(stderr에 묻고 stdin에서 읽음) | `src/engine/**`, `src/policy/**`, `src/contracts/**`, `src/cli/**` | 없음. PM 결정으로 다음에 한다(조사 B, 5.9) |
+| 6 줄 프로토콜 (DR-20으로 추진하지 않음) | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | 추진 안 함. 연결되지 않은 채 남아 있던 CLI 쪽 모듈과 VS Code 코어 왕복 시험(`3c09b58`)은 DR-66으로 지웠다(U-81). `src/cli/protocol/`과 `vscode/`는 없다 |
+| 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 구현됨. `plan`, `applyPlan`, `review`가 있다(5.6). 타입은 G-A의 것이다(DR-17). 앱 계층은 계약에서 바로 다시 내보낸다(U-254, `src/app/general-tasks.ts` 없앰) |
+| 8 권한 질문 | 정책 "확인 필요", `EngineDeps.confirm`, 답 뒤 재판정, 질문 사건, CLI 터미널 질문(stderr에 묻고 stdin에서 읽음) | `src/engine/**`, `src/policy/**`, `src/contracts/**`, `src/cli/**` | 구현됨(5.9). 정책의 `confirm: true` 규칙과 `confirmation_required`(U-74), `EngineDeps.confirm`(U-74, 견고함 U-106), 질문 사건 `confirmation_requested`·`confirmation_answered`, 앱 계층의 전달(U-108), CLI의 터미널 질문 `src/cli/confirm.ts`(U-110) |
 
 - 순서 제약(설계 당시): 이행 2는 N-A(`src/cli/run.ts`) 병합 뒤에 시작한다. N-A는 병합됐다.
 - 각 이행은 따로 병합한다. 이행 2는 동작을 바꾸지 않는 이동만 한다.
@@ -968,11 +969,11 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 
 유닛(대본 모델과 임시 디렉터리) [구현]
 
-- 수는 main feabd56 기준이다.
-  - `tests/unit/app/`: 파일 37개, test() 177개
-  - `tests/unit/cli/changes.test.ts`: 19개
-  - `tests/unit/vscode/core.test.ts`: 1파일, 추진 안 함
-- 설계 당시는 38·7·11건이었다.
+- 수는 main 6ef6e3a 기준이다(U-272, 원본의 `test(` 호출을 셈. 되풀이 안에서 만드는 시험은 하나로 센다).
+  - `tests/unit/app/`: 파일 70개, test() 358개
+  - `tests/unit/cli/changes.test.ts`: 18개
+  - VS Code 코어 시험(`tests/unit/vscode/core.test.ts`)은 DR-66으로 지웠다(U-81).
+- 설계 당시는 38·7·11건이었다. 그 뒤 main feabd56에서는 37파일·177개, 19개였다.
 
 | 대상 | 시험 |
 | --- | --- |
@@ -984,7 +985,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 환경(DR-4) | 사본·`lookupEnv`의 대소문자 규칙, 변수 파일 해석이 `process.loadEnvFile`과 같음, 호출자의 env와 `process.env`가 바뀌지 않음, 소문자 `secretEnv`가 Windows 규칙에서 찾아지고 가려짐(다른 OS 규칙에서는 `secret_env_missing`), 변수 파일의 `LANG`이 자식 명령에 감 |
 | 비교(DR-7) | 원본·지금 내용이 지금 등록한 비밀로 가려짐, 나중 편집·삭제의 상태, 실행·잠금을 만들지 않음, 설정이 풀리지 않으면 그 오류 |
 | 조립 | 보호 경로가 있으면 무결성 점검 사건이 그대로 온다 |
-| 읽기 명령 | `report`(complete, `run_not_found`), `revert`, `doctor`(점검 id마다 하나: 지금 18개, `DOCTOR_CHECK_IDS`. 설계 당시 12개, W-5) |
+| 읽기 명령 | `report`(complete, `run_not_found`), `revert`, `doctor`(점검 id마다 하나: 지금 14개, `DOCTOR_CHECK_IDS`(`src/contracts/commands.ts`). 설계 당시 12개, W-5) |
 | 작업 공간 목록(5.12) | 종류·순서·보호·`state`, 등록 값·키 모양·제어 문자 이름이 가려지고 `name: null`, 링크·junction과 그 안의 경로는 `refused`, `not_found`·`not_dir`, 맞지 않는 인자, 500개씩의 쪽과 숫자 순서, 상한을 넘으면 `too_large`, 상태 디렉터리를 만들지 않음, 설정 오류 |
 | 실행 사건 목록(5.13) | 끝난 실행의 레코드가 그 실행의 이벤트와 같음(`at` 제외), 꼴이 맞지 않는 줄(JSON 아님, 배열, 다른 실행, 다음 번호 아님, 시각 아님, 모르는 종류, 다른 실행 종류의 종류, 비밀을 담은 필드 이름, 끝나지 않은 꼬리)이 빠지고 셈, 그 뒤 맞는 줄은 가려서 줌, 지금 등록한 값과 키 모양을 가림, 적용 실행(시작 레코드 빠짐, 번호 유지), 기록 변경 표시, 도는 중(`incomplete`), 없음·손상·맞지 않는 인자, 종류 필터와 쪽, 2 MiB 끊기와 큰 레코드 혼자, 잠금 없음·journal 그대로, 설정 오류 |
 | 적용 전 점검(5.14) | 적용할 수 있는 계획에서 아무것도 남거나 바뀌지 않고(작업 공간 전체 비교) 그 뒤 적용이 됨, 실제 적용의 `plan_checked`와 행동마다 같음(`source_changed`, `destination_exists`, `denied`), 하드 링크 없음의 `unsafeMoves`, 실행기가 거두지 못한 시험 링크를 거둠, 거두지 못한 것은 `probesLeft`, 점검 중 잠금과 잡힌 잠금의 `workspace_locked`, 풀지 못한 잠금은 `lockLeft`, 적용의 거부(인자, 다이제스트, 없음, 작업 종류, DR-28, 기록 변경, 이미 적용, 적용 실행), 설정 오류 |
@@ -994,7 +995,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
   - 변수 파일을 사본 대신 호출자 env에 적재
   - 엔진 시작 관문 제거
   - `parentEnv` 제거
-- 통합(남은 것): 줄 프로토콜(이행 6)은 실제 CLI 프로세스를 대본 모델로 실행해 `started` → 이벤트 → stdout 결과 한 줄, stdin EOF와 취소의 `by` 값을 확인한다.
+- 통합: 줄 프로토콜(이행 6)의 실제 CLI 프로세스 시험은 하지 않는다. DR-20으로 추진하지 않고 그 코드는 DR-66으로 지웠다(U-81).
 
 ## 9. 다른 문서와 맞출 점
 

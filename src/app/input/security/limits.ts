@@ -6,8 +6,8 @@
  * Messages name the field and the rule, never a number taken from a file.
  */
 
-import { DEFAULT_MAX_REPAIR_ATTEMPTS, DEFAULT_MAX_SAME_FAILURES } from "../../contracts/index.js";
-import type { Limits, ModelProviderName, ResolvedLimits } from "../../contracts/index.js";
+import { DEFAULT_MAX_REPAIR_ATTEMPTS, DEFAULT_MAX_SAME_FAILURES } from "../../../contracts/index.js";
+import type { Limits, ModelProviderName, ResolvedLimits } from "../../../contracts/index.js";
 
 /** Largest delay Node timers honour. Larger values fire after 1 ms. */
 export const MAX_TIMER_MS = 2_147_483_647;

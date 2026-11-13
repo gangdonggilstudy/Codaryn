@@ -281,6 +281,14 @@ export function toSchemaFieldPath(text: string): SchemaFieldPath | null {
   return text as SchemaFieldPath;
 }
 
+/**
+ * U-280 (CLI migration C-3a, moved from src/cli/args.ts): a run id by the rule the store names its run
+ * directories with; `--run` and the app layer's requests are checked against it. The same rule as
+ * RUN_ID below and the store's and the plan executor's own copies; making them one is not part of
+ * the migration.
+ */
+export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 /** N-14, N-16: the text as a RunId when it follows the run directory rule (no `..`), else null. */
@@ -513,7 +521,9 @@ export const FIXED_MESSAGES = {
   // U-207 (DR-70, Q-4; draft for nb-i18n): RunSummaryContext.hiddenGroups, the table results of this
   // run that left out groups of fewer than k rows (QueryTablePayload.suppressedGroups above 0), and k.
   // U-210 (R-108 L-2): or values from fewer than k cells (a shown group's fewCells, Codex V-19).
-  // Counts only: never a key, a value or a column.
+  // Counts only: never a key, a value or a column. U-246 (R-110 L-2): its last sentence says what the
+  // agent got for both: neither those groups nor those values, only how many groups were left out and
+  // which values were empty (a value left out is null, its operation's index in fewCells).
   "summary.groups_hidden": { results: "count", k: "count" },
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
@@ -1206,6 +1216,7 @@ export const FIXED_MESSAGES = {
   // contract (U-219), the words for nb-i18n to confirm.
   // U-201: the run, apply and revert summaries say it when their context's `lockLeft` is true
   // (RunSummaryContext, ApplySummaryContext, RevertSummaryContext), right before their next commands.
+  // U-257: and a confirmed cleanup's text (CleanupOutcome.lockLeft), as its last line.
   "lock.release_failed": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 

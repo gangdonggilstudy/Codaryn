@@ -8,7 +8,10 @@
  *   more lowercase hex). People's discarded files (`discarded/<runId>/`) need `--delete-discarded`
  *   besides: the two confirmations are apart in the same command (DR-39 P-4). The CLI checks the
  *   given digest against a plan made now; the store makes the plan again under the workspace lock
- *   and removes nothing unless its digest is the same (plan_changed).
+ *   and removes nothing unless its digest is the same (plan_changed). U-268 (nc-human's migration
+ *   preparation, C-9b (a)): both plans are made at one time, the clock read once, as the app's
+ *   cleanup does; before, the store's was made at a second reading, so a run that crossed an
+ *   `--older-than` boundary in between ended the command as cleanup_plan_changed.
  * - DR-44 (가): the records of a run not reverted, or only partly (NOT_REVERTED_WARNINGS), need
  *   `--include-not-reverted` besides (CleanupConfirmation.includeNotReverted): a confirmation apart
  *   from the other two. The preview's head line says how many such runs the plan holds
@@ -69,16 +72,17 @@ import type {
   SummarizeState,
 } from "../contracts/index.js";
 import { createMessageCatalog } from "../i18n/index.js";
+import { lockReleaseFailedLine } from "./human/index.js";
 import { applyCleanup as storeApplyCleanup, planCleanup as storePlanCleanup, summarizeState as storeSummarizeState } from "../store/index.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { RUN_ID_PATTERN } from "./args.js";
 import type { ArgsFailure } from "./args.js";
 import { argumentsError, cliError } from "./run.js";
-import { knownKeyValues } from "./settings.js";
-import type { SettingsEnvironment } from "./settings.js";
-import { localPathProblem } from "./task.js";
-import { hideKeys } from "./text-safety.js";
+import { knownKeyValues } from "../app/input/settings.js";
+import type { SettingsEnvironment } from "../app/input/settings.js";
+import { localPathProblem } from "../app/input/task.js";
+import { hideKeys } from "../app/input/text-safety.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -233,11 +237,13 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
   const summarize = io.summarizeState ?? storeSummarizeState;
   const plan = io.planCleanup ?? storePlanCleanup;
   const apply = io.applyCleanup ?? storeApplyCleanup;
-  const now = (): string => new Date(io.clock.now()).toISOString();
+  // U-268: one reading of the clock for the plan shown and the store's plan under the lock (the
+  // request's time selects by age only; the cleanup record's time is the store's own).
+  const now = new Date(io.clock.now()).toISOString();
 
   let output: CleanupOutput;
   try {
-    const shown = await plan({ workspaceRoot, selection, now: now() });
+    const shown = await plan({ workspaceRoot, selection, now });
     if (confirm === null) {
       output = { schemaVersion: 1, kind: "cleanup", status: "preview", exitCode: CLEANUP_EXIT_CODES.preview, summary: await summarize({ workspaceRoot }), plan: shown };
     } else if (!shown.digest.startsWith(confirm)) {
@@ -246,7 +252,7 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
       const outcome = await apply({
         workspaceRoot,
         selection,
-        now: now(),
+        now,
         confirmation: { digest: shown.digest, discarded: deleteDiscarded, includeNotReverted },
       });
       if (!outcome.ok) {
@@ -318,6 +324,9 @@ function groupOf(fate: CleanupItemFate): Group {
  * The person's text: the catalog's lines (cleanup.*) and the item names and sizes. U-86 (UXM-10):
  * the preview groups the items by what must be given for each to go; `selected` (default true):
  * whether a selection option was given, without which it offers example commands.
+ * U-257 (U-201): a confirmed cleanup that finished but could not release the workspace lock
+ * (CleanupOutcome.lockLeft, in the JSON since U-201) ends with lock.release_failed
+ * (lockReleaseFailedLine), as a run's, an apply's and a revert's summaries do; never otherwise.
  */
 export function renderCleanup(output: CleanupOutput, messages: MessageCatalog, options: { readonly selected?: boolean } = {}): string {
   const out: string[] = [];
@@ -343,6 +352,9 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog, o
     const discardedLeft = kept.filter((item) => item.target === "run" && item.reason === "discarded_left").length;
     if (discardedLeft > 0) out.push(messages.format("cleanup.done_discarded_left", { count: discardedLeft }));
     for (const item of kept) out.push(`- ${targetName(item.target)} ${itemName(item)}: ${keptText(item.reason)}`);
+    // U-257: the lock this cleanup could not release, last; only then, so every other text is as before.
+    const lockLine = lockReleaseFailedLine(output.outcome.lockLeft, messages);
+    if (lockLine !== null) out.push(lockLine);
     return `${out.join("\n")}\n`;
   }
 

@@ -7,8 +7,11 @@
  * view asked for during a burst and given up meanwhile still waited up to 750 ms per file. Now
  * `changes` takes `{ signal }` (ChangesOptions) and hands it to every read of a current file.
  * A test hook wraps the workspace to see what each read is given; the burst is the guard's own
- * `retried` with a try that always sees a change, so the waits are the real ones. Reproduced first
- * (0f43616, todo until the view passed the signal). Temporary folders, scripted model, fake values only.
+ * `retried` with a try that always sees a change. U-279: its waits are on a clock of the test's
+ * whose waits end only through the signal (never by themselves), so the case does not measure time:
+ * the view ends when, and because, the caller aborts; a view that did not hand the signal on would
+ * wait for good and fail at the case's own time limit. Reproduced first (0f43616, todo until the view
+ * passed the signal). Temporary folders, scripted model, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -71,27 +74,38 @@ describe("U-234: the changes view and the caller's signal", () => {
     assert.equal(given[0]?.signal, undefined);
   });
 
-  test("a read in a burst ends once the signal is aborted, not after the guard's 750 ms of waits", async () => {
-    // The guard's own retries, with a try that sees a change every time (a burst that never stops).
+  test("a read in a burst ends once the signal is aborted, and only then", { timeout: 30_000 }, async () => {
+    // The guard's own retries, with a try that sees a change every time (a burst that never stops),
+    // waiting on a clock whose waits end only through the signal: no time is measured.
+    const waits: { readonly ms: number; readonly hadSignal: boolean }[] = [];
+    let waiting: () => void = () => undefined;
+    const firstWait = new Promise<void>((resolve) => (waiting = resolve));
+    const clock = {
+      now: () => 0,
+      sleep: (ms: number, signal?: AbortSignal) =>
+        new Promise<void>((resolve) => {
+          waits.push({ ms, hadSignal: signal !== undefined });
+          waiting();
+          if (signal?.aborted === true) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        }),
+    };
     const burst: Read = async (_target, options) => {
-      const outcome = await retried(async () => "changed" as const, { signal: options?.signal });
+      const outcome = await retried(async () => "changed" as const, { signal: options?.signal, clock });
       return outcome === "changed" ? { ok: false, code: "io_error" } : outcome;
     };
     const { app, request } = await ranWith({ changesRead: { createWorkspace: wrapping(() => burst) } });
 
-    const waited = Date.now();
-    const unbounded = view(await changesWith(app, request));
-    const fullWait = Date.now() - waited;
-    assert.ok(fullWait >= 700, `without a signal the waits run out (${fullWait} ms)`);
-
     const controller = new AbortController();
-    const started = Date.now();
-    setTimeout(() => controller.abort(), 30);
-    const cancelled = view(await changesWith(app, request, { signal: controller.signal }));
-    const elapsed = Date.now() - started;
-    assert.ok(elapsed < 400, `the wait ended at the abort (${elapsed} ms)`);
-    for (const output of [unbounded, cancelled]) {
-      assert.deepEqual(output.files.map((file) => [file.path, file.unavailable]), [["NOTES.md", "unreadable"]], "a file still changing is unreadable, as before");
-    }
+    let ended = false;
+    const cancelled = changesWith(app, request, { signal: controller.signal }).then((outcome) => ((ended = true), outcome));
+    await firstWait;
+    // The read waits on the clock now; without the abort it would wait for good.
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(ended, false, "the view waits while the burst goes on");
+    controller.abort();
+    const output = view(await cancelled);
+    assert.deepEqual(output.files.map((file) => [file.path, file.unavailable]), [["NOTES.md", "unreadable"]], "a file still changing is unreadable, as before");
+    assert.deepEqual(waits, [{ ms: 50, hadSignal: true }], "one wait, given the caller's signal, ended by the abort; no try more after it");
   });
 });

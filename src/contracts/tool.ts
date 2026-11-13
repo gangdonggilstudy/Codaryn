@@ -212,6 +212,8 @@ export function failedToolContent(code: ToolErrorCode, message: string): string 
  * to add (cancelled, io_error; unknown_tool and unresolved_token come before a call runs).
  * R-68 L-1, L-2: not_found also comes from search_files given a file, and not_text from a
  * directory given to read_file or write_file; their hints are true for those too.
+ * U-261: none for invalid_table either: query_table's message ends with its problem's own hint
+ * (QUERY_TABLE_PROBLEM_HINTS, query.ts), since one hint cannot fit its seven causes.
  */
 export const TOOL_FAILURE_HINTS: { readonly [C in ToolErrorCode]?: string } = {
   policy_denied: "The path must stay inside the workspace, also after links are followed, and outside Codaryn's records folder.",
@@ -223,8 +225,6 @@ export const TOOL_FAILURE_HINTS: { readonly [C in ToolErrorCode]?: string } = {
   masking_failed: "The result could not be masked, so none of it is shown.",
   // U-197 (bundle A, Q-5): query_table.
   too_many_groups: "Group by columns with fewer distinct values, or by fewer columns.",
-  // R-102 L-5: an unknown or doubled column is the usual cause; describe shows the columns.
-  invalid_table: "Call query_table with describe set to true to see the table's columns, then query only those.",
 };
 
 /**

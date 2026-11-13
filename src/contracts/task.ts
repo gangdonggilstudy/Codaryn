@@ -89,7 +89,7 @@ export interface ResolvedTaskSpec extends TaskSpec {
    * intersection, PolicyConfig.writablePaths). Absent or empty: no such limit. The policy gate
    * judges it (PolicyGateOptions.writablePathSets), never the merged `policy.writablePaths`:
    * mergeWorkflowPolicy does not combine the lists. U-182 (B-4): the CLI builds them from each
-   * source (src/cli/writable.ts); the app layer follows. A run that carries out an approved `run`
+   * source (src/app/input/writable.ts); the app layer follows. A run that carries out an approved `run`
    * plan adds the plan's files as one more list (approvedPlanWritablePathSets, U-187).
    */
   readonly writablePathSets?: readonly WritablePathSet[];

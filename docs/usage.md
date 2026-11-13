@@ -371,6 +371,7 @@ codaryn: finished — needs input (no_verifier)
 **보내는 것과 남기는 것:**
 - 키는 `Authorization` 헤더에만 들어간다. 요청 본문과 기록에는 없다.
 - 요청마다 `store: false`로 OpenAI 쪽 응답 저장을 끈다. 그래서 다음 요청에 앞 응답의 항목(추론 항목 포함)을 다시 보낸다. 추론 항목은 암호문이라 Codaryn의 가림이 볼 수 없다. 자세한 것은 [민감정보 처리](privacy.md) "OpenAI 제공자"다.
+- **OpenAI 쪽 보존([사실 확인](design/second-provider-facts.md) C-14):** API로 보낸 자료는 기본으로 학습에 쓰이지 않는다. 남용 감시 기록은 최대 30일 남는다. 보존 없음(ZDR)은 OpenAI의 사전 승인이 필요하다. Codaryn이 끄는 것은 응답 저장(`store: false`)뿐이다([민감정보 처리](privacy.md) 10절). Anthropic 쪽 보존은 이 문서가 확인하지 않았다. 제공자의 약관을 본다.
 - 실행 기록에는 추론 항목의 개수만 남는다(`model_response`의 `reasoningItems`).
 - 키가 거부되면(401·403) 제공자의 문구를 옮기지 않고 고정 문구와 요청 id만 남긴다. 예: `HTTP 401: the key or its access was refused; the provider's message is not shown (request req_fake_1)`.
 - 할당량 소진(429 중 `insufficient_quota`나 과금 코드)은 다시 시도하지 않는다.
@@ -455,7 +456,40 @@ run id (UTC)               started (local)      changes  result
 - **절대 상한(코드):** 턴 1000, 도구 호출 5000, 총 토큰 50,000,000, 실행 시간 86,400,000ms(24시간), `maxRepairAttempts` 20, `maxSameFailures` 10. 넘으면 그 값을 적은 파일의 오류다.
 - 다른 시간 값(`requestTimeoutMs`, 검증기 `timeoutMs`)은 2,147,483,647ms 이하다. 모델이 `run_command`에 주는 `timeoutMs`는 600000ms 이하이며, 넘으면 그 호출이 `invalid_args`로 거부된다.
 
-**검증기(`verifiers`):** `command`(`executable`, `args`, 선택 `cwd`, `timeoutMs` 기본 60000, `expectExitCode` 기본 0), `file_rules`(`exists`, `absent`, `contains`, `not_contains`), 표를 확인하는 `data_checks`(18.6절). 모든 검증기가 통과해야 `done`이다. 모델의 완료 선언만으로는 성공하지 않고, 검증기가 없으면 `needs-input`으로 끝난다.
+**검증기(`verifiers`):** `command`(`executable`, `args`, 선택 `cwd`, `timeoutMs` 기본 60000, `expectExitCode` 기본 0), `file_rules`(`exists`, `absent`, `contains`, `not_contains`), 표를 확인하는 `data_checks`(아래 "자료 검증기의 규칙"). 모든 검증기가 통과해야 `done`이다. 모델의 완료 선언만으로는 성공하지 않고, 검증기가 없으면 `needs-input`으로 끝난다.
+
+**자료 검증기의 규칙(`data_checks`):** 작업 공간의 표를 글자 그대로 확인한다. 형식은 `src/contracts/verify.ts`의 `DataChecksVerifierConfig`이고, 아래는 그것을 옮긴 것이다(코드 기준).
+
+```json
+{
+  "id": "summary-table",
+  "kind": "data_checks",
+  "rules": [
+    { "type": "table_shape", "table": { "path": "summary.csv", "format": "csv" },
+      "columns": ["region", "total"], "rows": { "equals": 3 } },
+    { "type": "aggregate_match", "source": { "path": "sales.csv", "format": "csv" },
+      "column": "amount", "op": "sum", "groupBy": "region",
+      "target": { "path": "summary.csv", "format": "csv" },
+      "targetColumn": "total", "targetKeyColumn": "region" }
+  ]
+}
+```
+
+- 규칙은 하나 이상이다. 비면 task를 읽을 때 거부된다(`invalid_task`, `verifiers[0].rules must be a non-empty array`).
+- **표:** `{ "path": 작업 공간 기준 경로, "format": "csv" | "tsv" | "jsonl" }`. UTF-8 글이고 16 MiB까지다(16절).
+  - `csv`와 `tsv`는 첫 행이 머리 행이다. `csv`는 RFC 4180의 따옴표를 따른다. `jsonl`은 줄마다 JSON 객체 하나이고, 그 키가 열이다.
+  - 수는 `-?숫자[.숫자][e|E[+|-]숫자]` 꼴만이다. 수가 필요한 열에서 그 밖의 칸은 수가 아니다. 빈 칸은 모든 연산이 건너뛴다.
+- **`table_shape`:** `table`의 열과 데이터 행 수(머리 행 빼고)를 본다. 둘 다 없으면 표가 해석되는지만 본다.
+  - `columns`: 열 이름 목록. `columnsMatch`가 `"exact"`(기본)면 같은 이름이 같은 순서로, `"includes"`면 적어도 이 이름들이 있어야 한다.
+  - `rows`: `{ "equals": n }`, `{ "min": a, "max": b }`(하나만 써도 된다), `{ "sameAs": 표 }`(다른 표와 같은 행 수) 가운데 하나다.
+- **`aggregate_match`:** `source` 표의 `column`에 `op`를 계산해 `target` 표의 `targetColumn`과 맞댄다.
+  - `op`: `sum`, `count`(빈 칸이 아닌 칸의 수), `min`, `max`, `mean`.
+  - `groupBy`를 주면 그 열의 값마다 묶고, `targetKeyColumn`이 대상 표의 묶음 열이다(둘은 함께만 쓴다). 대상은 묶음마다 정확히 한 행이고 다른 행이 없어야 한다. 묶음 값은 글자 그대로 비교하고, 묶음 칸이 빈 원본 행은 뺀다.
+  - `groupBy`가 없으면 대상 표는 데이터 행이 정확히 하나다.
+  - `tolerance`: `{ "absolute": …, "relative": … }`, 기본 둘 다 `1e-9`. 두 수는 `|a - b| <= max(absolute, relative × max(|a|, |b|))`이면 같다.
+- **결과의 뜻:** 원본(`source`, `rows.sameAs`의 표)을 읽거나 해석할 수 없거나 수가 아닌 칸이 있으면 `inconclusive`다(모델이 입력을 고칠 수 없다). 대상(`target`, `table_shape`의 `table`)이 없거나 해석되지 않거나 열·행이 맞지 않거나 값이 다르면 `fail`이다(모델이 고칠 수 있다). 경로 거부, 읽기 오류, 잘못된 규칙은 어느 쪽이든 `inconclusive`다.
+- **근거:** 열 이름, 데이터 행 번호(1부터, 머리 행 빼고), 비교한 두 수를 적는다. 그 밖의 칸 값은 적지 않는다. 재수정을 켜면 근거가 가린 뒤 모델에 간다. 원본이나 대상이 읽기 제외 경로 아래일 때 근거와 판정이 어떻게 달라지는지는 18.12절 4와 [민감정보 처리](privacy.md) 13·15절이다.
+- **확인하지 않는 것:** 적은 모양과 집계뿐이다. 방법, 해석, 글 속의 숫자는 확인하지 않는다. 보고서의 "Not checked"와 16절에 같은 한계가 있다. 18.9절의 예시가 이 두 규칙을 쓴다.
 
 **오류 위치:** 설정·task·대본 파일의 오류는 어느 파일의 어느 필드인지, JSON 문법 오류는 줄과 열을 알려 준다. 값은 보이지 않는다. stdout JSON의 `diagnostic`(`code`, `file`, `field`, `line`, `column`)에도 같은 위치가 있다. 실제 출력(stderr):
 
@@ -1102,6 +1136,20 @@ codaryn: 오류 — task 파일을 읽을 수 없거나 값이 올바르지 않�
   - 프로필과 작업 종류 정의의 목록도 따로 같은 판정을 받는다(`profiles.<이름>.policy.writablePaths`, `workflows.<id>.policy.writablePaths`).
   - 지금 GUI의 설정 화면에는 `writablePaths`를 고치는 편집이 없다. 목록은 설정 파일을 손으로 고쳐 둔다. GUI의 넓히기 확인 대화상자는 이 두 종류에 이름을 붙인다: "쓰기 허용 경로 넓힘", "쓰기 허용 경로 제한 없앰(파일 도구가 작업 공간 어디든 씀)"(U-192, 병합 `111e25d`. 코드와 카탈로그 기준).
 
+**읽기 제외 경로(`unreadablePaths`):** 모델이 읽거나 목록으로 보거나 바꾸지 못하는 작업 공간 기준 경로 목록이다. 그 아래의 표는 `query_table`의 집계로만 다룬다(18.12절). 계약은 [CLI·공통 계약](cli-contract.md) 13.2다.
+- 형식과 판정은 보호 경로와 같다. 실경로까지 보므로 그 아래를 가리키는 링크로도 읽지 못한다. 쓸 수 없는 항목은 모든 경로를 덮는다.
+- 둘 수 있는 곳은 task 파일, 설정 파일, 프로필, 작업 종류 정의(`policy` 안)다. 실행의 목록은 넷의 합이다. 설정 파일과 프로필의 항목은 task 파일로 실행해도 걸리고, 어느 원천도 항목을 빼지 못한다.
+- 그 아래의 읽기와 쓰기는 `path/unreadable_path`로 거부되고, `search_files`와 `inspect_files`는 그 아래 항목을 이름째 뺀다. 끝 요약은 `Calls denied at paths this task may not read: 1`처럼 거부 수를 세고, `These paths are kept from the agent on purpose (unreadablePaths); a task type with the query_table tool can still aggregate their tables. To let it read them, take the entry out of unreadablePaths where it was set.`라고 안내한다(18.12절의 실제 출력).
+- 무결성 확인의 대상에도 든다(보호 경로처럼 실행 앞뒤의 해시).
+- 명령과 함께 둘 수 없다(R-5). 읽기 제외가 하나라도 있으면 명령 규칙과 명령 검증기는 실행 전에 거부되고, `doctor`의 허용 명령 항목이 실패다(18.12절 5).
+- 사람의 화면(변경 보기, GUI의 파일 보기)과 `revert`는 읽기 제외를 보지 않는다. 막는 것은 모델로 가는 것이다.
+- GUI의 설정 화면에는 이 목록을 보이거나 고치는 칸이 없다. 설정 파일을 손으로 고친다. 설정 변경이 항목을 빼면 넓히기 확인을 거친다(18.12절 9).
+
+**묶음 크기 k(`minGroupSize`):** 읽기 제외 아래 표에서 `query_table`이 보이는 묶음의 최소 행 수다. 둘 수 있는 곳은 읽기 제외와 같다.
+- 5부터 1,000까지의 정수다. 5 아래면 `policy.minGroupSize must be a whole number from 5 to 1000`이다(18.12절 5).
+- 실행의 k는 원천들의 값 가운데 가장 큰 것이다. 어느 원천도 5 아래로 내리지 못한다(18.12절 7).
+- 읽기 제외 밖의 표에는 걸리지 않는다(k 1).
+
 **Windows 실행 규칙:** 도구 명령과 검증기 명령에 똑같이 적용한다.
 
 - 이름은 자식에게 넘기는 `PATH`와 `PATHEXT`로 찾는다. 작업 디렉터리와 상대 `PATH` 항목은 찾지 않는다. `.exe`, `.com`, `.cmd`, `.bat`만 실행한다.
@@ -1189,10 +1237,18 @@ node --test dist/tests/live/openai-live.js
 - **자료 검증(`data_checks`):** 판단 불가(`inconclusive`)가 되는 경우가 둘 있다. 검증 결과의 한계 목록에도 같은 내용이 나온다.
   - 열이나, 묶은 규칙의 묶음 하나라도 값이 모두 비어 있으면 sum·min·max·mean 규칙
   - 더해 가는 합이 double 범위를 넘으면 sum·mean 규칙. 넘는지는 행 순서에 달렸다. 같은 값 `1e308, -1e308, 1e308`은 검사되고 `1e308, 1e308, -1e308`은 판단 불가다.
+- **표 크기(Q-7 실측):** `data_checks`는 16 MiB(`MAX_DATA_TABLE_BYTES`)까지 읽는다. 더 큰 원본은 읽기 전에 `inconclusive`, 더 큰 대상은 `fail`이다. `query_table`은 64 MiB(`MAX_QUERY_TABLE_BYTES`)까지다. 상한은 바꾸지 않았다. 맞출지는 사용자 질문으로 남아 있다(DR-74 (6)).
+  - 잰 곳: main `6ef6e3a`의 빌드를 스크립트로 불렀다. 합성 CSV(열 넷), Windows 11, Ryzen 9 7940HX(32 스레드), 메모리 47 GiB, Node 26.13.1이다. 측정마다 새 프로세스였고, 세 번의 가운데 값이다. 다른 작업이 함께 도는 기계라 시간은 어림이다.
+  - 메모리는 프로세스의 최대 상주 메모리다. 모듈만 불러 둔 프로세스가 64 MiB였다.
+  - 묶음 키 100개인 표: `data_checks`의 묶음 합은 16 MB(28.8만 행)에서 0.15초·70 MiB, 64 MB(115만 행)에서 0.45초·77 MiB였다. 묶지 않은 합과 `table_shape`는 그보다 빠르고 메모리는 같았다. `query_table`의 묶음 합·개수·평균은 16 MB에서 0.14초·73 MiB, 64 MB에서 0.53초·78 MiB였다.
+  - 묶음 키 1만 개인 표: `data_checks`는 16 MB에서 0.23초·81 MiB, 64 MB에서 1.1초·85 MiB, `query_table`은 0.20초·88 MiB와 0.69초·102 MiB였다.
+  - 키가 행마다 다른 표(가장 나쁜 경우): `data_checks`는 묶음 수에 상한이 없어 16 MB(27만 묶음)에서 0.37초·303 MiB, 64 MB(107만 묶음)에서 1.6초·822 MiB였다. `query_table`은 1만 묶음을 넘으면 `too_many_groups`로 멈추어 0.18초·101 MiB와 0.68초·162 MiB였다. 그래서 `data_checks`의 상한을 64 MiB로 올리면, 키가 거의 다 다른 열로 묶을 때 메모리가 약 0.8 GiB까지 든다.
+  - 64 MB 표를 지금의 16 MiB 상한으로 읽게 하면 읽기 전에 거부되어 2 ms였다.
 - **큰 작업 공간의 파일 목록:** 작업 공간의 파일 목록(상한 10만 개)을 `plan`은 한 번, `apply --digest`는 두 번(동작 앞뒤) 만든다. 터미널 질문으로 승인하면 계획을 보이기 전에 한 번 더 만든다(코드 기준, 터미널 대화는 확인하지 않았다). 파일이 아주 많으면 시간이 걸린다. 목록을 만드는 중의 취소는 목록이 끝나기를 기다리지 않는다. 파일 5만 개(목록 하나에 약 0.5초)에서 첫 목록 중에 취소 파일을 만들자 약 0.1초 뒤 `cancelled`로 끝났고 아무것도 옮기지 않았다(main `3e36b1b`).
 - **보호 경로:** 파일 도구만 막는다. 명령으로 고치는 것은 막지 못하고, 무결성 확인은 사후 탐지다. 두 확인 사이에 바뀌었다가 다음 확인 전에 되돌려진 변경은 탐지하지 못한다.
 - **되돌리기:** 명령이 바꾼 파일은 대상이 아니다. 실행 중 다른 프로그램이 같은 파일을 바꾸면 스냅샷이 실제 실행 전 상태와 다를 수 있다.
 - **실행 계획(18.11절 "알려진 한계"):** 계획 기록을 다른 작업 공간에 복사하면 거기서 원래 다이제스트로 수행된다(DR-74 (4), Codex V-14 M-1). 요약은 강제되지 않고 허용한 명령은 승인한 파일에 묶이지 않는다. 계획 파일이 `writablePaths` 밖이라 계획 없이 끝난 계획 실행은 `model_error`이고 끝 요약이 모델 설정 점검을 권한다.
+- **개인정보 표(18.12절 "알려진 한계"):** 보장은 행을 보내지 않는다는 것뿐이다. 여러 질의의 차로 작은 묶음의 값을 알아낼 수 있다(Q-8). 5행 이상인 묶음의 키와 열 이름은 모델에게 간다. 읽기 제외가 걸린 확인은 대본 모델과 모의 API뿐이다.
 - **같은 실패 판정:** 숫자만 바뀌는 진전(실패 3건 → 1건)도 같은 실패로 보아 `maxSameFailures`에서 멈춘다. 임시 경로처럼 숫자가 아닌 내용이 매번 바뀌면 다른 실패로 보아 `maxRepairAttempts`와 예산 한도만 반복을 멈춘다.
 - **가림의 빈틈:** 12절 목록 밖의 변형, 다른 값과 함께 인코딩된 Base64, UTF-16·CP949 출력은 가려지지 않는다. 출력 끝에서 4096바이트보다 긴 변형이 잘리면 일부가 남을 수 있다. 아주 짧은 가릴 값이나 변수 파일의 흔한 값(예: `postgres`)은 엉뚱한 곳까지 가릴 수 있다.
 - **파일 해시 노출:** 파일 해시가 모델과 기록에 남는다. 짧은 비밀이 든 파일은 추측 검증이 가능하다.
@@ -1278,6 +1334,8 @@ node --test dist/tests/live/openai-live.js
 | `invalid_arguments` | 옵션 오류. 같은 옵션 반복, 모르는 옵션, `--env-file`, `--workspace`·`--goal` 한쪽만, 한 줄 실행 목표와 `--task` 등을 함께 씀, 작업 공간 안의 취소 파일, `doctor`의 `--task`와 `--workspace` 함께, 프로필 이름 형식, 목록에 없는 `models --use` 번호, 이름이 `latest`인 실행 디렉터리가 있는데 `--run latest`, `apply`의 `--run latest`나 형식이 틀린 `--digest`, task 파일과 `--workflow`를 함께 줌, `revert`의 `--dry-run`과 `--allow-unsafe-move`를 함께 줌, 바꾸는 명령(`revert`, `cleanup`, `apply`, `review`)에 `--workspace`를 주지 않음(현재 폴더라면 `--workspace .`, 10절 "`--workspace` 생략") |
 | Node 오류, 종료 9 | `--env-file`의 파일이 없다. `--vars-file`로 바꾼다 |
 | `invalid_task`, `invalid_config` | stderr의 오류 설명이 파일과 필드(또는 줄·열)를 알려 준다(6절). 설정 상한보다 큰 task 한도, 설정 최상위보다 큰 프로필 한도, 없는 프로필, anthropic의 `maxTotalTokens: null`, 작업 공간 안의 파일, 변수 파일의 BOM, 1 MiB보다 큰 task·설정 파일(4절 "키")도 여기다 |
+| 읽기 제외와 k의 거부(힌트 `unreadable_paths_required`, `unreadable_with_commands`, `min_group_size_range`) | `analyze-private`인데 실행의 읽기 제외가 비었으면 설정 파일·프로필·task 파일의 `policy.unreadablePaths`에 표의 폴더를 둔다. 읽기 제외가 있으면 명령 규칙과 명령 검증기를 뺀다. `policy.minGroupSize`는 5~1000으로 둔다(18.12절 5) |
+| 끝 요약의 `Calls denied at paths this task may not read` | 모델이 읽기 제외 아래를 읽으려 했다. 의도한 막음이다. 표는 `query_table`이 있는 작업 종류(`analyze`, `analyze-private`)로 집계한다(13절, 18.12절) |
 | `config_exists` | `init`의 대상 위치에 파일이 이미 있다. 그 파일을 고치거나, `--config`로 다른 위치를 준다 |
 | `key_in_file` | task·설정 파일이나 `--goal`, 한 줄 실행 목표에서 키 필드나 키 값을 지우고 환경 변수로 옮긴다. 메시지가 어느 키 변수의 값을 찾았는지 알린다(16절 "키 거부와 가림의 빈틈") |
 | `secret_env_missing` | `secretEnv`에 적은 환경 변수가 없다 |
@@ -1366,7 +1424,8 @@ node --test dist/tests/live/openai-live.js
 | `general` | 도구 넷 | 검증기 | 지금까지와 같은 작업 |
 | `code` | 도구 넷 | 검증기 | 코드 변경. 명령은 정책이 허용한 것만 |
 | `document` | `read_file`, `search_files`, `write_file` | 검증기 | 문서 작성. 명령 도구 없음 |
-| `analyze` | `read_file`, `search_files`, `write_file` | 검증기를 통과한 뒤 사람 확인(18.6) | 자료 분석. 개인정보 자료는 다루지 않는다(18.7) |
+| `analyze` | `read_file`, `search_files`, `query_table`, `write_file` | 검증기를 통과한 뒤 사람 확인(18.6) | 자료 분석. 개인정보가 든 표는 `analyze-private`로(18.7) |
+| `analyze-private` | `read_file`, `search_files`, `query_table`, `write_file` | 검증기를 통과한 뒤 사람 확인(확인 항목 셋) | 개인정보가 든 표의 집계 분석. 실행에 읽기 제외가 있어야 하고 명령은 금지(18.12) |
 | `organize` | `read_file`, `search_files`, `inspect_files`, `propose_plan` | 계획을 제안하고 멈춤. 사람이 승인하면 적용(18.3) | 파일 이동·폐기. 명령 금지 |
 
 - **고르는 곳**(앞의 것이 우선): task 파일의 `workflowRef` → 간편 형식의 `--workflow <id>` → 프로필의 `workflowRef`. task 파일과 `--workflow`를 함께 주면 `invalid_arguments`다.
@@ -1762,12 +1821,13 @@ node dist/src/cli/main.js review --task <task.json> --run <실행 id> --reject
 - `report`의 `Review checklist` 절이 확인 항목과 판정을 보여 준다. 판정 전에는 `No verdict yet.`, 판정 뒤에는 예를 들어 `Verdict: **rejected** (`2026-11-12T05:58:15.969Z`)`이고, 그 뒤에 판정을 바꾸는 명령 줄(`A later review replaces it: …`)이 붙는다(18.9절). 판정은 그 실행의 `review.json`에 있다.
 - 확인 항목은 작업 종류가 정한다. task의 `humanReview.checklist`로 바꿀 수 있다.
 - 사람 확인은 사람의 판단을 기록할 뿐이다. 보고서의 해석이나 분석 방법을 Codaryn이 확인하지는 않는다.
-- 결과 표의 형태와 집계는 `data_checks` 검증기로 확인한다(규칙은 [CLI·공통 계약](cli-contract.md)과 `src/contracts/verify.ts`).
+- 결과 표의 형태와 집계는 `data_checks` 검증기로 확인한다(규칙은 6절 "자료 검증기의 규칙").
 
-### 18.7 개인정보가 든 자료는 다루지 않는다
+### 18.7 개인정보가 든 자료: 읽기 제외와 `analyze-private`
 
 - `read_file`과 `search_files`는 표의 행을 그대로 모델에 보낸다. 가려지는 것은 등록한 가릴 값(12절)뿐이다. 이름, 연락처 같은 개인정보는 가려지지 않는다.
-- 원자료 행을 모델에 보내지 않고 집계만 돌려주는 도구는 아직 없다. 그 전까지 개인정보가 든 표나 문서는 어떤 작업 종류로도 작업 공간에 두지 않는다. `analyze`를 포함한다.
+- 그래서 개인정보가 든 표는 읽기 제외 경로(13절) 아래에 두고 `analyze-private`로 다룬다(18.12절). 모델은 행 대신 `query_table`의 집계만 받는다. 보장은 "행을 보내지 않는다"뿐이다(18.12절 "알려진 한계").
+- 읽기 제외 아래의 문서도 모델은 읽지도 목록으로 보지도 못한다. 읽기 제외 밖에 둔 개인정보는 어떤 작업 종류로든 모델에 갈 수 있다. `analyze`를 포함한다.
 - 파일 정리(`organize`)는 파일 내용을 모델에 보내지 않는다. `inspect_files`는 경로, 크기, 수정 시각, 요청하면 해시만 준다. 그래도 파일 이름과 폴더 이름은 모델에 간다. 이름에 개인정보가 있으면 그 값을 가릴 값으로 등록하거나 그 폴더를 작업 공간에서 뺀다.
 - 이미지나 오피스 문서 같은 바이너리 파일도 내용을 읽지 않고 옮길 수 있다.
 
@@ -2337,7 +2397,7 @@ Report: codaryn report --workspace <workspace> --run 20261113T141029Z-58b21c7e
 
 - 확인: `run_command`를 더한 정의에 `node -e`로 `docs/by-command.txt`를 쓰는 명령 규칙을 두고, 계획을 수행하는 대본이 그 명령을 부르게 했다. 명령은 허용되어 계획에 없는 그 파일을 썼다. 끝 요약의 `Files changed: 2`에는 들지 않았고, 그 실행을 되돌려도 그 파일은 남았다(명령이 바꾼 파일은 되돌리지 않는다, 11절).
 
-**9. GUI.** 계획 화면은 실행 계획의 파일 목록(만들기·고치기)과 요약을 보이고, 점검으로 계획을 수행할 실행이 쓸 수 없는 파일을 표시한다. 적용 단추는 꺼져 있고 "실행 계획은 아직 이 앱에서 수행할 수 없습니다. …"라고 까닭을 말한다. 메인 프로세스도 그런 승인을 `run_plan_apply_unavailable`로 거부한다(U-196·U-206, 병합 `2ef6b48`. 코드 기준, 화면을 띄워 보지 않았다). 실행 계획의 수행은 CLI의 `apply`로 한다.
+**9. GUI.** 계획 화면은 실행 계획의 파일 목록(만들기·고치기)과 요약을 보이고, 점검으로 계획을 수행할 실행이 쓸 수 없는 파일을 표시한다(U-196·U-206). 적용하면 메인 프로세스의 OS 대화상자가 파일 수와 다이제스트를 묻는다(`Apply this changes plan? {files} files (digest {digest})`). 그 설명은 CLI의 승인 글과 같은 것을 말한다: 파일 도구가 이 파일들에만 쓰는 실행이 시작된다는 것, 요약은 모델이 쓴 작업 설명으로 계획과 함께 승인되며 강제되지 않는다는 것, 명령은 이 파일들에 묶이지 않는다는 것. 승인하면 앱 계층이 CLI와 같은 길로 계획을 수행한다(사건, 권한 질문, 취소. U-218·U-226, 병합 `eb042d9`). 코드 기준이고, 화면을 띄우거나 실제 OS 대화상자를 누르지는 않았다.
 
 **10. 알려진 한계.**
 
@@ -2348,6 +2408,218 @@ Report: codaryn report --workspace <workspace> --run 20261113T141029Z-58b21c7e
 - **계획 없이 끝난 계획 실행(위 7, 계획 파일이 `writablePaths` 밖):** `failed`/`model_error`이고, 끝 요약의 마지막 안내가 모델 설정 점검이다(main `529fcea`, cli-contract 18.9).
 - 검증기 없는 task에서 계획을 수행한 실행은 일을 하고도 `needs-input`/`no_verifier`로 끝난다. 그때 `runs`는 계획을 만든 실행을 `plan carried out by run …, which ended as no_verifier`라 부르고, `plan`은 그 계획을 `carried out`, `report`는 `carried out by run …, which ended as no_verifier`라 부른다(U-221).
 - **쓰기의 폴더 바꿔치기(DR-73):** 계획을 수행한 실행의 `write_file`은 도구가 경로를 푼 뒤의 바꿔치기를 닫지 못한다(16절). 승인 뒤 계획 파일의 길 위에 생긴 링크는 시작 전에 낡음으로 본다(위 6).
+
+### 18.12 개인정보 표의 집계 분석 (`analyze-private`, `query_table`)
+
+개인정보가 든 표는 읽기 제외 경로(13절) 아래에 둔다. 그러면 모델은 그 표를 읽지도, 목록으로 보지도, 바꾸지도 못하고 `query_table`의 집계만 받는다(DR-69, DR-70, DR-74 (1)). 모델에게 가는 것은 열 이름, 5행 이상인 묶음의 키와 행 수, 5칸 이상으로 만든 count·sum·mean 값, 숨긴 묶음의 개수뿐이다. 가는 것과 가지 않는 것의 전체 표는 [민감정보 처리](privacy.md) 15절에 있다.
+
+- **작업 종류:** `analyze-private`는 `read_file`, `search_files`, `query_table`, `write_file`을 주고 명령을 허용하지 않는다. 끝은 사람 확인이고, 확인 항목은 셋이다. 실행의 읽기 제외가 비면 시작하지 않는다.
+- **`analyze`와 다른 점:** `analyze`도 `query_table`을 준다. 그러나 읽기 제외 밖의 표는 `read_file`로도 읽히므로 숨기는 것이 없다(아래 6).
+- **보장:** 행을 보내지 않는다는 것뿐이다. 여러 질의의 차로 작은 묶음의 값을 알아낼 수 있다(아래 10).
+- **확인:** 아래 출력은 모두 main `ddd4401`의 실제 CLI로 낸 것이다. [예시](../examples/analyze-private-demo/README.md)를 저장소 밖에 복사해 대본 모델로 돌렸다(키 없음, `CODARYN_LANG=en`).
+  - 읽기 제외가 걸린 확인은 대본 모델과 127.0.0.1의 모의 API(Anthropic, OpenAI)뿐이고, 실제 API로는 확인하지 않았다.
+  - 모델로 간 것 전체에서 표지를 찾는 카나리 검사는 시험의 몫이다(통합 `n17`·`n18`, 유닛 `g-u210-canary-cli`).
+
+**준비.** 예시의 설정 파일이 읽기 제외 경로 `private`를 두고, task는 `"workflowRef": "analyze-private"`를 고른다. task 파일에는 읽기 제외가 없다. 설정 파일과 프로필의 항목은 task 파일로 실행해도 걸리고, task 파일로 뺄 수 없다(13절).
+
+```json
+{
+  "schemaVersion": 1,
+  "policy": {
+    "commands": [],
+    "network": "deny",
+    "destructive": "deny",
+    "restorePathTokens": false,
+    "unreadablePaths": [
+      "private"
+    ]
+  }
+}
+```
+
+- 표 `private/members.csv`는 합성 18행이다(지역 north 6, south 5, east 7행). 이름 열은 `member-n1` 같은 표지다.
+- 검증기는 `data_checks`(결과 표의 열·행 수와 지역별 합계)와 `file_rules`(보고서) 둘이다.
+
+**1. 점검(`doctor`).**
+
+```
+[ok]      task file                 the task file is valid
+doctor: ok (exit code 0). No network access was made and nothing was changed.
+```
+
+**2. 실행.** 대본은 다음을 차례로 한다.
+
+1. 표를 읽으려다 거부된다.
+2. `query_table`로 표의 꼴(`describe`), 지역별 합·개수와 bonus 합, 지역·팀별 합을 묻는다.
+3. 읽기 제외 표에서 받지 않는 연산(max)을 물어 거부된다.
+4. 결과 표와 보고서를 쓴다.
+
+```
+codaryn: run started — provider scripted
+codaryn: protected material check — unchanged (run_start)
+codaryn: turn 1
+codaryn: read file — denied (path/unreadable_path)
+codaryn: turn 2
+codaryn: aggregate a table — allowed (query_table)
+codaryn: aggregate a table — its shape only (columns and counts)
+codaryn: turn 3
+codaryn: aggregate a table — allowed (query_table)
+codaryn: aggregate a table — grouped by 1 column(s) (sum, count)
+codaryn: turn 4
+codaryn: aggregate a table — allowed (query_table)
+codaryn: aggregate a table — grouped by 2 column(s) (sum)
+codaryn: turn 5
+codaryn: aggregate a table — allowed (query_table)
+codaryn: aggregate a table — failed (invalid_table)
+codaryn: turn 6
+codaryn: write file — allowed (write_file)
+codaryn: created summary.csv
+codaryn: turn 7
+codaryn: write file — allowed (write_file)
+codaryn: created report.md
+codaryn: turn 8
+codaryn: check #1 — passed (pass)
+codaryn: check #2 — passed (pass)
+codaryn: finished — needs input (awaiting_review)
+── Result: needs input — waiting for a person's review (needs-input/awaiting_review) ──
+Checks passed: 2 of 2 (within the configured checks)
+Protected material checks that found no change: 3
+Files changed: 2
+  summary.csv (created)
+  report.md (created)
+Denied calls: 1
+Calls denied at paths this task may not read: 1
+These paths are kept from the agent on purpose (unreadablePaths); a task type with the query_table tool can still aggregate their tables. To let it read them, take the entry out of unreadablePaths where it was set.
+Failed calls: 1
+Groups of fewer than 5 rows, or values from fewer cells than that, were left out of 2 table result(s); the agent got neither those groups nor those values, only how many groups were left out and which values were empty.
+Usage: model turns 8 · tool calls 6 · 0.7 s
+The agent's last message (the agent's own words, not a verified fact):
+  | summary.csv와 report.md를 만들었다. 원자료 행은 읽지 않았다.
+Look at the result and record a verdict with codaryn review.
+Run id: 20261113T165816Z-fb68780c
+Report: codaryn report --workspace <workspace> --run 20261113T165816Z-fb68780c
+Revert: codaryn revert --workspace <workspace> --run 20261113T165816Z-fb68780c
+Items to check: 3
+  - The report's interpretation matches the result table.
+  - No input data the goal names is missing from the analysis.
+  - No value in the result table or the report can identify a person.
+Record a verdict: codaryn review --task <task.json> --run 20261113T165816Z-fb68780c --accept or --reject
+```
+
+- 진행 줄은 무엇을 물었는지만 말한다(`aggregate a table — grouped by 1 column(s) (sum, count)`). 경로, 열 이름, 키, 수는 없다.
+- 끝 요약은 읽기 제외 때문에 거부된 호출 수와 할 수 있는 일, 숨긴 묶음이나 값이 있던 결과의 수, 확인 항목 셋을 말한다.
+
+**3. 모델이 받은 것.** journal의 도구 결과가 모델이 받은 가림본이다(아래는 그 기록에서 꺼냈다).
+
+- 표 읽기(거부):
+
+```
+error (policy_denied): denied by policy: path/unreadable_path. Files here may not be read, listed or changed in this task; use query_table for their tables.
+```
+
+- 표의 꼴: 열 다섯과 행 수 18이다. 세 칸뿐인 `bonus`의 칸 수와, 글자 열의 "수로 읽히는 칸 수"(0)는 5 미만이라 `null`이다.
+
+```
+{"kind":"describe","columns":[{"name":"region","nonEmpty":18,"numeric":null},{"name":"team","nonEmpty":18,"numeric":null},{"name":"amount","nonEmpty":18,"numeric":18},{"name":"bonus","nonEmpty":null,"numeric":null},{"name":"name","nonEmpty":18,"numeric":null}],"rows":18,"minGroupSize":5}
+```
+
+- 지역별: 세 지역이 모두 보인다. bonus 합은 5칸 미만이라 `null`이고, 그 연산 번호가 `fewCells`에 든다.
+
+```
+{"kind":"groups","groupBy":["region"],"operations":[{"op":"sum","column":"amount"},{"op":"count","column":"amount"},{"op":"sum","column":"bonus"}],"groups":[{"keys":["east"],"rows":7,"values":[525,7,null],"fewCells":[2]},{"keys":["north"],"rows":6,"values":[800,6,null],"fewCells":[2]},{"keys":["south"],"rows":5,"values":[385,5,null],"fewCells":[2]}],"suppressedGroups":0,"next":null,"minGroupSize":5}
+```
+
+- 지역·팀별: 5행 이상인 두 묶음만 보이고, 나머지 넷은 `suppressedGroups`로만 센다.
+
+```
+{"kind":"groups","groupBy":["region","team"],"operations":[{"op":"sum","column":"amount"}],"groups":[{"keys":["east","team-alpha"],"rows":6,"values":[315]},{"keys":["north","team-alpha"],"rows":5,"values":[500]}],"suppressedGroups":4,"next":null,"minGroupSize":5}
+```
+
+- 수가 아닌 칸: 읽기 제외 아래 표에서는 질의가 그런 칸 때문에 거부되지 않는다. 합과 평균에서는 빈 칸처럼 빠지고, count는 센다(U-277). 이 예시 표에는 그런 칸이 없다.
+- max(거부):
+
+```
+error (invalid_table): table rejected: op_not_allowed at operations[0].op. A table under unreadablePaths takes only count, sum and mean; ask for those.
+```
+
+**4. 검증과 사람 확인.**
+- 원본이 읽기 제외 아래인 `data_checks`의 근거에는 원본에서 읽은 수와 원본의 행 번호가 없다.
+- 묶음 비교는 5행 이상인 묶음만 맞댄다. `query_table`이 주지 않는 값(min·max, 5칸 미만 값 등)을 거는 규칙은 맞대지 않는다(U-223, U-258, [민감정보 처리](privacy.md) 13절).
+- `file_rules`도 같다. 읽기 제외 아래 파일을 보는 규칙은 종류와 상관없이, 파일이 있든 없든 맞대지 않는다. 그 아래로 링크하는 `markdown_links`도 같다(U-276, [민감정보 처리](privacy.md) 13절).
+- 사람 확인은 셋째 항목 "한 사람을 알아볼 수 있는 값이 없다"를 사람이 본다.
+
+```
+codaryn: Chose the latest run: 20261113T165816Z-fb68780c (started 2026-11-14 01:58:16)
+Review of run 20261113T165816Z-fb68780c: accepted.
+  1. The report's interpretation matches the result table.
+  2. No input data the goal names is missing from the analysis.
+  3. No value in the result table or the report can identify a person.
+The run's result and records are unchanged; `codaryn report` shows the verdict.
+```
+
+**5. 실행 전에 거부되는 것.** 셋 모두 기록과 모델 요청 전이다(`runs`에 실행이 늘지 않는다).
+
+- 설정 파일 없이 돌리면(실행의 읽기 제외가 비면) `invalid_task`다. 메시지는 "policy.unreadablePaths must not be empty under the analyze-private task type: put the folder of the tables with personal data in it (the task file, the config file or a profile)"이다. 사람용 오류:
+
+```
+codaryn: error — the task file cannot be read or has an invalid value (invalid_task)
+  task file — policy.unreadablePaths has an invalid value (values are not shown)
+  To fix: Check that the file given with --task exists and is outside the workspace. If a field is named, fix that field. codaryn doctor --task <file> checks it.
+  Check: codaryn doctor
+  The analyze-private task type needs at least one entry in policy.unreadablePaths. Put the folder of the tables with personal data there, in the task file, the config file or a profile.
+```
+
+- `doctor`도 task 파일 항목을 실패로 알린다: `[failed]  task file                 the task file has an invalid value at policy.unreadablePaths (values are not shown)`.
+- 읽기 제외가 있으면 명령 규칙도 명령 검증기도 둘 수 없다(R-5). 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
+  - 명령을 허용하는 작업 종류(`general`)의 명령 규칙: "policy.commands must be empty while unreadablePaths is set: a command can read any file, the ones kept from the agent too".
+  - 명령 검증기: "verifiers[2] cannot be a command verifier while unreadablePaths is set: a command can read any file, and its output goes to the model".
+  - `analyze-private`는 명령을 아예 허용하지 않아 "policy.commands must be empty: the workflow allows no command"이고, 힌트가 까닭을 붙인다(`hint`: "unreadable_with_commands").
+  - `doctor`의 허용 명령 항목: `[failed]  allowed commands          command rules and command checks while unreadablePaths is set: 1; a run refuses them, since a command can read any file, the ones kept from the agent too`.
+- k를 5 아래로 두면 "policy.minGroupSize must be a whole number from 5 to 1000"이다(`hint`: "min_group_size_range").
+
+**6. `analyze`의 `query_table`(읽을 수 있는 표).** 읽기 제외 밖의 표에서는 k가 1이고 연산 다섯을 모두 받는다. 1행 묶음과 min·max도 그대로 간다.
+
+```
+{"kind":"groups","groupBy":["region"],"operations":[{"op":"min","column":"amount"},{"op":"max","column":"amount"},{"op":"sum","column":"amount"}],"groups":[{"keys":["east"],"rows":1,"values":[60,60,60]},{"keys":["north"],"rows":2,"values":[30,120,150]},{"keys":["south"],"rows":1,"values":[80,80,80]}],"suppressedGroups":0,"next":null,"minGroupSize":1}
+```
+
+**7. k 올리기.** 설정 파일에 `"minGroupSize": 6`을 두면 5행인 south도 숨겨진다. k는 원천들의 값 가운데 가장 큰 것이고 5 아래로 내려가지 않는다(13절).
+
+```
+{"kind":"groups","groupBy":["region"],"operations":[{"op":"sum","column":"amount"}],"groups":[{"keys":["east"],"rows":7,"values":[525]},{"keys":["north"],"rows":6,"values":[800]}],"suppressedGroups":1,"next":null,"minGroupSize":6}
+```
+
+**8. 실행 계획과 함께(18.11).** 실행 계획을 수행하는 실행에도 실행의 읽기 제외가 걸린다. 설정 파일의 읽기 제외 아래에서 계획을 수행한 실행이 표를 읽으려 하자 거부되었다.
+
+```
+── Result: done — every configured check passed (done/verified) ──
+Calls denied at paths this task may not read: 1
+These paths are kept from the agent on purpose (unreadablePaths); a task type with the query_table tool can still aggregate their tables. To let it read them, take the entry out of unreadablePaths where it was set.
+```
+
+```
+error (policy_denied): denied by policy: path/unreadable_path. Files here may not be read, listed or changed in this task; use query_table for their tables.
+```
+
+**9. GUI(앱 계층).** GUI의 메인 프로세스가 부르는 앱 계층으로 같은 예시를 돌렸다(창은 띄우지 않았다). CLI와 같이 표 읽기는 거부되고 `query_table`의 결과도 같았다. 화면은 사람 점검 항목으로 둔다(ne-verify).
+
+```
+{"status":"needs-input","reason":"awaiting_review","decisions":["read_file:unreadable_path","query_table:allowed","query_table:allowed","query_table:allowed","query_table:allowed","write_file:allowed","write_file:allowed"],"queries":["describe rows 18","groups 3 suppressed 0","groups 2 suppressed 4"]}
+```
+
+- 새 작업 화면의 작업 종류 목록에 `analyze-private`가 있다(내장 id에서 만든다). `analyze`를 고르면 안내 글이 읽기 제외와 `analyze-private`를 권한다(`task.analyzeNotice`, 코드 기준).
+- 설정 화면에는 읽기 제외와 k를 보이거나 고치는 칸이 없다. 설정 파일을 손으로 고친다.
+- 앱 계층의 설정 변경 판정은 항목 빼기와 k 낮추기를 넓히기로 본다. GUI의 넓히기 확인이 그 이름을 보인다(`an unreadable path removed (the model may read those files)`, `the minimum group size k lowered (…)`, 코드 기준).
+
+**10. 알려진 한계.**
+
+- **여러 질의의 차(제안서 Q-8):** 위 3의 결과만으로도 north의 합 800에서 north·team-alpha의 합 500을 빼면, north·team-beta 한 사람의 금액 300이 나온다. 질의 횟수에는 한도가 없다. 막으려면 잡음이 필요하고 범위 밖이다. k는 작은 묶음이 실수로 드러나는 것을 줄이는 완화책이다.
+- **빠졌다는 사실은 간다:** `null`과 `fewCells`, `suppressedGroups`는 값을 만든 칸이나 묶음의 행이 k 미만이라는 것과 숨긴 묶음의 수를 알린다.
+- **수가 아닌 칸(U-277):** 합 ÷ 평균은 묶음의 수의 개수다. 그래서 count와 비교하면 수가 아닌 칸의 수가 나온다. `describe`의 칸 수에서 보인 묶음의 몫을 빼면 나머지 행들의 칸 종류가 나오고, 나머지가 한 행이면 그 칸이 비었는지, 수인지, 둘 다 아닌지가 나온다. 확인(main `8fc49df`의 실제 CLI, 대본 모델: 예시 표의 north 한 칸을 `n/a`로 바꾸자 north의 합은 720(80이 빠짐), 개수는 6, 평균은 144였고 거부는 없었다. `describe`의 `amount`는 비지 않은 칸 18, 수로 읽히는 칸 17이었다). 자세한 것은 [민감정보 처리](privacy.md) 13절이다.
+- **키와 열 이름:** 5행 이상이 함께 가진 키(예: 지역 이름)는 칸 값이지만 모델에게 간다(DR-70). 열 이름은 늘 간다. 사람마다 열이 하나인 교차표처럼 열 이름이 개인정보인 표는 행과 열을 바꿔 둔다.
+- **목표와 결과 파일:** 목표와 작업 종류의 지시문은 그대로 모델에 간다. 목표에 개인정보를 적지 않는다. 모델이 쓴 결과 표와 보고서는 사람 확인의 셋째 항목으로 사람이 본다.
+- **사람의 화면과 되돌리기:** 변경 보기와 GUI의 파일 보기에는 읽기 제외 아래 파일도 보인다. `revert`는 지금의 읽기 제외를 보지 않는다([민감정보 처리](privacy.md) 13절).
+- **표 크기:** `query_table`은 64 MiB, `data_checks`는 16 MiB까지 읽는다. 둘을 맞출지는 사용자 질문으로 남아 있다(DR-74 (6)). 잰 시간과 메모리는 16절 "표 크기(Q-7 실측)"에 있다.
 
 ## 19. GUI의 파일 보기: 텍스트 보기와 고치기
 

@@ -49,7 +49,7 @@ import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "../cli/assemble.js";
 import { createCancelSource } from "../cli/cancel.js";
-import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "../cli/config-file.js";
+import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
 import { runInit } from "../cli/init.js";
@@ -63,8 +63,8 @@ import { runRevert } from "../cli/revert.js";
 import { prepareTask, runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome, PrepareEnvironment, RunNotes } from "../cli/run.js";
 import type { RunArgs } from "../cli/args.js";
-import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
-import { knownKeyValues } from "../cli/settings.js";
+import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
+import { knownKeyValues } from "./input/settings.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
@@ -322,7 +322,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       if (!assembled.ok || assembledRun === null) return assembled;
       const { privacy, workspaceRoot } = assembledRun;
       // DR-15: events from the records the engine appends, in memory, masked again with this gateway.
-      const journal = journalWithEvents(assembled.deps.journal, input.runId, observer, privacy, input.clock);
+      const journal = journalWithEvents(assembled.deps.journal, observer, privacy);
       reportStart({ runId: input.runId, workspaceRoot });
       // U-108 (B-4, DR-3): the engine's permission questions go to the observer (permission.ts).
       return { ...assembled, deps: { ...assembled.deps, journal, confirm: confirmThrough(observer) } };
@@ -879,7 +879,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       openMoves = resolve;
     });
     const wrapped: ApplyPlan = async (deps) => {
-      const journal = applyJournalWithEvents(deps.journal, deps.runId, observer, deps.privacy, deps.clock);
+      const journal = applyJournalWithEvents(deps.journal, observer, deps.privacy);
       reportMoves(deps.runId);
       await movesGate;
       await nextMacrotask();

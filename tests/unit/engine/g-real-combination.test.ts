@@ -218,6 +218,7 @@ async function applyRun(
     journal: {
       append: async (event) => {
         journal.push(event);
+        return { seq: journal.length, at: new Date(0).toISOString(), runId: APPLY_RUN, ...event };
       },
       close: async () => {},
     },

@@ -78,7 +78,7 @@ import type {
 } from "../contracts/index.js";
 import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
-import { cleanText } from "./text-safety.js";
+import { cleanText } from "../app/input/text-safety.js";
 import { createMessageCatalog } from "../i18n/index.js";
 import { terminalConfirm } from "./confirm.js";
 import type { AskLine } from "./confirm.js";
@@ -87,11 +87,11 @@ import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
 import type { RunArgs } from "./args.js";
 import type { ApprovedPlanParts, Assemble } from "./assemble.js";
-import { parseConfig } from "./config.js";
-import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
+import { parseConfig } from "../app/input/config.js";
+import { chooseConfigFile, isMissingFile, selectProfile } from "../app/input/config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
 import { API_PROVIDER_FACTORIES } from "./provider.js";
-import { createRunId } from "./run-id.js";
+import { createRunId } from "../app/input/run-id.js";
 import { createFailedCalls } from "./failed-calls.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
 import {
@@ -106,14 +106,14 @@ import {
   relateRealPaths,
   secretEnvNotSetMessage,
   selectEnvFileSecrets,
-} from "./security/index.js";
-import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
-import type { SettingsEnvironment, SettingsFailure } from "./settings.js";
-import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
-import type { InputErrorPosition } from "./task.js";
-import { writablePathSetsOf } from "./writable.js";
-import { UNREADABLE_PATHS_REQUIRED_TEXT, runMinGroupSize, runUnreadablePaths } from "./unreadable.js";
+} from "../app/input/security/index.js";
+import type { PathRelation, WorkspaceLocation } from "../app/input/security/index.js";
+import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "../app/input/settings.js";
+import type { SettingsEnvironment, SettingsFailure } from "../app/input/settings.js";
+import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "../app/input/task.js";
+import type { InputErrorPosition } from "../app/input/task.js";
+import { writablePathSetsOf } from "../app/input/writable.js";
+import { UNREADABLE_PATHS_REQUIRED_TEXT, runMinGroupSize, runUnreadablePaths } from "../app/input/unreadable.js";
 import { queryTableFacts } from "./human/index.js";
 
 export interface CliEnvironment {
@@ -1087,7 +1087,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
     const failed = createFailedCalls();
     const watched: Journal = {
       async append(event) {
-        await recorded.append(event);
+        const stored = await recorded.append(event);
         if (failed.observe(event)) notes.failedToolCalls += 1;
         if (event.type === "tool_decision" && !event.allowed) {
           notes.deniedToolCalls += 1;
@@ -1109,6 +1109,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
         if (event.type === "run_started" && event.policyNarrowings !== undefined && event.policyNarrowings.length > 0) {
           notes.policyNarrowings = event.policyNarrowings;
         }
+        return stored;
       },
       close: () => recorded.close(),
     };
@@ -1143,7 +1144,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
         ? progressed
         : {
             async append(event) {
-              await progressed.append(event);
+              const stored = await progressed.append(event);
               if (!announced && event.type === "run_started") {
                 announced = true;
                 writeMasked(
@@ -1154,6 +1155,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
                     : defaultConfigNotice(defaultDisplay ?? ""),
                 );
               }
+              return stored;
             },
             close: () => progressed.close(),
           };

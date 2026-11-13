@@ -12,7 +12,7 @@
 // Fake values only; a key-shaped text is built at run time, never written in this file.
 
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /** A closed loopback port: an address that is never reached. */
@@ -158,6 +158,148 @@ function otherTaskSetup(dir) {
 const digestOf = (step) => (ctx) => String(ctx.json(step)?.plan?.digest ?? "none").slice(0, 12);
 const QUICK_APPLY = ["apply", "--workspace", "work", "--workflow", "organize", "--config", "quick-config.json"];
 
+/**
+ * U-250 (the migration plan's P-2): runs that call the task-type tools (inspect_files, propose_plan,
+ * query_table, propose_changes), whose names the app's run events now show (they read "(unknown
+ * tool)" before). The CLI uses no events, so its output and records must stay the same.
+ */
+/** An organize run that looks at the inbox (inspect_files) before it proposes the plan. */
+function inspectSetup(dir) {
+  planSetup(dir);
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [
+      { toolCalls: [{ name: "inspect_files", args: { path: "inbox", hash: true } }] },
+      { toolCalls: [{ name: "propose_plan", args: { summary: "Sort the inbox", actions: [{ kind: "move", from: "inbox/a.txt", to: "sorted/a.txt" }] } }] },
+    ],
+  });
+}
+/** A config task type with query_table (a table of no personal data: every group shown). */
+function querySetup(dir) {
+  write(dir, "work/data/sales.csv", "region,amount\nnorth,10\nsouth,5\nnorth,2.5\n");
+  write(dir, "config.json", { schemaVersion: 1, workflows: { tables: { tools: ["read_file", "query_table", "write_file"] } } });
+  write(dir, "task.json", task({ id: "compare-query", workflowRef: "tables", goal: "Total the sales by region.", verifiers: [{ id: "report", kind: "file_rules", rules: [{ type: "contains", path: "out/report.md", text: "# Sales" }] }] }));
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [
+      { toolCalls: [{ name: "query_table", args: { path: "data/sales.csv", groupBy: ["region"], operations: [{ op: "sum", column: "amount" }, { op: "count", column: "amount" }] } }] },
+      { toolCalls: [writeFile("out/report.md", "# Sales\n\n- north 12.5, south 5.\n")] },
+      { text: "The totals are written." },
+    ],
+  });
+}
+/** A config task type with plan "run": the model proposes the files to change (propose_changes). */
+const RUN_PLAN_CONFIG = { schemaVersion: 1, workflows: { rewrite: { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" } } };
+function runPlanSetup(dir) {
+  write(dir, "work/notes.md", "# Weekly notes\n\n- The site moves next week.\n");
+  write(dir, "config.json", RUN_PLAN_CONFIG);
+  write(dir, "task.json", task({ id: "compare-run-plan", workflowRef: "rewrite", goal: "Write a summary of notes.md into summary.md." }));
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [{ toolCalls: [{ name: "propose_changes", args: { summary: "Add the summary", files: [{ path: "summary.md", change: "create" }] } }] }, { text: "The plan is proposed." }],
+  });
+}
+/**
+ * The run that carries the plan out starts its script at the first step again, so the step before its
+ * apply writes that run's steps (each build has its own fresh case folder; both get the same file).
+ */
+function carryingScript(dir) {
+  write(dir, "script.json", { schemaVersion: 1, steps: [{ toolCalls: [{ name: "read_file", args: { path: "notes.md" } }] }, { toolCalls: [writeFile("summary.md", SUMMARY)] }, { text: "The summary is written." }] });
+}
+const RUN_PLAN = ["--task", "task.json", "--config", "config.json"];
+
+/**
+ * U-256: the paths the migration's C-2 to C-5 pass that no case covered yet (the plan's 5.2: a stage
+ * adds its cases first), and the gaps nc-human's preparation report names for C-9a and C-9b.
+ * Bundle A (C-3b's merging of every source's list and k, C-5's refusals before a run, C-4's
+ * assembly that hands the list and k to every part): analyze-private without unreadable paths,
+ * unreadable paths with command rules or a command verifier (R-5), an analyze-private run that reads,
+ * searches and queries a private table, and the list and k from the config file and a profile.
+ */
+const PRIVATE_POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, unreadablePaths: ["private"] };
+/** A people table: north 6 rows, east 5, south 3 (fewer than k 5: never shown). Synthetic values. */
+const PEOPLE_CSV = [
+  "person,region,amount",
+  ...[1, 2, 3, 4, 5, 6].map((n) => `person-n${n},north,${n * 10}`),
+  ...[1, 2, 3, 4, 5].map((n) => `person-e${n},east,${n * 3}`),
+  ...[1, 2, 3].map((n) => `person-s${n},south,${n * 7}`),
+].join("\n");
+/** An analyze-private task over ./work/private/people.csv; `extra` changes the task file. */
+function privateSetup(extra = {}, files = {}) {
+  return (dir) => {
+    write(dir, "work/private/people.csv", `${PEOPLE_CSV}\n`);
+    write(dir, "work/public/guide.md", "# Guide\n\nReport only totals by region.\n");
+    for (const [name, content] of Object.entries(files)) write(dir, name, content);
+    write(dir, "task.json", task({ id: "compare-private", workflow: "analyze", workflowRef: "analyze-private", goal: "Total the amounts by region.", policy: PRIVATE_POLICY, verifiers: [{ id: "report", kind: "file_rules", rules: [{ type: "contains", path: "out/report.md", text: "# Totals" }] }], ...extra }));
+    write(dir, "script.json", {
+      schemaVersion: 1,
+      steps: [
+        { toolCalls: [{ name: "read_file", args: { path: "private/people.csv" } }] },
+        { toolCalls: [{ name: "search_files", args: { path: ".", text: "north" } }] },
+        { toolCalls: [{ name: "query_table", args: { path: "private/people.csv", groupBy: ["region"], operations: [{ op: "count", column: "person" }, { op: "sum", column: "amount" }] } }] },
+        { toolCalls: [writeFile("out/report.md", "# Totals\n\n- north and east are shown.\n")] },
+        { text: "The totals are written." },
+      ],
+    });
+  };
+}
+/** The same run with the list (and k 7) in the config file, or in a profile, instead of the task file. */
+const NO_LIST_POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false };
+const PRIVATE_CONFIG = {
+  "config.json": { schemaVersion: 1, policy: { ...PRIVATE_POLICY, minGroupSize: 7 } },
+  "profile-config.json": { schemaVersion: 1, profiles: { private: { policy: PRIVATE_POLICY } } },
+};
+
+/**
+ * Run plans (C-4's assembly with the approved plan's parts; C-7b's gate): an apply with a task type
+ * that does not resolve to plan "run", a digest that is not the plan's, a locked workspace (a lock
+ * of a process that lives: the tool's own, by pid alone), and a planned file changed since the plan.
+ */
+function lockHeld(dir) {
+  write(dir, "work/.codaryn/lock.json", { pid: process.pid, runId: "20200101T000000Z-0000beef", startedAt: "2020-01-01T00:00:00.000Z" });
+}
+function lockTaken(dir) {
+  rmSync(path.join(dir, "work", ".codaryn", "lock.json"), { force: true });
+}
+const NOT_RUN_PLAN_CONFIG = { schemaVersion: 1, workflows: { rewrite: { tools: ["read_file", "search_files", "write_file", "propose_changes"] } } };
+
+/** C-9a (nc-human's report 2.5): runs of every kind for `runs` and for the revert of a plan run. */
+function plansOfBothKindsSetup(dir) {
+  planSetup(dir);
+  write(dir, "config.json", RUN_PLAN_CONFIG);
+  write(dir, "work/notes.md", "# Weekly notes\n\n- The site moves next week.\n");
+  write(dir, "run-plan-task.json", task({ id: "compare-run-plan", workflowRef: "rewrite", goal: "Write a summary of notes.md into summary.md." }));
+  write(dir, "run-plan-script.json", { schemaVersion: 1, steps: [{ toolCalls: [{ name: "propose_changes", args: { summary: "Add the summary", files: [{ path: "summary.md", change: "create" }] } }] }, { text: "The plan is proposed." }] });
+}
+/** Points the run plan's task at its own script (both tasks share ./work). */
+function runPlanScripts(dir, carrying) {
+  if (carrying) carryingScript(dir);
+  else write(dir, "script.json", JSON.parse(readFileSync(path.join(dir, "run-plan-script.json"), "utf8")));
+}
+const RUN_PLAN_TASK = ["--task", "run-plan-task.json", "--config", "config.json"];
+/**
+ * nc-human's report 2.2: a key-shaped text where the runs table shows it. A task file cannot hold one
+ * (key_in_file, C-5's refusal), but a run id may look like one (RUN_ID_PATTERN): a run folder of that
+ * name, made by hand, beside a run of the task. The key-shaped text is built at run time.
+ */
+const keyShaped = () => ["sk", "ant", "api03", "FAKEID".repeat(8)].join("-");
+function keyIdSetup(dir) {
+  documentSetup(DOCUMENT_STEPS)(dir);
+  write(dir, "key-task.json", task({ id: keyShaped() }));
+  write(dir, `work/.codaryn/runs/${keyShaped()}/journal.jsonl`, "");
+}
+const cleanup = (...more) => ({ args: ["cleanup", "--workspace", "work", ...more] });
+const cleanupDigestOf = (step) => (ctx) => String(ctx.json(step)?.plan?.digest ?? "none").slice(0, 12);
+
+/**
+ * U-265: cleanup by age, with no clock of the comparison's own. A run or a discarded folder is selected
+ * by `--older-than <days>` when now minus its start is more than that many days (the store's rule), so a
+ * run made seconds before is always selected by 0 days and never by 1: the comparison's real clock is
+ * far from any day's boundary, and the selection is the same in both builds and in every run.
+ */
+const OLDER = ["--older-than", "0"];
+const DISCARDED_OLDER = ["--discarded-older-than", "0"];
+
 export const CASES = [
   {
     name: "document-run",
@@ -293,6 +435,73 @@ export const CASES = [
     setup: documentSetup(DOCUMENT_STEPS),
     steps: [{ args: ["frobnicate"] }, { args: ["run", "--task", "missing.json"] }, { args: ["report", "--workspace", "work", "--run", NO_RUN] }],
   },
+  // U-280 (the CLI migration's C-3a: the security checks, text cleaning, the install check, run ids and
+  // the model-text format move to src/app/input/): the pre-run input checks they make, in text and
+  // JSON. A key field in the task file, a key value in the config file (built at run time), a variables
+  // file with a byte order mark, a task file inside the workspace, a secret from a variables file
+  // masked in a run, and doctor on the key field and the variables file.
+  {
+    name: "input-checks",
+    setup: (dir) => {
+      documentSetup(DOCUMENT_STEPS, {}, {
+        "keyfield-task.json": task({ model: { provider: "scripted", scriptPath: "./script.json", apiKey: "placeholder" } }),
+        "keyvalue-config.json": { schemaVersion: 1, note: ["sk", "ant", "api03", "FAKE".repeat(20)].join("-") },
+        "bom.env": "\uFEFFCMP_NAME=1\n",
+        "secret.env": `CMP_SECRET=${FAKE_SECRET}\n`,
+        "secret-task.json": task({ privacy: { secretEnv: ["CMP_SECRET"] } }),
+        "work/inner-task.json": task({ workspaceRoot: "." }),
+      })(dir);
+    },
+    steps: [
+      { args: ["run", "--task", "keyfield-task.json"] },
+      { args: ["run", "--task", "task.json", "--config", "keyvalue-config.json"] },
+      { args: ["run", "--task", "task.json", "--vars-file", "bom.env"] },
+      { args: ["run", "--task", "work/inner-task.json"] },
+      { args: ["run", "--task", "secret-task.json", "--vars-file", "secret.env"] },
+      { args: ["doctor", "--task", "keyfield-task.json"] },
+      { args: ["doctor", "--task", "task.json", "--vars-file", "bom.env", "--json"] },
+    ],
+  },
+  {
+    name: "input-checks-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS, {}, { "keyfield-task.json": task({ model: { provider: "scripted", scriptPath: "./script.json", apiKey: "placeholder" } }), "bom.env": "\uFEFFCMP_NAME=1\n" }),
+    steps: [{ args: ["run", "--task", "keyfield-task.json"] }, { args: ["run", "--task", "task.json", "--vars-file", "bom.env"] }, { args: ["doctor", "--task", "keyfield-task.json"] }],
+  },
+  // U-282 (the CLI migration's C-3b: the task, config, config file and provider settings parsers and the
+  // writable lists move to src/app/input/): their refusals and resolutions, in text and JSON. A task's
+  // near-miss field, a limit above the absolute cap and a writablePaths entry outside the workspace; a
+  // config's near-miss field, a definition with a built-in id and a profile that is not there; the
+  // quick form through CODARYN_CONFIG with no provider settings; doctor on the config and the profile.
+  {
+    name: "config-task-forms",
+    setup: documentSetup(DOCUMENT_STEPS, {}, {
+      "near-task.json": { ...task(), verifier: [] },
+      "cap-task.json": task({ limits: { maxModelTurns: 100000, maxToolCalls: 10, maxTotalTokens: null, maxDurationMs: 60000 } }),
+      "writable-task.json": task({ policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, writablePaths: ["../outside"] } }),
+      "near-config.json": { schemaVersion: 1, limit: {} },
+      "builtin-config.json": { schemaVersion: 1, workflows: { code: { tools: ["read_file"] } } },
+      "profile-config.json": { schemaVersion: 1, profiles: { docs: { workflowRef: "document" } } },
+      "quick-config.json": { schemaVersion: 1, limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 1000, maxDurationMs: 60000 } },
+    }),
+    steps: [
+      { args: ["run", "--task", "near-task.json"] },
+      { args: ["run", "--task", "cap-task.json"] },
+      { args: ["run", "--task", "writable-task.json", "--json"] },
+      { args: ["run", "--task", "task.json", "--config", "near-config.json"] },
+      { args: ["run", "--task", "task.json", "--config", "builtin-config.json"] },
+      { args: ["run", "--workspace", "work", "--goal", "g", "--config", "profile-config.json", "--profile", "nope"] },
+      { args: ["run", "--workspace", "work", "--goal", "g"], env: { CODARYN_CONFIG: "quick-config.json" } },
+      { args: ["doctor", "--config", "near-config.json", "--json"] },
+      { args: ["doctor", "--config", "profile-config.json", "--profile", "docs"] },
+    ],
+  },
+  {
+    name: "config-task-forms-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS, {}, { "near-task.json": { ...task(), verifier: [] }, "near-config.json": { schemaVersion: 1, limit: {} } }),
+    steps: [{ args: ["run", "--task", "near-task.json"] }, { args: ["run", "--task", "task.json", "--config", "near-config.json"] }, { args: ["doctor", "--config", "near-config.json"] }],
+  },
   // U-135: terminal cases (imitated: see the tool).
   {
     name: "terminal-first-page",
@@ -413,6 +622,193 @@ export const CASES = [
       run(),
       (ctx) => ({ args: [...QUICK_APPLY, "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["n"] }),
       (ctx) => ({ args: [...QUICK_APPLY, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+    ],
+  },
+  // U-250 (P-2): the task-type tools' names in a run's progress lines, records and report.
+  { name: "workflow-tools-inspect", setup: inspectSetup, steps: [run(), report("latest"), report("latest", "--json"), runs("--json")] },
+  { name: "workflow-tools-query", setup: querySetup, steps: [run("--config", "config.json"), report("latest"), report("latest", "--json")] },
+  {
+    name: "workflow-tools-run-plan",
+    setup: runPlanSetup,
+    steps: [
+      run("--config", "config.json"),
+      (ctx) => ({ args: ["plan", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--json"] }),
+      (ctx) => ({ args: ["plan", ...RUN_PLAN, "--run", runIdOf(0)(ctx)] }),
+      (ctx) => {
+        carryingScript(ctx.dir);
+        return { args: ["apply", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      report("latest"),
+      runs("--json"),
+    ],
+  },
+  // U-256: bundle A's refusals before a run (C-3b, C-5), en and ko.
+  {
+    name: "private-refusals",
+    setup: privateSetup({}, {
+      "no-list-task.json": task({ id: "compare-private", workflow: "analyze", workflowRef: "analyze-private", goal: "Total the amounts by region.", policy: NO_LIST_POLICY }),
+      "commands-task.json": task({ policy: { ...PRIVATE_POLICY, commands: [{ executable: "node", argsPrefix: ["--version"], allowExtraArgs: false }] } }),
+      "verifier-task.json": task({ policy: PRIVATE_POLICY, verifiers: [{ id: "lint", kind: "command", executable: "node", args: ["--version"], expectExitCode: 0 }] }),
+    }),
+    steps: [
+      { args: ["run", "--task", "no-list-task.json"] },
+      { args: ["run", "--task", "no-list-task.json"], lang: "ko" },
+      { args: ["run", "--task", "commands-task.json"] },
+      { args: ["run", "--task", "commands-task.json"], lang: "ko" },
+      { args: ["run", "--task", "verifier-task.json"] },
+      { args: ["doctor", "--task", "no-list-task.json"] },
+    ],
+  },
+  // U-256: an analyze-private run: the read under the list refused, the search and query_table leaving it out (C-4).
+  { name: "private-run", setup: privateSetup(), steps: [run(), report("latest"), report("latest", "--json"), runs("--json")] },
+  { name: "private-run-ko", lang: "ko", setup: privateSetup(), steps: [run(), report("latest")] },
+  // U-256: the list and k 7 from the config file, the list from a profile (C-3b's merging).
+  {
+    name: "private-config-profile",
+    setup: privateSetup({ policy: NO_LIST_POLICY }, PRIVATE_CONFIG),
+    steps: [run("--config", "config.json"), report("latest", "--json"), run("--config", "profile-config.json", "--profile", "private"), report("latest", "--json")],
+  },
+  // U-256: a run plan's apply refused: the task type, the digest, a held lock, a planned file changed since.
+  {
+    name: "run-plan-refusals",
+    setup: (dir) => {
+      runPlanSetup(dir);
+      write(dir, "not-run-plan-config.json", NOT_RUN_PLAN_CONFIG);
+    },
+    steps: [
+      run("--config", "config.json"),
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--config", "not-run-plan-config.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+      (ctx) => ({ args: ["apply", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--digest", "000000000000"] }),
+      (ctx) => {
+        lockHeld(ctx.dir);
+        carryingScript(ctx.dir);
+        return { args: ["apply", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      (ctx) => {
+        lockTaken(ctx.dir);
+        write(ctx.dir, "work/summary.md", "# Written by hand meanwhile\n");
+        return { args: ["apply", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      (ctx) => ({ args: ["plan", ...RUN_PLAN, "--run", runIdOf(0)(ctx)] }),
+      runs(),
+    ],
+  },
+  // U-256 (nc-human's report 2.5): revert --run latest, en and ko (the latestChosen line).
+  {
+    name: "revert-latest",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [run(), { args: ["revert", "--workspace", "work", "--run", "latest", "--dry-run"] }, { args: ["revert", "--workspace", "work", "--run", "latest"] }, { args: ["revert", "--workspace", "work", "--run", "latest"] }],
+  },
+  {
+    name: "revert-latest-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [run(), { args: ["revert", "--workspace", "work", "--run", "latest", "--dry-run"] }, { args: ["revert", "--workspace", "work", "--run", "latest"] }, runs()],
+  },
+  // U-256 (nc-human's report 2.5): the revert of a plan run of each kind (appliedPlanHint), and the runs list with every kind.
+  {
+    name: "revert-plan-runs",
+    setup: plansOfBothKindsSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+      (ctx) => {
+        runPlanScripts(ctx.dir, false);
+        return { args: ["run", ...RUN_PLAN_TASK] };
+      },
+      (ctx) => {
+        runPlanScripts(ctx.dir, true);
+        return { args: ["apply", ...RUN_PLAN_TASK, "--run", runIdOf(2)(ctx), "--digest", digestOf(2)(ctx)] };
+      },
+      runs(),
+      runs("--json"),
+      { ...runs(), lang: "ko" },
+      (ctx) => ({ args: ["revert", "--workspace", "work", "--run", runIdOf(0)(ctx), "--dry-run"] }),
+      (ctx) => ({ args: ["revert", "--workspace", "work", "--run", runIdOf(2)(ctx), "--dry-run"] }),
+      (ctx) => ({ args: ["revert", "--workspace", "work", "--run", runIdOf(2)(ctx), "--dry-run"], lang: "ko" }),
+      (ctx) => ({ args: ["revert", "--workspace", "work", "--run", runIdOf(3)(ctx)] }),
+    ],
+  },
+  // U-256 (nc-human's report 2.2): a task id holding a key shape, in the runs table and its JSON.
+  { name: "runs-key-shaped-id", setup: keyIdSetup, steps: [{ args: ["run", "--task", "key-task.json"] }, run(), runs(), runs("--json"), { ...runs(), lang: "ko" }] },
+  // U-256 (nc-human's report 3.4): cleanup confirmed, with discarded files and runs not reverted; a wrong digest; ko.
+  {
+    name: "cleanup-confirm",
+    setup: planSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+      (ctx) => cleanup("--run", `${runIdOf(0)(ctx)},${runIdOf(1)(ctx)}`, "--discarded-run", runIdOf(1)(ctx), "--json"),
+      (ctx) => cleanup("--run", `${runIdOf(0)(ctx)},${runIdOf(1)(ctx)}`, "--discarded-run", runIdOf(1)(ctx), "--confirm", "000000000000"),
+      (ctx) => cleanup("--run", `${runIdOf(0)(ctx)},${runIdOf(1)(ctx)}`, "--discarded-run", runIdOf(1)(ctx), "--confirm", cleanupDigestOf(2)(ctx)),
+      (ctx) => cleanup("--run", `${runIdOf(0)(ctx)},${runIdOf(1)(ctx)}`, "--discarded-run", runIdOf(1)(ctx), "--confirm", cleanupDigestOf(2)(ctx), "--delete-discarded", "--include-not-reverted", "--json"),
+      runs(),
+    ],
+  },
+  {
+    name: "cleanup-confirm-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [run(), (ctx) => cleanup("--run", runIdOf(0)(ctx), "--json"), (ctx) => cleanup("--run", runIdOf(0)(ctx)), (ctx) => cleanup("--run", runIdOf(0)(ctx), "--confirm", cleanupDigestOf(1)(ctx), "--include-not-reverted")],
+  },
+  // U-254 (the CLI migration's C-1, the app layer's types into the contracts): `changes` is the CLI's
+  // one command that goes through the app layer (src/cli/changes.ts, CodarynApp.changes, toCliError).
+  // Its forms the other cases leave out: the quick form, `latest`, a run that does not exist and a run
+  // id that is not one, in text and JSON, in both languages.
+  {
+    name: "changes-forms",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      { args: ["changes", "--workspace", "work", "--run", "latest"] },
+      { args: ["changes", "--workspace", "work", "--run", "latest", "--json"] },
+      { args: ["changes", "--task", "task.json", "--run", "latest"] },
+      { args: ["changes", "--workspace", "work", "--run", NO_RUN] },
+      { args: ["changes", "--workspace", "work", "--run", NO_RUN, "--json"] },
+      { args: ["changes", "--workspace", "work", "--run", "../x"] },
+      { args: ["changes", "--workspace", "work", "--run", "../x", "--json"] },
+      { args: ["changes", "--workspace", "work"] },
+    ],
+  },
+  {
+    name: "changes-forms-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [run(), { args: ["changes", "--workspace", "work", "--run", "latest"] }, { args: ["changes", "--workspace", "work", "--run", NO_RUN] }],
+  },
+  // U-265: cleanup by age (--older-than, --discarded-older-than): none by 1 day, all by 0, then confirmed; and --reverted.
+  {
+    name: "cleanup-older-than",
+    setup: planSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+      cleanup("--older-than", "1", "--discarded-older-than", "1"),
+      cleanup("--older-than", "1", "--json"),
+      cleanup(...OLDER),
+      cleanup(...OLDER, ...DISCARDED_OLDER, "--json"),
+      (ctx) => cleanup(...OLDER, ...DISCARDED_OLDER, "--confirm", cleanupDigestOf(5)(ctx)),
+      (ctx) => cleanup(...OLDER, ...DISCARDED_OLDER, "--confirm", cleanupDigestOf(5)(ctx), "--delete-discarded", "--include-not-reverted", "--json"),
+      runs(),
+    ],
+  },
+  {
+    name: "cleanup-older-than-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [run(), cleanup("--older-than", "1"), cleanup(...OLDER), cleanup(...OLDER, "--json"), (ctx) => cleanup(...OLDER, "--confirm", cleanupDigestOf(3)(ctx), "--include-not-reverted")],
+  },
+  {
+    name: "cleanup-reverted",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      run(),
+      (ctx) => ({ args: ["revert", "--workspace", "work", "--run", runIdOf(1)(ctx)] }),
+      cleanup("--reverted"),
+      cleanup("--reverted", "--json"),
+      (ctx) => cleanup("--reverted", "--confirm", cleanupDigestOf(4)(ctx), "--json"),
+      runs(),
     ],
   },
 ];

@@ -27,6 +27,8 @@ import type {
 import { runDataChecksVerifier } from "./data-checks.js";
 import { checkMarkdownHeadings, checkMarkdownLinks } from "./markdown.js";
 import { createRawVerifierResult } from "./result.js";
+import { FILE_NOT_JUDGED_NOTE, fileRulesNotComparedLimit, unreadablePathSet } from "./unreadable.js";
+import type { PathSet } from "../policy/path-set.js";
 
 export { createIntegrityChecker } from "./integrity.js";
 export { createInventoryChecker } from "./inventory.js";
@@ -63,6 +65,12 @@ export interface VerifierRunnerOptions {
    * Absent: none. The CLI's and the app's assembly pass it once a parser takes the field (A-6).
    */
   readonly unreadablePaths?: readonly string[];
+  /**
+   * U-258 (PM, F-1): the run's group size k (ResolvedTaskSpec.minGroupSize). data_checks compares a
+   * grouped aggregate over a source under unreadable paths for the groups of at least k rows only.
+   * Absent: DEFAULT_MIN_GROUP_SIZE (5); never below 5.
+   */
+  readonly minGroupSize?: number;
 }
 
 function errorMessage(error: unknown): string {
@@ -156,7 +164,11 @@ type RuleState = "held" | "not_held" | "undecided";
 interface RuleVerdict {
   readonly state: RuleState;
   readonly note: string;
+  /** U-276: not compared, since a file it looks at is under unreadable paths. */
+  readonly notCompared?: true;
 }
+
+const FILE_NOT_JUDGED: RuleVerdict = { state: "undecided", note: FILE_NOT_JUDGED_NOTE, notCompared: true };
 
 function describeText(text: string): string {
   const literal = JSON.stringify(text);
@@ -182,11 +194,19 @@ function describeRule(rule: FileRule): string {
 
 const isMarkdownRule = (rule: FileRule): rule is MarkdownFileRule => (MARKDOWN_RULE_TYPES as readonly string[]).includes(rule.type);
 
-async function checkRule(rule: FileRule, workspace: Workspace, signal: AbortSignal): Promise<RuleVerdict> {
+async function checkRule(rule: FileRule, workspace: Workspace, signal: AbortSignal, unreadable: PathSet | null): Promise<RuleVerdict> {
+  // U-276 (Codex V-28 H1): a rule on a file under the run's unreadable paths is not compared, whatever
+  // it checks and whether the file is there: its verdict would tell the model about the file.
+  if (unreadable !== null && typeof rule.path === "string") {
+    const where = await workspace.resolve(rule.path, "read");
+    if (where.ok && (await unreadable.coversEffective(where.path.relative, workspace))) return FILE_NOT_JUDGED;
+  }
   // U-116: the Markdown rules read their file themselves (up to MAX_MARKDOWN_RULE_FILE_BYTES); they
-  // look at the signal between their long steps (R-89 M-1, L-2).
-  if (rule.type === "markdown_headings") return checkMarkdownHeadings(rule, workspace, { signal });
-  if (rule.type === "markdown_links") return checkMarkdownLinks(rule, workspace, { signal });
+  // look at the signal between their long steps (R-89 M-1, L-2). U-276: and a link target's place.
+  const isUnreadable = unreadable === null ? undefined : (relative: string): Promise<boolean> => unreadable.coversEffective(relative, workspace);
+  const markdown = { signal, ...(isUnreadable === undefined ? {} : { isUnreadable }) };
+  if (rule.type === "markdown_headings") return checkMarkdownHeadings(rule, workspace, markdown);
+  if (rule.type === "markdown_links") return checkMarkdownLinks(rule, workspace, markdown);
   const resolved = await workspace.resolve(rule.path, "read");
   if (!resolved.ok) return { state: "undecided", note: `path rejected (${resolved.code})` };
 
@@ -229,6 +249,7 @@ async function runFileRulesVerifier(
   config: FileRulesVerifierConfig,
   workspace: Workspace,
   signal: AbortSignal,
+  unreadable: PathSet | null = null,
 ): Promise<RawVerifierResult> {
   const rules = Array.isArray(config.rules) ? config.rules : [];
   if (rules.length === 0) {
@@ -246,6 +267,7 @@ async function runFileRulesVerifier(
   const lines: string[] = [];
   let failed = false;
   let undecided = false;
+  let notCompared = 0;
   for (const rule of rules) {
     const label = describeRule(rule);
     checked.push(label);
@@ -254,13 +276,14 @@ async function runFileRulesVerifier(
       verdict = { state: "undecided", note: "cancelled before this rule was checked" };
     } else {
       try {
-        verdict = await checkRule(rule, workspace, signal);
+        verdict = await checkRule(rule, workspace, signal, unreadable);
       } catch (error) {
         verdict = { state: "undecided", note: `check failed: ${errorMessage(error)}` };
       }
     }
     if (verdict.state === "not_held") failed = true;
     if (verdict.state === "undecided") undecided = true;
+    if (verdict.notCompared === true) notCompared += 1;
     lines.push(`${verdict.state.replace("_", " ")}: ${label} (${verdict.note})`);
   }
 
@@ -269,6 +292,7 @@ async function runFileRulesVerifier(
     limits.push("text rules are literal substring matches; structure, meaning and link targets are not checked");
   }
   if (rules.some(isMarkdownRule)) limits.push(...MARKDOWN_RULE_LIMITS);
+  if (notCompared > 0) limits.push(fileRulesNotComparedLimit(notCompared, rules.length));
   return createRawVerifierResult({
     id: config.id,
     kind: "file_rules",
@@ -280,7 +304,9 @@ async function runFileRulesVerifier(
 }
 
 export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRunner {
-  const { workspace, commandRunner, unreadablePaths } = options;
+  const { workspace, commandRunner, unreadablePaths, minGroupSize } = options;
+  // U-276: file_rules judges the run's unreadable paths as data_checks does.
+  const unreadable = unreadablePathSet(unreadablePaths);
   return {
     async run(config: VerifierConfig, signal: AbortSignal): Promise<RawVerifierResult> {
       try {
@@ -288,10 +314,13 @@ export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRu
           return await runCommandVerifier(config, workspace, commandRunner, signal);
         }
         if (config.kind === "file_rules") {
-          return await runFileRulesVerifier(config, workspace, signal);
+          return await runFileRulesVerifier(config, workspace, signal, unreadable);
         }
         if (config.kind === "data_checks") {
-          return await runDataChecksVerifier(config, workspace, signal, unreadablePaths === undefined ? {} : { unreadablePaths });
+          return await runDataChecksVerifier(config, workspace, signal, {
+            ...(unreadablePaths === undefined ? {} : { unreadablePaths }),
+            ...(minGroupSize === undefined ? {} : { minGroupSize }),
+          });
         }
       } catch (error) {
         return createRawVerifierResult({

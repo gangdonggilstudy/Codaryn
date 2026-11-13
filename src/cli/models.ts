@@ -47,8 +47,8 @@ import type {
   ModelsOutput,
 } from "../contracts/index.js";
 import { parseModelsArgs } from "./args.js";
-import { parseConfig } from "./config.js";
-import { chooseConfigFile } from "./config-file.js";
+import { parseConfig } from "../app/input/config.js";
+import { chooseConfigFile } from "../app/input/config-file.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { argumentsError, cliError, jsonSyntaxError, positionDiagnostic, settingsError, withHint } from "./run.js";
@@ -60,12 +60,12 @@ import {
   inputFileTooLargeMessage,
   rawTextHoldsKey,
   selectEnvFileSecrets,
-} from "./security/index.js";
-import { configFieldOf, envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "./settings.js";
-import type { SettingsEnvironment } from "./settings.js";
-import { isApiProviderName, localPathProblem, quickProvider, quotedChoices } from "./task.js";
+} from "../app/input/security/index.js";
+import { configFieldOf, envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "../app/input/settings.js";
+import type { SettingsEnvironment } from "../app/input/settings.js";
+import { isApiProviderName, localPathProblem, quickProvider, quotedChoices } from "../app/input/task.js";
 import { displayWidth, padEnd, padStart } from "./human/index.js";
-import { cleanText, hideKeys } from "./text-safety.js";
+import { cleanText, hideKeys } from "../app/input/text-safety.js";
 
 const LF = String.fromCharCode(10);
 const CR = String.fromCharCode(13);

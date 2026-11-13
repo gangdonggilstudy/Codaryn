@@ -12,7 +12,9 @@
 //   "Duration: N ms of" and the end summary's "· N s" / "· N초" -> <MS>, <S>; a lock's "pid" -> <PID>
 // - U-167: in a cleanup step's output only, the byte counts ("N bytes", "N바이트", "bytes": N) ->
 //   <BYTES>. cleanup measures the records folder, whose size follows the digits of "durationMs" (a
-//   run over 100 ms is 2 bytes larger). The record files themselves are compared as they are.
+//   run over 100 ms is 2 bytes larger). The record files themselves are compared as they are,
+//   but U-256: the cleanup record a confirmed cleanup writes (.codaryn/cleanup.jsonl) holds those
+//   same measured sizes, so its byte counts are <BYTES> too.
 // Labels by first appearance keep the structure: two runs that make the same records in the same
 // order get the same labels, and a value that appears in another place shows up as a difference.
 
@@ -27,6 +29,8 @@ const PID = /("pid"\s*:\s*)\d+/g;
 const DIGEST_FIELD = /"digest"\s*:\s*"([0-9a-f]{64})"/g;
 /** U-167: a cleanup step's artifacts (its exit, stdout and stderr), by their key. */
 const CLEANUP_STEP = /^step \d+: codaryn cleanup(?:\s|$)/;
+/** U-256: the cleanup record, whose sizes are the ones cleanup measured. */
+const CLEANUP_RECORD = /^file (?:.*\/)?\.codaryn\/cleanup\.jsonl$/;
 const BYTES_JSON = /("bytes"\s*:\s*)\d+/g;
 const BYTES_TEXT = /\b\d[\d,]*( bytes\b|바이트)/g;
 
@@ -97,7 +101,7 @@ export function normalizeSide(artifacts, { paths = [] } = {}) {
   const result = new Map();
   for (const { key, text } of stage1) {
     const shown = text === null ? null : apply(text);
-    result.set(apply(key), shown !== null && CLEANUP_STEP.test(key) ? bytes(shown) : shown);
+    result.set(apply(key), shown !== null && (CLEANUP_STEP.test(key) || CLEANUP_RECORD.test(key)) ? bytes(shown) : shown);
   }
   return result;
 }

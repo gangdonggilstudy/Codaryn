@@ -2,7 +2,7 @@
  * U-208 (P1 bundle A, A-5; DR-70): the canary. A run with the real policy gate, privacy gateway and
  * tool runner over a table under the run's unreadable paths, every cell holding its own marker made
  * at run time. The model calls query_table (describe, a grouped query, a query whose every group is
- * smaller than k, a refused min, a not_number), read_file and a text search on the table. Then no
+ * smaller than k, a refused min, a text column summed), read_file and a text search on the table. Then no
  * request to the model, no journal event and nothing in the result holds a marker from a row (names,
  * notes, single amounts, the row without a key) or a key of a group of fewer than k rows; what DR-70
  * allows does reach the model: the column names, the keys of the groups of at least k rows, their row
@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
+import { QUERY_TABLE_PROBLEM_HINTS } from "../../../src/contracts/index.js";
 import type { EngineDeps, JsonObject, PolicyConfig, ToolCall, ToolResult, Workspace } from "../../../src/contracts/index.js";
 import { runTask } from "../../../src/engine/index.js";
 import { argsProblemText, workflowToolArgsProblem } from "../../../src/engine/validate-args.js";
@@ -184,11 +185,19 @@ describe("U-208: the canary - only DR-70's four reach the model, the journal and
     assert.equal(fine.suppressedGroups, ROWS.length - AMOUNTS.none.length);
   });
 
-  test("min is refused, a text column summed fails by its row, read_file is denied and the search finds nothing", () => {
+  test("min is refused, a text column summed gives no value, read_file is denied and the search finds nothing", () => {
     assert.equal(resultOf("q4").errorCode, "invalid_table");
     assert.match(String(resultOf("q4").content), /op_not_allowed at operations\[0\]\.op/);
-    assert.equal(resultOf("q5").errorCode, "invalid_table");
-    assert.match(String(resultOf("q5").content), /not_number at data row 1, operations\[0\]/);
+    // U-261: the refused operation's own hint, not the columns' one.
+    assert.ok(String(resultOf("q4").content).endsWith(QUERY_TABLE_PROBLEM_HINTS.op_not_allowed), String(resultOf("q4").content));
+    // U-277 (Codex V-28b): a table under unreadablePaths has no not_number; a column of text summed
+    // is null in fewCells, as an empty column is.
+    assert.equal(resultOf("q5").errorCode, null, String(resultOf("q5").content));
+    const textSum = JSON.parse(String(resultOf("q5").content)) as { groups: { rows: number; values: unknown[]; fewCells?: number[] }[] };
+    assert.deepEqual(
+      textSum.groups.map((group) => [group.rows, group.values, group.fewCells]),
+      [[ROWS.length, [null], [0]]],
+    );
     const denial = outcome.journal.ofType("tool_decision").find((event) => event.callId === "r1" && !event.allowed);
     assert.equal(denial?.code, "unreadable_path");
     const search = JSON.parse(String(resultOf("s1").content)) as { entries: unknown[]; withheld?: true };

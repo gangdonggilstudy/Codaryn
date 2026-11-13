@@ -27,8 +27,8 @@ import { createHash } from "node:crypto";
 import { API_PROVIDERS, API_PROVIDER_NAMES, effectiveMinGroupSize, mergeWorkflowPolicy, mergeWorkflowVerifiers } from "../contracts/index.js";
 import type { ApiProviderName, CodarynConfig, CommandRule, ConfirmableCommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
-import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
-import { quickProvider } from "../cli/task.js";
+import { configFieldOf, providerSettingsOf } from "./input/settings.js";
+import { quickProvider } from "./input/task.js";
 import { compilePathSet } from "../policy/path-set.js";
 import { workflowDefinitions } from "../workflows/index.js";
 import { appError } from "./errors.js";
@@ -281,7 +281,7 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     found.push({ kind: "min_group_size_lowered", field: "policy.minGroupSize" });
   }
   // GUI F-3, review R-27 I1: where the workspace's text and a provider's key go, as a run reads it
-  // (src/cli/settings.ts resolveConnection): each API provider's address in the config (top-level
+  // (src/app/input/settings.ts resolveConnection): each API provider's address in the config (top-level
   // apiBaseUrl, or providers.<name>.apiBaseUrl when that entry is there), else its default. The
   // same address written another way is not a widening. Addresses from environment variables are
   // not in the config file (R-27 I3). Then the provider a quick run uses (the config's `provider`,

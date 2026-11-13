@@ -46,8 +46,8 @@
 
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
-import { JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
-import type { ApplyJournalEventType, JournalEventType, JournalRecord, PrivacyGateway } from "../contracts/index.js";
+import { APPLY_JOURNAL_EVENT_TYPES, JOURNAL_EVENT_TYPES, JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import type { ApplyJournalEntryType, JournalRecord, PrivacyGateway } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { readApplyResult, readResult, summarizeApplyJournal, summarizeJournal } from "../cli/report.js";
 import { REPLACEMENT, cleanText, hideKeys, hideKeysInStrings } from "../cli/text-safety.js";
@@ -72,43 +72,17 @@ const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
 const CR_LF = /\r\n/g;
 
-/** A model run's record types; the compiler checks the list against the contract's union. */
-const RUN_TYPES = {
-  run_started: true,
-  model_request: true,
-  model_response: true,
-  model_error: true,
-  tool_decision: true,
-  tool_result: true,
-  // U-74 (DR-3): the in-run permission question and its answer; cleaned and masked as every record is.
-  confirmation_requested: true,
-  confirmation_answered: true,
-  file_changed: true,
-  verifier_result: true,
-  repair_started: true,
-  integrity_checked: true,
-  state_checked: true,
-  run_finished: true,
-} as const satisfies Record<JournalEventType, true>;
+/**
+ * The record types of each kind of journal: the contract's lists (U-105, JOURNAL_EVENT_TYPES and
+ * APPLY_JOURNAL_EVENT_TYPES), so a type added to the contract is listed here with it. An apply's
+ * `plan_item_started` (the one type of APPLY_JOURNAL_ENTRY_TYPES that is not shown) is taken but not given.
+ */
+const RUN_TYPES: ReadonlySet<string> = new Set<string>(JOURNAL_EVENT_TYPES);
+const APPLY_TYPES: ReadonlySet<string> = new Set<string>(APPLY_JOURNAL_EVENT_TYPES);
+const PLAN_ITEM_STARTED: ApplyJournalEntryType = "plan_item_started";
 
-/** An apply's shown record types; `plan_item_started` is taken but not given. */
-const APPLY_TYPES = {
-  apply_started: true,
-  plan_checked: true,
-  file_moved: true,
-  file_discarded: true,
-  plan_item_failed: true,
-  verifier_result: true,
-  integrity_checked: true,
-  state_checked: true,
-  run_finished: true,
-} as const satisfies Record<ApplyJournalEventType, true>;
-const PLAN_ITEM_STARTED = "plan_item_started";
-
-/** Every record type a page can give, for the request's filter. */
-export const RUN_EVENT_TYPES: readonly RunEventType[] = [...new Set<RunEventType>([...(Object.keys(RUN_TYPES) as JournalEventType[]), ...(Object.keys(APPLY_TYPES) as ApplyJournalEventType[])])];
-
-const isOwn = (table: object, key: string): boolean => Object.prototype.hasOwnProperty.call(table, key);
+/** Every record type a page can give, for the request's filter: a model run's, then an apply's others. */
+export const RUN_EVENT_TYPES: readonly RunEventType[] = [...new Set<RunEventType>([...JOURNAL_EVENT_TYPES, ...APPLY_JOURNAL_EVENT_TYPES])];
 
 /** The request's run, page and filter, checked before anything is read. */
 export function runEventsArguments(
@@ -211,7 +185,7 @@ function readRecord(record: Record<string, unknown>, runKind: "run" | "apply", s
   if (!isRunTimestamp(record["at"]) || typeof type !== "string") return { kind: "skipped" };
   const table = runKind === "run" ? RUN_TYPES : APPLY_TYPES;
   const taken = runKind === "apply" && type === PLAN_ITEM_STARTED;
-  if (!taken && !isOwn(table, type)) return { kind: "skipped" };
+  if (!taken && !table.has(type)) return { kind: "skipped" };
   try {
     if (!plainFields(record, source.privacy, source.keys)) return { kind: "skipped" };
     if (taken) return { kind: "taken" };

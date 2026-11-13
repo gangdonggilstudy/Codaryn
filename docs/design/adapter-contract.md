@@ -642,7 +642,7 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
   - **같은 번호를 두 줄 이상이 주면** 어느 쪽도 진짜로 고르지 않는다. 모두 빼고(`skipped`) 그 번호를 빠짐(`missing`)으로 센다. journal은 손상이다. 그래서 꼴이 맞는 위조 줄이 진짜 줄을 밀어내지 못한다.
   - **제자리의 줄**(기대하는 번호)은 주든 안 주든 번호를 센다(가). 그래서 그 뒤의 레코드가 이어진다. 다음을 모두 만족하면 주고, 아니면 `skipped`로 센다(손상은 아니다).
     - `at`이 실제 시각이다(store의 `isRunTimestamp`).
-    - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름).
+    - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름). U-111: 목록은 계약의 것(`JOURNAL_EVENT_TYPES`, `APPLY_JOURNAL_EVENT_TYPES`, U-105)을 그대로 쓴다.
       - U-74의 실행 중 질문과 답(`confirmation_requested`, `confirmation_answered`)도 모델 실행의 종류다. 질문의 `subject`는 엔진이 이미 안전하게 만든 글이지만(U-106) 다른 글과 같이 가리고 정리한다. 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다(실행 이벤트도 같다).
     - 모든 단계의 필드 이름이 낙타 꼴의 평범한 낱말이고 가리기가 바꾸지 않는다. 깊이는 64까지다. 그래서 비밀을 필드 이름에 담은 줄, 그리고 필드 이름과 같은 값을 지금 등록했을 때(`text`, `turn` 등) 그 필드가 든 레코드가 빠진다. 그 뒤는 이어진다.
     - 가릴 수 있다.
@@ -693,11 +693,10 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   4. 이미 적용됨 `plan_already_applied`, 기록 변경 표시 `plan_records_changed`, 다이제스트가 다르면 `plan_not_approved`
   5. store의 `loadPlan`으로 계획을 다시 읽어 경로를 얻는다. 보기가 판정한 계획(같은 다이제스트, 적용 안 됨)이어야 한다.
   6. 잠금. 다른 작업이 잡고 있으면 `workspace_locked`다(재시도 가능).
-- **판정은 적용 사전 점검의 것이다.** 적용 task의 설정으로 행동마다 본다.
+- **판정은 적용 사전 점검의 것이다.** U-111: 엔진의 `preflightPlan`(U-105)을 그대로 부른다. `applyPlan`이 부르는 바로 그 고리라 판정을 복사하지 않는다. 적용 task의 설정으로 행동마다 본다.
   - 적용 task의 `planActions`와 정책 관문(`createPolicyGate`, `PLAN_ACTION_DESCRIPTORS`, 경로를 풀기 전과 후). 아니면 `denied`다.
-    - 엔진은 이 부름을 `applyPlan` 안에 둔다. 엔진이 `preflightPlan`으로 내보내기 전까지(조사 3-a) 앱 계층이 같은 방식으로 부른다.
-    - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
-  - 그다음 tools의 `createPlanExecutor`의 `check`를 그대로 부른다: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
+  - 그다음 tools의 `createPlanExecutor`의 `check`: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
+  - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
   - 인벤토리 상한(DR-6)은 계획 보기가 센 것이다(같은 `createInventoryChecker`).
 - **잠금과 시험 링크를 거둔다.**
   - 하드 링크 시험은 원본 파일의 두 번째 이름을 잠깐 만든다. 같은 볼륨이면 상태 디렉터리 안에, 아니면 원본 옆에 만든다. 그래서 점검하는 동안 작업 공간 잠금을 잡는다.

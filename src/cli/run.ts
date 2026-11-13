@@ -634,7 +634,11 @@ export async function prepareTask(
   let config: CodarynConfig | null = null;
   if (configFile !== null) {
     const outcome = parseConfig(configFile.value);
-    if (!outcome.ok) return error("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
+    if (!outcome.ok) {
+      const failed = error("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
+      // U-177: a parser's hint (a definition's plan "run") makes the human error say why.
+      return outcome.hint === undefined ? failed : withHint(failed, outcome.hint);
+    }
     config = outcome.config;
     notes.configLanguage = config.language ?? null;
     notes.configDefault = defaultDisplay;
@@ -666,6 +670,8 @@ export async function prepareTask(
     // A task file's own fields are "task"; limits bounded by the config file and the quick form are "config".
     const file: InputDiagnosticFile = taskFile !== null && taskOutcome.code === "invalid_task" ? "task" : "config";
     const failed = error(taskOutcome.code, taskOutcome.message, positionDiagnostic(file, taskOutcome.position));
+    // U-177: a parser's hint (a task file's plan "run") makes the human error say why.
+    if (taskOutcome.hint !== undefined) return withHint(failed, taskOutcome.hint);
     // U-115 (UXM-9, U-37): the quick form's settings were missing because there is no config file
     // yet; the person is told so (codaryn init). The message, the code and the exit code are as before.
     return noConfigYet && taskFile === null && configFile === null && taskOutcome.code === "invalid_config" ? withHint(failed, "config_missing") : failed;

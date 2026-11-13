@@ -15,8 +15,9 @@
  * limit raised or removed, a protected path or an integrity path removed, a secret variable no
  * longer masked, a verifier removed, a command verifier added or changed (R-14 L-2), path tokens restored, plan actions allowed, a different API
  * address (top-level or a provider's, GUI F-3), another provider for quick runs (F-3), a profile or
- * workflow definition changed, U-183 (DR-69 B-4): a list of writable paths that covers a path it did
- * not, or that is gone (no limit). Narrowing changes need no confirmation.
+ * workflow definition changed, U-183 (DR-69 B-4): a list of writable paths with an entry it did not
+ * have (V-8 M-1: even one inside an old entry, which a link can point elsewhere), or that is gone
+ * (no limit). Narrowing changes need no confirmation.
  * The new text is the config as formatted JSON; the file's own formatting is not kept.
  */
 
@@ -115,20 +116,23 @@ function asRelative(entry: string): string {
  * covered by every source's list (the config's, the applied profile's, the workflow definition's,
  * the task file's), so each list is judged on its own.
  * - The list gone (no limit again): `writable_paths_unlimited` at the list.
- * - An entry that covers a path the old list did not cover, by the policy gate's own matcher
- *   (compilePathSet `prefix`, whole segments, ignoring case on Windows; an old list it cannot use
- *   covered nothing): `writable_path_added` at that entry. So an added entry, a broader prefix or
- *   the root widen; an entry inside an old one does not.
- * - Narrowing: no list before (nothing can widen it), an entry removed, a narrower prefix, an empty list.
- * The text is compared, as the settings file has it: a link's real path is not resolved here.
+ * - V-8 M-1: an entry that is not one of the old entries, by the policy gate's own matching
+ *   (compilePathSet `exact`: whole segments, `\` too and ignoring case on Windows, a trailing `/`
+ *   or `./` left out): `writable_path_added` at that entry, even one inside an old entry. The gate
+ *   resolves an allow entry to its real path, so an entry narrower by its letters (`a` -> `a/b`)
+ *   opens a new scope where `a/b` is a link or junction to elsewhere. These lists are used in
+ *   every workspace, each with its own links, so that cannot be checked when the settings change:
+ *   what cannot be checked is a widening. (An old list the gate cannot use matched no entry.)
+ * - Narrowing: no list before (no limit: a list in any workspace covers less), the same entries in
+ *   another order or spelling, an entry removed, an empty list.
  */
 function writableWidening(before: readonly string[] | undefined, after: readonly string[] | undefined, field: string): SettingsWidening[] {
   if (before === undefined) return [];
   if (after === undefined) return [{ kind: "writable_paths_unlimited", field }];
-  const covered = compilePathSet(before, { match: "prefix", onUnusable: "misses" });
+  const kept = compilePathSet(before, { match: "exact", onUnusable: "misses" });
   const found: SettingsWidening[] = [];
   for (const [index, entry] of after.entries()) {
-    if (typeof entry !== "string" || !covered.covers(asRelative(entry))) found.push({ kind: "writable_path_added", field: `${field}[${index}]` });
+    if (typeof entry !== "string" || !kept.covers(asRelative(entry))) found.push({ kind: "writable_path_added", field: `${field}[${index}]` });
   }
   return found;
 }

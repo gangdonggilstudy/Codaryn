@@ -7,7 +7,7 @@
  * A config's, a profile's or a workflow definition's list is used in every workspace, each with its
  * own links, so whether a new entry passes a link cannot be checked when the settings change: an
  * entry that is not one of the old entries (the same by the gate's matching) is a widening.
- * Reproduced first (todo until the judgment treats a new entry so). Temporary folders, a junction
+ * Reproduced first (e7d62d2, todo until the judgment treated a new entry so). Temporary folders, a junction
  * (no privilege needed on Windows), fake values only.
  */
 
@@ -22,7 +22,6 @@ import { wideningOf } from "../../../src/app/index.js";
 import { createPolicyGate } from "../../../src/policy/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
 
-const TODO = { todo: "V-8 M-1: an entry narrower by its text is not checked for a link" };
 const POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false } as const;
 const BASE = { schemaVersion: 1, model: "fake-model-a", maxOutputTokens: 64 } as unknown as CodarynConfig;
 type Workflow = NonNullable<CodarynConfig["workflows"]>[string];
@@ -38,7 +37,7 @@ function placed(where: "config" | "profile" | "definition", writable: readonly s
 const FIELD = { config: "policy.writablePaths", profile: "profiles.docs.policy.writablePaths", definition: "workflows.docs.policy.writablePaths" } as const;
 
 describe("U-183 V-8 M-1: an entry narrower by its text through a junction", () => {
-  test("the gate allows a new real scope; the judgment says writable_path_added for each list", TODO, async () => {
+  test("the gate allows a new real scope; the judgment says writable_path_added for each list", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "codaryn-u183-v8-"));
     await mkdir(path.join(root, "a"));
     await mkdir(path.join(root, "c"));

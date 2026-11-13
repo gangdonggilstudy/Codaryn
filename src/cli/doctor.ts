@@ -90,6 +90,7 @@ import type { SettingsEnvironment } from "./settings.js";
 import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
+import { displayWidth, padEnd } from "./human/index.js";
 import { hideKeys } from "./text-safety.js";
 
 /** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
@@ -131,6 +132,8 @@ export interface DoctorEnvironment {
   readonly inspectLock?: (workspaceRoot: string) => Promise<LockState>;
   /** R-16 L-1: the store's `listParkedFiles` (the default); tests inject it. */
   readonly listParkedFiles?: ListParkedFiles;
+  /** U-115 (UXM-9): stdout is a terminal; then the text ends with what to do next. JSON is the same. */
+  readonly stdoutIsTerminal?: boolean;
 }
 
 /**
@@ -435,8 +438,84 @@ function keyHintOf(check: DoctorOutput["checks"][number], platform: NodeJS.Platf
   return { id: platform === "win32" ? "init.key_hint_windows" : "init.key_hint_posix", params: { keyEnv } };
 }
 
-export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog, platform: NodeJS.Platform = process.platform): string {
-  if (messages === undefined) return renderDoctorEnglish(output, platform);
+/**
+ * The text of doctor. U-115 (UXM-9): with `terminal` (stdout is a terminal), what is not set up yet
+ * and what to do next follow the closing line (nextStepLines); `task`: doctor was given --task;
+ * U-132 (R-91 L-3): `workspace`: doctor was given --workspace.
+ * Without it the text is as before, line for line.
+ */
+export function renderDoctor(
+  output: DoctorOutput,
+  messages?: MessageCatalog,
+  platform: NodeJS.Platform = process.platform,
+  options: { readonly terminal?: boolean; readonly task?: boolean; readonly workspace?: boolean } = {},
+): string {
+  const text = messages === undefined ? renderDoctorEnglish(output, platform) : renderDoctorLines(output, messages, platform);
+  if (options.terminal !== true) return text;
+  const next = nextStepLines(output, messages ?? createMessageCatalog("en"), options.task === true ? "task" : options.workspace === true ? "workspace" : "here");
+  return next.length === 0 ? text : `${text}${next.join("\n")}\n`;
+}
+
+/**
+ * U-115 (UXM-9): what is not set up yet and what to do next, from the checks' texts, numbered in a
+ * fixed order: the config file (no file while the limits or the model fail: init, and the limits it
+ * fills are not counted again; a file that fails: fix it), the key (not set, or holding a character that cannot be sent), the model
+ * (not set or a placeholder; after the key when the key is a step), the other failed checks, the
+ * warnings, then doctor again; with the key not set, the way to try without one. With nothing to
+ * do, the next command (the warnings first, if any). U-132 (review R-91): with no default config
+ * location at all, init with --config (L-1); after a key that cannot be sent, the model once its
+ * value is fixed (L-4); the next command for what doctor checked: the task, the folder given with
+ * --workspace (the quick form), or the folder the run starts in (L-3).
+ */
+function nextStepLines(output: DoctorOutput, catalog: MessageCatalog, checked: "task" | "workspace" | "here"): string[] {
+  const raw = catalog.format as (id: MessageId, params?: object) => string;
+  const say = (id: MessageId, params?: object): string => {
+    try {
+      return raw(id, params);
+    } catch {
+      return englishLine(params === undefined ? { id } : { id, params });
+    }
+  };
+  const checkOf = (id: string) => output.checks.find((check) => check.id === id);
+  const handled = new Set<string>();
+  const steps: string[] = [];
+  const configText = checkOf("config_file")?.text?.id;
+  // No config file is a step only when a run would miss what it gives (a task file brings its own).
+  const missesConfig = checkOf("limits")?.status === "fail" || checkOf("model")?.status === "fail";
+  if ((configText === "doctor.config_file.default_missing" || configText === "doctor.config_file.none") && missesConfig) {
+    // No default location at all: init cannot make one there, so the file goes where --config says.
+    steps.push(say(configText === "doctor.config_file.none" ? "doctor.next.init_with_config" : "doctor.next.init"));
+    handled.add("config_file").add("limits");
+  } else if (checkOf("config_file")?.status === "fail") {
+    steps.push(say("doctor.next.config_fix"));
+    handled.add("config_file");
+  }
+  const key = checkOf("api_key")?.text;
+  const keyEnv = key !== undefined && "params" in key ? (key.params as { readonly keyEnv?: unknown }).keyEnv : undefined;
+  const keyMissing = key?.id === "doctor.api_key.missing" && typeof keyEnv === "string";
+  const keyUnusable = key?.id === "doctor.api_key.unusable" && typeof keyEnv === "string";
+  if (keyMissing || keyUnusable) {
+    steps.push(say(keyMissing ? "doctor.next.key" : "doctor.next.key_unusable", { keyEnv }));
+    handled.add("api_key");
+  }
+  const modelText = checkOf("model")?.text?.id;
+  if (modelText === "doctor.model.missing" || modelText === "doctor.model.placeholder") {
+    steps.push(say(keyMissing ? "doctor.next.model_after_key" : keyUnusable ? "doctor.next.model_after_key_fix" : "doctor.next.model"));
+    handled.add("model");
+  }
+  const others = output.checks.filter((check) => check.status === "fail" && !handled.has(check.id)).length;
+  if (others > 0) steps.push(say("doctor.next.other", { count: others }));
+  const warnings = output.checks.filter((check) => check.status === "warn" && !handled.has(check.id)).length;
+  if (steps.length > 0) {
+    if (warnings > 0) steps.push(say("doctor.next.warnings", { count: warnings }));
+    steps.push(say("doctor.next.again"));
+    return [say("doctor.next.heading"), ...steps.map((step, index) => `  ${index + 1}. ${step}`), ...(keyMissing ? [say("first_use.try_without_key")] : [])];
+  }
+  const ready = say(checked === "task" ? "doctor.next.ready_task" : checked === "workspace" ? "doctor.next.ready_workspace" : "doctor.next.ready");
+  return warnings > 0 ? [say("doctor.next.warnings", { count: warnings }), ready] : [ready];
+}
+
+function renderDoctorLines(output: DoctorOutput, messages: MessageCatalog, platform: NodeJS.Platform): string {
   const raw = messages.format as (id: MessageId, params?: object) => CatalogText;
   // A catalog without a text for an id (an older catalog) must not stop doctor: the English stays.
   const format = (id: MessageId, fallback: string, params?: object): string => {
@@ -448,7 +527,8 @@ export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog, pl
   };
   const status = (value: DoctorCheckStatus): string => `[${format(`doctor.status.${value}`, value)}]`;
   const labels = output.checks.map((check) => format(`doctor.check.${check.id}`, check.id));
-  const width = Math.max(...labels.map((label) => label.length));
+  // U-127: terminal columns (displayWidth), so a Korean label lines up as an English one does.
+  const width = Math.max(...labels.map((label) => displayWidth(label)));
   const lines = output.checks.flatMap((check, index) => {
     // The check's own text; when the catalog has none, the message, which already holds the notes.
     let fromCatalog = check.text !== undefined;
@@ -460,7 +540,7 @@ export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog, pl
         fromCatalog = false;
       }
     }
-    const first = `${status(check.status).padEnd(10)}${(labels[index] ?? check.id).padEnd(width)}  ${body}`;
+    const first = `${padEnd(status(check.status), 10)}${padEnd(labels[index] ?? check.id, width)}  ${body}`;
     // DR-36 (b): each note on its own line under the check's text.
     const indent = " ".repeat(10 + width + 2);
     const notes = fromCatalog ? (check.notes ?? []).map((note) => `${indent}${format(note.id, noteEnglish(note), "params" in note ? note.params : undefined)}`) : [];
@@ -979,6 +1059,6 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   const checks = DOCTOR_CHECK_IDS.map((id) => results.get(id) as DoctorCheck);
   const status = worst(checks);
   const output: DoctorOutput = { schemaVersion: 1, kind: "doctor", status, exitCode: DOCTOR_EXIT_CODES[status], checks };
-  const text = args.json ? jsonLine(output) : renderDoctor(output, io.messages, platform);
+  const text = args.json ? jsonLine(output) : renderDoctor(output, io.messages, platform, { terminal: io.stdoutIsTerminal === true, task: args.taskPath !== null, workspace: args.workspace !== null });
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }

@@ -62,6 +62,7 @@ import {
 import { configFieldOf, envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { isApiProviderName, localPathProblem, quickProvider, quotedChoices } from "./task.js";
+import { displayWidth, padEnd, padStart } from "./human/index.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 
 const LF = String.fromCharCode(10);
@@ -208,10 +209,11 @@ function table(models: readonly ModelsListEntry[], currentId: string | null): st
     tokens(model.maxOutputTokens),
   ]);
   const header = ["  #", "id", "name", "input tokens", "output tokens"];
-  const widths = header.map((title, column) => Math.max(title.length, ...rows.map((row) => (row[column] ?? "").length)));
+  // U-127: terminal columns (displayWidth), so a name with wide characters keeps the columns after it.
+  const widths = header.map((title, column) => Math.max(displayWidth(title), ...rows.map((row) => displayWidth(row[column] ?? ""))));
   const format = (row: readonly string[]): string =>
     row
-      .map((cell, column) => (column >= 3 ? cell.padStart(widths[column] ?? 0) : cell.padEnd(widths[column] ?? 0)))
+      .map((cell, column) => (column >= 3 ? padStart(cell, widths[column] ?? 0) : padEnd(cell, widths[column] ?? 0)))
       .join("  ")
       .trimEnd();
   return [format(header), ...rows.map(format)];

@@ -611,7 +611,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **사람과 모델에게 알리는 것**
   - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
   - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
-- **앱 계층:** 같은 `prepareTask`로 목록을 만든다. 그러나 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)은 아직 게이트에 목록을 넘기지 않는다(앱 담당 몫).
+- **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
 - **계획 run:** `plan: "run"`은 B-4 전까지 거부된다(18.1, U-177). 승인된 계획의 파일 목록(`plan` 원천)은 B-3이 더한다.
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)

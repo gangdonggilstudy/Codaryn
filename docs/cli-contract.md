@@ -262,7 +262,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 ### 8.3 오류 코드와 힌트 한 곳 (U-166, AXM-11)
 
 - 오류 JSON(`CliErrorOutput`)의 `code`와 `hint`에 올 수 있는 값을 여기 한 곳에 둔다. 8절과 15~18절의 "더해졌다"는 값이 생긴 내력이다. 값의 원천은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES`, `CLI_ERROR_CATEGORY`, `CLI_ERROR_RETRYABLE`, `ALL_CLI_ERROR_HINTS`이고, 유닛 시험(`tests/unit/cli/g-u166-axm-cli.test.ts`)이 아래 두 표와 그 상수가 같은지 본다.
-- **더하기만 한다.** `code`와 `hint`의 값은 지우거나 뜻을 바꾸지 않고 더하기만 한다. 기존 JSON을 깨는 변경은 DR-48이 두 곳(정리 명령의 JSON, 도는 실행의 조회)에만 허용했고 U-22가 그것을 했다. 코드로는 `cleanup_plan_changed`와 `run_in_progress`가 더해졌다.
+- **더하기만 한다.** `code`와 `hint`의 값은 지우거나 뜻을 바꾸지 않고 더하기만 한다. 예외 하나: U-235(PM)가 `hint`의 `plan_run_not_available`(U-177이 `plan: "run"`을 받지 않던 동안의 힌트)을 뺐다. U-195부터 어떤 출력도 그 값을 담지 않았다. 기존 JSON을 깨는 변경은 DR-48이 두 곳(정리 명령의 JSON, 도는 실행의 조회)에만 허용했고 U-22가 그것을 했다. 코드로는 `cleanup_plan_changed`와 `run_in_progress`가 더해졌다.
 - **분기는 필드로 한다.** 프로그램은 `code`, `category`, `retryable`(8.2), `hint`, `diagnostic.code`(17.5)로 가른다. `message`는 사람이 읽는 영어 설명이고 같은 `code`에서도 경우마다 다르다(예: `invalid_arguments`는 사용법 전체를 담는다).
 - 사람용 오류(stderr)는 `code`의 `error.<code>.what`·`error.<code>.fix`를 쓰고, `hint`가 있으면 `error.hint.<hint>` 한 줄을 더한다(17.4, U-37).
 - 종료 코드는 `code`가 정한다. 실행이 시작된 뒤의 끝(`run`의 상태, `revert`의 `partial`)은 이 표가 아니라 8절의 `RUN_EXIT_CODES`·`REVERT_EXIT_CODES`다.
@@ -318,7 +318,6 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `key_in_task` | `key_in_file` | — | task 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `key_in_config` | `key_in_file` | — | 설정 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `config_missing` | `invalid_config` | — | 간편 형식·한 줄 실행에서 설정 파일이 아예 없음(`codaryn init`으로 만든다, 15절 "처음 시작 안내") |
-| `plan_run_not_available` | `invalid_task`, `invalid_config` | — | U-177이 B-4 전까지 `plan: "run"`을 받지 않을 때 쓰던 힌트. U-195부터 주지 않는다(값은 더하기만이라 남는다, 18.1) |
 | `plan_kind_differs` | `run_not_plan` | — | U-228: 그 실행에는 계획이 있지만 `apply`에 준 task가 수행하는 종류가 아님(바꿀 파일 계획에 계획 방식 `apply`나 계획 방식 없는 task, 이동 계획에 계획 방식 `run`이나 계획 방식 없는 task). 사람용 오류는 `run_not_plan`의 줄 대신 `error.run_not_plan.other_kind`를 쓰고, 이 힌트를 고치는 법으로 준다 |
 | `plan_tool_missing` | `invalid_task`, `invalid_config` | — | U-228(U-224): 작업 종류가 계획 방식의 계획 도구 없이 해석됨(`run`에는 `propose_changes`, `apply`에는 `propose_plan`). 문제 코드 `plan_tool_missing` |
 | `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
@@ -1087,7 +1086,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 해석 규칙(`resolveWorkflow`)
   - 도구는 작업 종류가 허용한 것 안에서만 좁힐 수 있다.
   - `plan: "apply"`는 약하게 바꿀 수 없다.
-  - U-195(DR-69 B-4): 파서(`parsePlanMode`)는 `PLAN_MODES`의 값을 모두 받는다. U-177(검토 R-99 M-2)이 B-4 전까지 하던 `plan: "run"`의 거부는 없어졌고 그 힌트 `plan_run_not_available`은 주지 않는다. 틀린 값은 `plan must be one of none, apply, run`이다.
+  - U-195(DR-69 B-4): 파서(`parsePlanMode`)는 `PLAN_MODES`의 값을 모두 받는다. U-177(검토 R-99 M-2)이 B-4 전까지 하던 `plan: "run"`의 거부는 없어졌고 그 힌트 `plan_run_not_available`은 주지 않고, U-235에서 힌트 목록에서도 뺐다(8.3의 예외). 틀린 값은 `plan must be one of none, apply, run`이다.
     - `plan: "run"`의 계획 실행이 계획을 저장하려면 그 실행의 도구에 `propose_changes`가 있어야 한다. 지금 내장 작업 종류에는 그 도구를 둔 것이 없으므로, 설정 파일의 작업 종류 정의(`tools`에 `propose_changes`, `plan: "run"`)와 그것을 가리키는 `workflowRef`나 `--workflow`로 쓴다.
     - U-224(p4g): 계획 방식이 `run`인데 도구에 `propose_changes`가 없거나, `apply`인데 `propose_plan`이 없으면 해석에서 거부한다(`plan_tool_missing`, 자리는 정의의 `workflows.tools`, task의 `tools`, task의 `plan` 가운데 고칠 곳). 전에는 모델까지 가서 `failed`/`model_error`로 끝났다.
     - U-228: 그 오류에는 힌트 `plan_tool_missing`(계획 방식마다 필요한 도구와 고치는 법)이 붙는다. doctor는 실행처럼 작업 종류를 해석해, 이 문제일 때 고칠 파일의 점검을 `fail`로 한다. 정의나 프로필이면 `config_file`(`doctor.config_file.plan_tool_missing`), 아니면 `task_file`(`doctor.task_file.plan_tool_missing`)이다. 메시지는 실행의 글이다. 다른 해석 문제는 전처럼 실행이 말한다.

@@ -16,7 +16,7 @@
     - U-141: 질문이 줄 없이 끝나면 그 줄을 끝낸다.
     - U-137: 질문에서 끝난 실행도 그 호출의 거부를 기록한다.
     - U-136: 거부 요약 문구를 줄였다.
-  - GUI의 권한 대화상자(U-124)는 아직 main에 없어 넣지 않았다.
+  - GUI의 권한 대화상자(U-124)는 main `b249171`에서 M-3.11로 넣었다(U-185, nd-docs가 이 단위에 한해 고침).
 - 출처
   - `docs/reviews/2026-11-13-*.md`의 '검사하지 않은 범위'와 'PM 판단' 절
   - `docs/pm-status.md`의 '확인하지 않은 범위'
@@ -87,6 +87,7 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 | M-3.8 | 새로 등록한 사용자 환경 변수를 GUI가 받는지 | 없음 | — | E-8, GUI-D7 |
 | M-3.9 | 렌더러가 클립보드에 직접 쓸 수 있는지 | 없음 | — | R-73 I1, R-77 I2 |
 | M-3.10 | GUI의 실제 실행 | **필요** | — | GU-3, U-63 |
+| M-3.11 | GUI의 실행 중 권한 대화상자: 기본 단추, Esc, 포커스, 답 없음, 창이 가려졌을 때 | **필요** | — | U-124, DR-3, 설계 3.6 |
 | M-4.1 | FAT32·exFAT에서 적용·되돌리기 동의(CLI) | 없음 | 빈 USB 메모리 또는 VHD | DR-21, DR-25, U-119 |
 | M-4.2 | FAT32·exFAT에서 동의(GUI) | 없음 | 위와 같음 | DR-25, U-119 |
 | M-4.3 | 두 볼륨 사이 이동 | 없음 | 두 번째 볼륨 | 설계 조사 5.4 |
@@ -967,7 +968,7 @@ navigator.clipboard.writeText("codaryn-clipboard-probe").then(() => "written", (
 - 1: 실행이 끝나고 결과, 변경 비교, 보고서가 보인다. 키 값은 화면 어디에도 없다.
 - 2: 취소를 확인하면 실행이 `cancelled`로 끝난다.
 - 3: 표가 보이고, 고른 모델이 설정 파일에 쓰인다.
-- GUI 실행의 끝 요약은 묻는 규칙의 거부를 아직 따로 말하지 않는다(CLI 계약 18.17, 선택 필드). 이것은 알려진 차이다.
+- 묻는 규칙이 있는 실행이면 GUI의 결과 화면이 그 결과(허용·거부·답 없음·취소)를 한 줄씩 말한다(U-124). 점검은 M-3.11이다.
 
 **다르면 볼 곳**
 - 실행 화면의 오류 카드 코드
@@ -975,6 +976,89 @@ navigator.clipboard.writeText("codaryn-clipboard-probe").then(() => "written", (
 - `gui/src/main/ipc.ts`
 
 **관련**: GU-3, GU-6, U-63, U-64
+
+---
+
+### M-3.11 GUI의 실행 중 권한 대화상자 (키 필요)
+
+**확인할 것**: 묻는 규칙(`confirm: true`)에 맞는 명령을 모델이 부를 때 GUI의 메인 프로세스가 띄우는 OS 대화상자
+- 기본 단추가 "거부"인지(Enter만 누르면 거부)
+- Esc가 거부인지
+- 대화상자가 뜰 때 포커스가 어디 있는지, GUI 창이 가려져 있어도 질문을 알아챌 수 있는지
+- 답하지 않으면 시간 한도에서 대화상자가 스스로 닫히고 거부되는지
+- 결과 화면이 질문의 결과를 맞게 말하는지
+
+**여기서 못 한 까닭**
+- 연기 시험은 대화상자를 띄우지 않고 정해진 답을 돌려줬다(U-124). 실제 OS 대화상자의 포커스와 키는 보지 못했다.
+- 키가 필요한 까닭:
+  - `confirm`은 설정 파일이나 프로필의 정책에서만 받는다(CLI 계약 18.16). 그 정책은 새 작업 화면의 목표로 시작하는 실행(간편 형식)에 쓰이고, 간편 형식의 제공자는 API 제공자뿐이다.
+  - task 파일(대본 모델)의 실행은 task 자신의 정책을 써서 묻는 규칙을 가질 수 없다.
+  - 연기 시험의 가짜 서버는 시험 진입점만 켜는 루프백 전용 전송을 쓴다. `npm start`로 띄운 GUI는 그 전송을 켜지 않는다.
+
+**준비**
+- 키를 사용자 환경 변수에 두고, 새 터미널 창에서 GUI를 띄운다(M-3.8).
+- 모델 ID는 M-1.6으로 확인한다.
+- 아래 작업 공간과 설정 파일을 만들고 `CODARYN_CONFIG`로 준다.
+  - `<모델 ID>`는 실제 ID로 바꾼다.
+  - 한도는 낮다: 모델 턴 4, 토큰 30,000, 시간 120초.
+
+```powershell
+$gws = "$m\confirm-gui-ws"
+New-Item -ItemType Directory -Force $gws | Out-Null
+[IO.File]::WriteAllText("$gws\README.md", "# GUI 권한 질문 점검`n")
+$gcfg = "$m\confirm-gui-config.json"
+[IO.File]::WriteAllText($gcfg, @'
+{
+  "schemaVersion": 1,
+  "model": "<모델 ID>",
+  "maxOutputTokens": 1024,
+  "limits": { "maxModelTurns": 4, "maxToolCalls": 4, "maxTotalTokens": 30000, "maxDurationMs": 120000 },
+  "policy": {
+    "commands": [{ "executable": "node", "argsPrefix": ["--version"], "allowExtraArgs": false, "confirm": true }],
+    "network": "deny", "destructive": "deny", "restorePathTokens": false
+  }
+}
+'@)
+$env:CODARYN_CONFIG = $gcfg
+npm start                         # gui 폴더에서
+```
+
+**순서**
+- 작업 공간으로 `$gws`를 연다. 새 작업 화면에서 작업 종류와 프로필은 비워 둔다.
+- 목표: "명령 node --version을 정확히 이 인자로 한 번 실행하고, 그 출력을 한 줄로 알려라. 파일은 바꾸지 않는다."
+- 답마다 실행을 한 번씩 한다. 적어도 1~4는 한다.
+
+1. 대화상자가 뜨면 아무것도 누르지 않고 본다: 제목, 글, 단추 둘, 초점이 어느 단추에 있는지. 그다음 Enter만 누른다.
+2. 다시 실행하고, 대화상자에서 Esc를 누른다.
+3. 다시 실행하고, Tab으로 "이번 호출에만 허용"에 초점을 옮긴 뒤 Enter를 누른다.
+4. 다시 실행하고, 대화상자가 뜨면 답하지 않고 둔다. 시간 한도(120초)까지 기다린다.
+5. (관찰) 다시 실행하고, 실행이 시작되자마자 다른 앱 창을 앞에 두거나 GUI 창을 최소화한다. 질문이 왔을 때 대화상자가 보이는지, 작업 표시줄에 표시가 있는지, OS 알림이 오는지 적는다. 그다음 대화상자를 찾아 거부한다.
+6. (관찰) 대화상자가 떠 있는 동안 GUI 창을 누르거나 닫아 본다(창의 닫기 단추, 창에 초점을 둔 Alt+F4).
+
+**기대 결과**
+- 대화상자의 글은 코드의 것이다(이 점검표를 쓸 때 대화상자를 띄워 보지는 않았다).
+  - 한국어 설정이면 제목 `권한 확인`, 글 `명령 하나를 이번 호출에만 허용할까요? 답하지 않으면 거부합니다.`다. 자세한 글은 `보이는 것은 실행 파일 이름과 인자 개수(1개)뿐이며, 인자 자체는 보이지 않습니다.`와 다음 줄 `실행 파일: node`다. 단추는 `이번 호출에만 허용`과 `거부`다.
+  - 영어 설정이면 제목 `Permission question`, 글 `Allow a command for this one call? With no answer it is denied.`다. 단추는 `Allow this call only`와 `Deny`다.
+  - 인자 글(`--version`)은 어디에도 없다.
+- 1: 처음 초점(기본 단추)은 "거부"다. Enter만 누르면 거부되고 명령은 돌지 않는다.
+  - 결과 화면에 `실행 전에 확인을 받게 된 명령의 호출 1건을 사람이 거부했습니다.`(영어 `Denied by the person: 1 call(s) to a command whose rule asks before it runs.`)가 있다.
+- 2: Esc도 거부다. 결과 화면은 1과 같다.
+- 3: 명령이 한 번 돈다. 결과 화면에 `실행 전에 확인을 받게 된 명령의 호출 1건을 사람이 그 호출에만 허용했습니다.`(영어 `Allowed by the person for that one call: 1 call(s) to a command whose rule asks before it runs.`)가 있다.
+- 4: 시간 한도에 닿으면 대화상자가 스스로 닫히고, 실행은 `budget-exhausted`/`max_duration`으로 끝난다.
+  - 결과 화면에 `실행 전에 확인을 받게 된 명령의 호출 1건에 답이 없어 거부했습니다(질문을 보일 수 없었거나 시간 한도로 기다림이 끝났습니다).`가 있다.
+- 5, 6: 기대를 정하지 않았다(관찰 항목).
+  - 코드는 대화상자를 GUI 창에 붙여 띄운다. 창이 이미 없거나 닫혔으면 묻지 않고 "답 없음"(기본 거부)으로 친다.
+  - 본 것을 그대로 적는다. 창을 닫을 수 있었다면 그 뒤 실행이 어떻게 끝났는지(결과 화면의 줄, 실행 목록)도 적는다.
+- 모든 경우
+  - 키 값이 화면에 없다.
+  - 모델이 명령을 부르지 않았거나 다른 인자로 불렀으면 판정할 수 없다(M-1.5와 같다). 다시 실행하고, 그런 일이 있었다고 적는다.
+
+**다르면 볼 곳**
+- 대화상자: `gui/src/main/app.ts`(`ask`), `gui/src/main/dialog-texts.ts`(`permissionDialogOptions`)
+- 결과 화면의 줄: `gui/src/renderer/run/run-screen.ts`, `gui/src/renderer/i18n/en.ts`·`ko.ts`(`run.confirm.*`)
+- 설계: [독립 GUI 설계](design/standalone-gui.md) 3.6
+
+**관련**: U-124, U-108, DR-3, DR-10, R-95
 
 ---
 

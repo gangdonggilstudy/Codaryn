@@ -777,6 +777,12 @@ export const FIXED_MESSAGES = {
   "changes.heading": { runId: "runId" },
   "changes.no_text_note": {},
   "changes.none": {},
+  // U-131 (N4, UXM-4, 5): a plan run (plan_pending) in place of changes.none: changes.plan_only, then
+  // what became of its plan by the run list's rule (planApplyStateOf): changes.plan_applied when the
+  // apply run is done, changes.plan_apply_other otherwise (`{runId}`: that apply run). Text only.
+  "changes.plan_only": {},
+  "changes.plan_applied": { runId: "runId" },
+  "changes.plan_apply_other": { runId: "runId" },
   "changes.file.created": {},
   "changes.file.changed": {},
   "changes.no_difference": {},

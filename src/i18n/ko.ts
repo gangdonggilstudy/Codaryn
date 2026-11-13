@@ -95,6 +95,14 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.inventory_limit": "작업 공간의 파일이 인벤토리 검사가 셀 수 있는 것보다 많습니다. 적용하면 plan_stale로 멈추고 아무것도 옮기지 않습니다.",
   "plan.applied_by": "적용 실행 {runId}에서 적용함",
   "plan.next_apply": "적용하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
+  // U-191 (nb-i18n이 다듬을 초안): 실행 계획(뒤 실행이 쓸 파일)의 계획 보기.
+  "plan.changes.heading": "실행 {runId}의 계획: 쓸 파일 {count}개, {status}",
+  "plan.change.create": "생성",
+  "plan.change.modify": "수정",
+  "plan.changes.summary_label": "이 변경을 할 실행이 받을 지시(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상에 들어감)",
+  "plan.changes.next_apply": "이 변경을 실행하게 하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
+  "plan.changes.digest_guarantee":
+    "다이제스트는 바로 이 파일들과, 계획을 만들 때 수정할 파일의 내용, 그리고 위의 지시를 가리킵니다. 그 뒤로 계획이나 이 파일 가운데 하나가 바뀌었으면 변경을 할 실행은 첫 모델 요청 전에 멈춥니다. 그 실행의 파일 도구는 이 파일들에만 쓸 수 있습니다.",
   "apply.question": "이 계획을 적용할까요?",
   "apply.unsafe_move_question": "이 계획의 이동 {count}개는 이 드라이브에 하드 링크가 없어 대상 자리의 파일을 덮어쓸 수 있습니다. 아무것도 옮기지 않았습니다. 이번 적용에서만 그래도 옮기도록 다시 적용할까요?",
   "review.recorded": "실행 {runId}의 검토: {verdict}.",

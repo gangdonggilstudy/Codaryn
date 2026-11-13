@@ -96,6 +96,14 @@ export const EN_MESSAGES: MessageTexts = {
   "plan.inventory_limit": "The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.",
   "plan.applied_by": "Applied by run {runId}",
   "plan.next_apply": "To apply it: codaryn apply <the same task form> --run {runId} --digest",
+  // U-191 (drafts for nb-i18n): the plan view of a run plan (files a later run may write).
+  "plan.changes.heading": "Plan of run {runId}: {count} file(s) to write, {status}",
+  "plan.change.create": "create",
+  "plan.change.modify": "modify",
+  "plan.changes.summary_label": "What the run that makes these changes will be told (the model's own words, not checked, and part of what you approve)",
+  "plan.changes.next_apply": "To have a run make these changes: codaryn apply <the same task form> --run {runId} --digest",
+  "plan.changes.digest_guarantee":
+    "The digest names exactly these files, the contents the files to modify had when the plan was made, and the words above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
   "apply.question": "Apply this plan?",
   "apply.unsafe_move_question": "Moves of this plan that could replace a file at the destination, since the drive has no hard links: {count}. Nothing was moved. Apply again and make such moves anyway, for this apply only?",
   "review.recorded": "Review of run {runId}: {verdict}.",

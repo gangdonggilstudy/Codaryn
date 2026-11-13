@@ -495,6 +495,18 @@ export const RUN_PHASES = ["running", "finished", "no_result"] as const;
 export type RunPhase = (typeof RUN_PHASES)[number];
 
 /**
+ * U-158 (AXM-8): the one rule for RunListEntry.phase, from what the store found for the run:
+ * whether its result.json is there, and whether the workspace lock names this run with a holder that
+ * is alive (the store's own lock check, `lockedByThisRun`). A result comes first: a run writes it
+ * before it lets the lock go, so for a moment both are true, and the run is finished. The store
+ * (`listRuns`) and any other reader of runs use this, so they say the same. Pure.
+ */
+export function runPhaseOf(facts: { readonly hasResult: boolean; readonly lockedByThisRun: boolean }): RunPhase {
+  if (facts.hasResult) return "finished";
+  return facts.lockedByThisRun ? "running" : "no_result";
+}
+
+/**
  * U-16 (UXM-4): what `changes` says of an apply run, whose moves and discards are its plan's
  * actions, not file writes of its own (it has no write records, so `files` is empty): the plan run
  * it applied and how many actions it applied (ApplyResult.applied). The app layer's ChangesOutput

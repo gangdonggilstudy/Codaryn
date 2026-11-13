@@ -414,7 +414,7 @@ run id (UTC)               started (local)      changes  result
 | `requestTimeoutMs`, `maxRetries` | HTTP 요청 시간 제한(기본 600000)과 재시도 횟수(0~10, 기본 2) |
 | `apiBaseUrl` | API 주소. 보통 비워 둔다 |
 | `limits` | 한도의 **상한**. task가 비운 필드에는 이 값을 쓴다 |
-| `policy`, `verifiers` | 간편 형식과 한 줄 실행에서만 쓴다. task 파일은 자기 값을 쓴다. 명령 규칙에 묻고 실행하는 `confirm: true`를 둘 수 있다(13절) |
+| `policy`, `verifiers` | 간편 형식과 한 줄 실행에서만 쓴다. task 파일은 자기 값을 쓴다. 명령 규칙에 묻고 실행하는 `confirm: true`를 둘 수 있다(13절). 예외: `policy.writablePaths`는 task 파일 실행에도 걸린다(13절 "쓰기 허용 경로") |
 | `secretEnv` | 가릴 값으로 등록할 환경 변수 이름. task의 것에 더해진다 |
 | `integrity.paths` | 작업 공간 밖 검증 자료(기준 테스트 등)의 절대 경로. 실행 중 바뀌면 `needs-input`/`protected_changed`([계약 15절](cli-contract.md#15-단계-3-계약-u-1u-3-u-5-u-6)) |
 | `language` | 사람용 글의 언어 `"ko"` 또는 `"en"`(8절) |
@@ -433,7 +433,7 @@ run id (UTC)               started (local)      changes  result
 ```
 
 - `--profile <이름>`은 `run`(모든 형식)과 `doctor`가 받는다. 이름은 영문·숫자·`.`·`_`·`-` 1~64자이며, 형식이 틀리면 `invalid_arguments`다.
-- 간편 형식과 한 줄 실행에서는 프로필의 `policy`·`verifiers`가 설정의 것을 대신하고, `limits`는 설정 `limits` 위에 필드별로 덮인다. task 파일 실행에서는 프로필의 한도만 상한으로 쓴다. 프로필의 명령 규칙에도 `confirm: true`를 둘 수 있다(13절).
+- 간편 형식과 한 줄 실행에서는 프로필의 `policy`·`verifiers`가 설정의 것을 대신하고, `limits`는 설정 `limits` 위에 필드별로 덮인다. task 파일 실행에서는 프로필의 한도만 상한으로 쓴다(그리고 프로필의 `policy.writablePaths`가 task 파일 실행에도 걸린다, 13절). 프로필의 명령 규칙에도 `confirm: true`를 둘 수 있다(13절).
 - 프로필의 한도는 설정 최상위 `limits`보다 클 수 없다. 파일을 읽을 때 모든 프로필을 검사하므로, 고르지 않은 프로필 하나가 넘어도 `invalid_config`다. 오류는 이름 대신 순번으로 위치를 말한다(`profiles[1].limits.maxModelTurns`).
 - 프로필을 쓴 실행은 끝 요약에 `A profile was applied (--profile).`가 붙는다. 이름은 나오지 않는다.
 - 그 이름의 프로필이 없으면 `run`은 `invalid_config`다. 프로필은 사용자 설정 파일에만 있고 task 파일은 프로필을 가질 수 없다.
@@ -1034,6 +1034,70 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **무결성 확인:** 보호 경로(또는 설정의 `integrity.paths`)가 있으면 실행 시작, 검증 회차마다 검증 전과 후에 그 내용을 시작 때와 비교한다(진행 줄 `protected material check`, 기록 `integrity_checked`). 바뀌었으면 검증 결과와 관계없이 `needs-input`/`protected_changed`(종료 3)로 끝나고, 결과의 `protectedChanged`에 경로가 남는다.
 - **한계:** 쓰기를 막는 것은 파일 도구뿐이다. 허용한 명령과 명령형 검증기는 보호 경로의 파일도 바꿀 수 있고, 무결성 확인은 그것을 사후에 알아챌 뿐 막지 않는다. 명령 허용 목록을 좁게 두고, `file_rules` 검증기(예: `code-task.json`의 `test-kept`)와 결과의 `changes`로 함께 확인한다.
 
+**쓰기 허용 경로(`writablePaths`):** 파일 도구(`write_file`)가 쓸 수 있는 작업 공간 기준 경로 목록이다. 목록 밖에 쓰면 거부한다(`tool_decision`의 `path`/`path_not_writable`). 읽기와 검색은 막지 않는다. 보호 경로가 "여기는 쓰지 말라"면 이것은 "여기만 써라"다(사용자 결정 DR-69, U-182·U-186·U-183, 병합 `a1d5c65`).
+
+- **형식:** 보호 경로와 같다. 경로 조각 단위로 비교하고 항목은 자기와 그 아래를 덮는다. 링크를 푼 경로로 비교하고 Windows에서는 대소문자를 무시한다. 절대 경로, `..`, 빈 값처럼 보호 경로에서 틀린 값은 여기서도 틀리고 실행 전에 거부한다(task에서 `invalid_task`, 설정에서 `invalid_config`).
+- **생략과 빈 목록:** 생략하면 제한이 없다(지금까지와 같다). 빈 목록 `[]`이면 파일 도구는 아무것도 쓰지 못한다.
+- **두는 곳:** 넷 모두 `policy` 안이다.
+  - task 파일의 `policy.writablePaths`
+  - 설정 파일의 `policy.writablePaths`
+  - 프로필의 `profiles.<이름>.policy.writablePaths`
+  - 설정 파일 작업 종류 정의의 `workflows.<id>.policy.writablePaths`
+  - 다른 정책 필드와 달리, 설정 파일과 프로필의 목록은 task 파일로 실행할 때도 걸린다. task 파일은 사용자 설정을 좁힐 수 있지만 넓힐 수 없다.
+- **좁히기만 한다:** 목록은 하나로 합치지 않는다. 둔 곳마다 목록 하나이고, 쓰기는 모든 목록이 덮어야 한다. 정책 합치기(18.1절)도 이 목록을 합치지 않는다.
+- **명령은 묶지 않는다:** 허용한 명령과 명령형 검증기는 목록 밖에도 쓸 수 있다. 목록과 명령 규칙이 함께 있으면 `doctor`의 허용 명령 항목이 주의다(아래).
+
+실제 출력. main `c83ec5b`의 CLI를 저장소 밖 임시 폴더에서 대본 모델로 돌렸다(키 없음, 한국어 출력). 작업 공간에는 `src/app.txt`와 `notes.md`가 있고, task 파일의 정책은 `"writablePaths": ["src"]`다. 모델은 `src/new.txt`를 만든 뒤 `todo.md`를 만들려 한다.
+
+```
+codaryn: 실행 시작 — 모델 제공자 scripted
+codaryn: 1턴
+codaryn: 파일 쓰기 — 허용 (write_file)
+codaryn: 파일 만듦 src/new.txt
+codaryn: 2턴
+codaryn: 파일 쓰기 — 거부 (path/path_not_writable)
+codaryn: 3턴
+codaryn: 끝 — 확인 필요 (no_verifier)
+codaryn: writablePaths에 없는 파일이라 거부된 쓰기: 1건. 그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.
+── 결과: 확인 필요 — 검증 없음 (needs-input/no_verifier) ──
+```
+
+- 끝 요약에는 `거부된 호출: 1건`이 나온다. 마지막 안내 줄은 사람용 진행 줄이고 결과 JSON에는 들어가지 않는다.
+- 거부된 쓰기는 실행을 멈추지 않는다. 모델은 실행 기록의 도구 결과에 남은 이 글을 받는다: `error (policy_denied): denied by policy: path/path_not_writable. This task may write only certain files and this is not one of them; do not write to it.`
+- 같은 폴더에서 확인한 것:
+  - 설정 파일(`--config`)에 `["src"]`, task 파일에 `["src", "todo.md"]`: `todo.md`는 여전히 거부됐다. task 파일이 넓히지 못한다.
+  - 프로필 `p`에 `["src"]`, 작업 종류 정의에 `["src/new.txt", "todo.md"]`, task 파일에 `["src", "todo.md"]`를 두고 `--profile p`로 task 파일을 실행: 세 목록이 모두 덮는 `src/new.txt`만 써졌다. `todo.md`(프로필이 덮지 않음)와 `src/other.txt`(정의가 덮지 않음)는 거부되어 안내 줄이 `거부된 쓰기: 2건`이었다.
+  - task 파일에 `[]`: 두 쓰기가 모두 거부됐다.
+- 잘못된 항목은 실행 전에 거부하고 실행 기록을 만들지 않는다. task 파일에 `["../outside"]`를 둔 경우의 stderr와 오류 JSON의 `message`:
+
+```
+codaryn: 오류 — task 파일을 읽을 수 없거나 값이 올바르지 않습니다 (invalid_task)
+  task 파일 — policy.writablePaths[0] 값이 올바르지 않습니다(값은 표시하지 않습니다)
+```
+
+  `"message":"policy.writablePaths[0] must not contain a '..' segment"`, `diagnostic.field`는 `policy.writablePaths[0]`이다.
+- **`doctor`의 주의:** 설정 파일에 `["src"]`와 명령 규칙 하나(`node --version`)를 둔 `doctor --config … --workspace …`의 허용 명령 줄이다. task 파일에 같은 둘을 둔 `doctor --task …`도 같은 줄을 내고 종료 3(주의)이다. `--json`의 그 항목은 `status: "warn"`, 문구 id `doctor.commands.writable_with_commands`다.
+
+```
+[주의]    허용 명령       writablePaths가 파일 도구를 제한하는 중에 명령 규칙 1개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다
+```
+
+- **적용과 GUI:** 파일 정리의 적용(`apply`)도 적용할 때의 목록으로 판정한다. 목록 밖의 동작은 적용 전 점검에서 막히고 아무것도 옮기지 않는다. GUI에서 시작한 실행과 적용 점검도 같은 목록을 쓴다(U-186). 둘 다 통합 시험(`tests/integration/n12-writable-paths.test.ts`)이 실제 CLI와 앱 계층으로 확인하며, 이 절에는 그 출력을 옮기지 않았다.
+- **설정 바꾸기에서의 넓히기(U-183):** 앱 계층의 설정 변경 제안은 목록을 넓히는 변경을 넓히기로 판정한다. GUI는 넓히기를 쓰기 전에 메인 프로세스의 OS 대화상자로 묻는다([독립 GUI 설계](design/standalone-gui.md) 6.6). 앱 계층의 `proposeSettingsChange`를 직접 불러 받은 판정(같은 폴더, main `c83ec5b`):
+
+| 바꾼 것(`policy.writablePaths`) | 넓히기 |
+| --- | --- |
+| `["src"]` → `["src", "docs"]` | `writable_path_added`(`policy.writablePaths[1]`) |
+| `["src"]` → `["src/app.txt"]` | `writable_path_added`(`policy.writablePaths[0]`) |
+| `["src"]` → 목록을 지움 | `writable_paths_unlimited`(`policy.writablePaths`) |
+| `["src", "docs"]` → `["src"]` | 없음 |
+| 목록 없음 → `["src"]` | 없음 |
+
+  - 옛 항목 안의 항목(`src` → `src/app.txt`)도 넓히기다. 그 항목이 다른 곳을 가리키는 링크나 정션이면 새 범위가 열리는데, 설정은 모든 작업 공간에 쓰이므로 바꾸는 때에 확인할 수 없기 때문이다(Codex V-8).
+  - 확인 없이 넓히기를 쓰려 하면 `invalid_arguments`(`the change widens what runs may do; it is written only when the person confirmed it`)이고 파일은 그대로였다.
+  - 프로필과 작업 종류 정의의 목록도 따로 같은 판정을 받는다(`profiles.<이름>.policy.writablePaths`, `workflows.<id>.policy.writablePaths`).
+  - 지금 GUI의 설정 화면에는 `writablePaths`를 고치는 편집이 없다. 그래서 이 판정은 GUI 화면에서는 나오지 않고, 목록은 설정 파일을 손으로 고쳐 둔다. GUI 대화상자가 이름을 붙일 수 있는 넓히기 종류에 이 둘이 아직 없으므로, 이런 넓히기가 든 제안이 오면 GUI는 쓰지 않는다(`unknown_widening`, 코드 기준).
+
 **Windows 실행 규칙:** 도구 명령과 검증기 명령에 똑같이 적용한다.
 
 - 이름은 자식에게 넘기는 `PATH`와 `PATHEXT`로 찾는다. 작업 디렉터리와 상대 `PATH` 항목은 찾지 않는다. `.exe`, `.com`, `.cmd`, `.bat`만 실행한다.
@@ -1132,6 +1196,16 @@ node --test dist/tests/live/openai-live.js
   - 표지 글 `CODARYN_SECRET`이 든 파일도 가린 곳으로 센다.
   - 등록 개수로 다른 제공자의 키 변수가 있는지, 설정한 두 값이 같은지를 알 수 있다.
 - **쓰기 경합:** 해시 비교와 파일 교체 사이에 다른 프로그램이 쓰면 그 변경을 덮어쓸 수 있다.
+- **작업 공간 글 읽기·쓰기의 폴더 바꿔치기(사용자 결정 DR-73):** 앱 계층의 `readWorkspaceText`·`writeWorkspaceText`(U-172, 병합 `b25edb1`)에 남은 틈이다. GUI의 텍스트 편집 화면이 쓸 함수이고, 그 화면은 아직 main에 없다. 지금 CLI와 GUI는 이 함수를 부르지 않는다(코드 기준, main `5ee11a1`).
+  - 같은 PC에서 사용자 권한으로 도는 다른 프로그램이 경로 확인 직후마다 폴더를 정션으로 바꿔치면 작업 공간 밖이나 상태 디렉터리의 파일을 읽거나 고칠 수 있다.
+  - Codex의 재확인(V-1b, Windows)에서 시험이 바꿔치는 시점을 확인 단계 사이에 맞춰 넣자 읽기 12경우 중 6경우가 경계 밖의 글을 돌려주었고, 쓰기 20경우 중 6경우가 바깥 파일을 바꿨다(쓰기는 `path_changed`로 끝났다). 임시 파일이 바깥에 남은 경우도 2경우 있었다. 바꿔치기 없는 정상 사용 5경우에는 거짓 거부가 없었다. 따로 도는 프로그램이 그 시점을 맞출 확률은 재지 않았다.
+  - 그런 프로그램은 이미 그 파일을 직접 읽고 쓸 수 있고, Node에는 이를 완전히 막을 수단이 없어서 알려진 한계로 둔다. 지금의 겹 확인은 유지한다.
+  - 자세한 수와 조건은 [민감정보 처리](privacy.md) 13절에 있다.
+- **에이전트의 파일 도구와 계획 적용의 폴더 바꿔치기(DR-73):** 에이전트의 파일 도구(`read_file`, `search_files`, `write_file`, `inspect_files`)와 계획 적용은 경로가 작업 공간 안인지 확인한 뒤 같은 경로로 파일을 다시 연다. 경로 확인과 사용 사이에 폴더가 바뀌는 것은 닫지 못한다(코드 기준, na-core의 조사. 경합을 재현하지는 않았다).
+  - 그 사이에 실행 중인 다른 프로그램이나, 허용한 명령이 남겨 둔 배경 프로세스가 경로의 폴더를 링크나 정션으로 바꾸면, 도구가 작업 공간 밖의 파일을 읽거나 쓸 수 있다. 쓰기는 작업 공간 안의 보호 경로나 `writablePaths`(13절 "쓰기 허용 경로") 밖에도 닿을 수 있다.
+  - 계획 적용의 이동은 원본 쪽 폴더가 바뀌면 밖의 파일 이름을 지울 수도 있다. 지운 것은 되돌리기가 모른다.
+  - 이런 프로그램과 명령은 이미 사용자 권한으로 그 파일에 직접 닿을 수 있다. 신뢰하지 않는 프로그램이 도는 PC에서는 실행하지 말고, 명령을 허용할 때는 배경에 남는 프로세스가 없는지 확인한다(16절 "남는 자손 프로세스").
+  - 읽은 내용이 모델에 가는 것은 [민감정보 처리](privacy.md) 13절에 있다.
 - **점검:** `doctor`는 모델이 실제로 있는지 확인하지 않는다.
 - **도움말과 사용법의 빠진 곳(UXM-20):** main `0ad28bc`에서 처음 확인했고, U-53 뒤의 main `76c5280`에서 실제 CLI로 다시 쟀다.
   - **고쳐진 것(U-53):**
@@ -1311,6 +1385,7 @@ node --test dist/tests/live/openai-live.js
   - 명령 규칙: 양쪽이 모두 허용하는 명령만 남는다. `organize`처럼 명령을 허용하지 않는 작업 종류에서는 설정·프로필의 명령 규칙이 모두 빠진다(task 파일 자신의 명령 규칙은 위처럼 `invalid_task`다).
   - 계획 동작(`planActions`): 설정 정책이 적었을 때만 양쪽에 다 있는 것으로 줄인다. 적지 않았으면 작업 종류의 것을 그대로 쓴다.
   - 경로 토큰 되살리기(`restorePathTokens`): 양쪽이 모두 허용할 때만 켜진다.
+  - 쓰기 허용 경로(`writablePaths`): 합치지 않는다. 설정, 프로필, 작업 종류 정의, task 파일의 목록이 각각 남고 쓰기는 모두가 덮어야 한다(13절).
   - 빠진 것은 `doctor`가 알리고(7절의 예), 실행 시작 줄에 이어 붙으며, 실행 기록의 `run_started`에 종류와 개수만 남는다. 확인(main `23daf6b`): 위 7절의 설정으로 `run --workspace … --workflow organize`를 하면 기록에 `commands_dropped` 1과 `restore_path_tokens_off` 1이 남았다.
   - 실행 시작 줄의 실제 출력(U-24 문구 브랜치 `f2ed116`(main `266c46d` 위)). task 파일이 `workflowRef`로 고른 설정의 작업 종류가 경로 토큰 되살리기를 끄고 같은 id의 검증기 하나를 뺀 경우다:
 

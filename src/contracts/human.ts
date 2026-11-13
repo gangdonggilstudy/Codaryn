@@ -208,6 +208,8 @@ export const SCHEMA_FIELD_NAMES = [
   "destructive",
   "restorePathTokens",
   "protectedPaths",
+  // U-182 (DR-69 B-4, review R-99 L-3; in na-core's unit by PM decision): `policy.writablePaths`.
+  "writablePaths",
   "privacy",
   "secretEnv",
   "limits",
@@ -641,6 +643,9 @@ export const FIXED_MESSAGES = {
   "progress.integrity_changed": { phase: "phase", count: "count" },
   "progress.finished": { status: "text", reason: "reason" },
   "progress.model_not_found": {},
+  // U-182 (DR-69 B-4): after a run whose `{count}` writes were denied as path_not_writable, how to
+  // allow a file (every writable list must cover it). A progress line, not in the result.
+  "progress.not_writable_hint": { count: "count" },
   "progress.unknown_tool": {},
   // G-A: an apply run's records (ApplyJournalEvent). `{approval}` is `approval.<channel>`,
   // `{problem}` is `plan.problem.<problem>`; an action is shown by its number (index + 1).
@@ -1071,6 +1076,11 @@ export const FIXED_MESSAGES = {
   // does not check those arguments, so such a command can change files outside an approved plan.
   // A warning in the `commands` check (no new check id).
   "doctor.commands.extra_args_with_plan": { count: "count" },
+  // U-182 (DR-69 B-8): `{count}` command rules while a writable list applies (policy.writablePaths of
+  // the config, the profile, the task type or the task). The lists bind the file tools only, so such
+  // a command can write files outside them. A warning in the `commands` check, or one of its notes
+  // when the check says something else (no new check id).
+  "doctor.commands.writable_with_commands": { count: "count" },
   // DR-41: notes of the `commands` check (DoctorCheck.notes): what the task type's own rules left out
   // of the configured policy (workflowPolicyNarrowings). Counts only.
   "doctor.workflow_policy.commands_dropped": { count: "count" },
@@ -1108,6 +1118,12 @@ export const FIXED_MESSAGES = {
   // The hint after `workspace_locked`. Its text names `.codaryn/lock.json` and
   // `.codaryn/lock.json.reclaim` (DR-27 b): both may need removing when no Codaryn runs here.
   "lock.remove_hint": {},
+  // U-193 (after U-176): a run, a check or a cleanup finished but the workspace lock could not be
+  // released (RunOutcome.lockLeft, PlanCheck.lockLeft, CleanupOutcome.lockLeft). No path: the
+  // doctor's lock line names the file. Draft by p5a from nc-human's line (p4g, nb-i18n to confirm).
+  // U-201: the run, apply and revert summaries say it when their context's `lockLeft` is true
+  // (RunSummaryContext, ApplySummaryContext, RevertSummaryContext), right before their next commands.
+  "lock.release_failed": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
 export type FixedMessageId = keyof typeof FIXED_MESSAGES;
@@ -1342,6 +1358,13 @@ export interface RunSummaryContext {
   readonly policyNarrowings?: readonly PolicyNarrowing[];
   readonly policySource: "task" | "config";
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /**
@@ -1435,6 +1458,13 @@ export interface HumanOutput {
 export interface ApplySummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /**
@@ -1444,6 +1474,13 @@ export interface ApplySummaryContext {
  */
 export interface RevertSummaryContext {
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /** Signature of `createHumanOutput`, exported by `src/cli/human/index.ts`. One renderer per command. */

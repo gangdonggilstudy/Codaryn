@@ -182,7 +182,7 @@ export interface RunHandle {
   cancel(): void;                  // 여러 번 불러도 된다. 끝난 뒤에는 효과가 없다
   readonly done: Promise<RunOutcome>;  // reject하지 않는다. result.json 저장과 잠금 해제 뒤에 풀린다
 }
-export type RunOutcome = { ok: true; result: EngineResult } | { ok: false; error: AppError };  // 시작 뒤 내부 예외만 오류
+export type RunOutcome = { ok: true; result: EngineResult; lockLeft?: true } | { ok: false; error: AppError };  // 시작 뒤 내부 예외만 오류
 export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error: AppError };
 ```
 
@@ -193,6 +193,12 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
   - 관문이 없어도 처음 시험은 journal I/O 순서 때문에 통과했다. 그래서 시점 시험을 따로 두었다.
 - `workflowRef`는 간편 형식의 `--workflow`로 넘긴다. task 파일은 자기 `workflowRef`를 쓰고, 둘을 함께 주면 CLI가 거부한다(R-14 I-4로 고침: 묶음 병합 뒤 CLI가 `--workflow`를 받는다).
 - 한 작업 공간에 실행 하나(잠금, P-4)는 그대로다. 한 프로세스가 서로 다른 작업 공간의 실행 여럿을 가질 수 있다(시험함).
+- U-186(DR-69 B-4, U-182 뒤): 앱 계층의 실행 조립(`src/app/assemble.ts`)도 task의 쓰기 경로 목록(`ResolvedTaskSpec.writablePathSets`, CLI의 `prepareTask`가 만듦)을 정책 관문에 준다. CLI의 실행과 같다. 그래서 GUI 실행에서도 목록 밖의 파일 도구 쓰기는 `path/path_not_writable`로 거부된다. task 파일의 목록과, task 파일 실행에 걸리는 설정 파일의 목록이 모두 그렇다(시험 `tests/unit/app/u186-writable-paths-app.test.ts`).
+- U-193(U-176 뒤): 실행 끝에 잠금을 풀지 못하면(store의 짧은 다시 시도 뒤 던짐, 또는 `false`) 실행 결과는 그대로이고, `done`의 `RunOutcome`에 `lockLeft: true`가 붙는다.
+  - 결과는 먼저 `result.json`에 쓴 그것이다. 결과 JSON의 기존 필드는 바뀌지 않는다.
+  - 전에는 이 경우 결과가 있는데도 `internal_error`였다.
+  - 잠금은 이 프로세스가 사는 동안 남는다. GUI는 엔진이 같은 프로세스라, 앱을 닫을 때까지 이 작업 공간의 다음 시작이 `workspace_locked`다. 앱이 끝나면 다른 프로세스의 다음 실행이 오래된 잠금으로 거둔다.
+  - 사람용 글은 `lock.release_failed`(문구 id 초안, nc-human의 제안 글)다.
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
 
@@ -276,6 +282,7 @@ export interface RunObserver {
     - DR-44 (a): 되돌리지 않았거나 일부만 되돌린 실행의 기록은 `includeNotReverted: true`일 때만 지운다. 아니면 `not_reverted_not_confirmed`로 남는다. 막지는 않는다. 미리보기의 `plan.totals.runs.notReverted`가 그 수다.
     - DR-44 (b)~(d): store의 경고(`partly_reverted`, 보관함이 남을 수 있을 때의 `discarded_left`, `leftover`), 남은 폴더 항목(target `leftover`, `leftoverId`), 남긴 까닭(`partly_removed`, `used_by_kept_apply`)을 그대로 넘긴다. 다 지우지 못한 것은 지웠다고 하지 않는다.
     - R-34b P-1: 기록을 확인할 수 없는(손상된) 실행은 `records_unreadable`이고, 되돌리지 않은 실행과 같이 `includeNotReverted`가 있어야 지운다.
+    - U-193(U-176 뒤): 계약 `CleanupOutcome`의 ok 쪽에 `lockLeft?: boolean`이 있다(이 단위가 초안, p4g 확인). 정리는 끝났지만 잠금을 풀지 못했으면 `true`이고 상태는 바뀌지 않는다. 앱은 store가 준 값을 그대로 넘긴다. store가 채우는 일(지금의 `.catch(() => false)` 대신)은 nc-human 몫이라, 그 전에는 나오지 않는다(시험은 todo로 둠). 사람용 글은 `lock.release_failed`.
     - R-34b P-2: 정리가 남긴 표지(`cleanup-leftover.json`)가 없는 `cleanup-<16 hex>` 폴더는 지울 항목이 아니다. 요약의 `unknownFolders`로 보이기만 한다.
     - U-13 (UXM-1): 폐기 보관함에 파일이 남아 있는 적용 실행의 기록은, 그 보관함을 함께 지우기로 확인하지 않는 한(`discarded: true`이고 그 보관함도 고른 경우) 지우지 않는다. 그 실행은 `kept`에 `discarded_left`로 남고, 그 계획 실행은 `used_by_kept_apply`로 남는다. 나머지는 지운다. 앱 계층은 이 결과를 그대로 넘긴다.
     - U-22 (DR-48, AXM-3): 실행한 정리의 결과는 `status`(계약의 `cleanupStatusOf`: `removed`, `nothing_removed`, `partly_failed`)를 갖고, `outcome.ok`는 CLI의 JSON처럼 `removed`일 때만 참이다. 확인한 다이제스트가 계획의 것이 아니면 `cleanup_plan_changed`, 다른 작업이 잠금을 잡고 있으면 `workspace_locked`이고, 둘 다 결과가 아니라 호출 오류다. 거꾸로, 아무것도 지우지 못한 정리(`nothing_removed`)와 일부 실패한 정리(`partly_failed`)는 호출 오류가 아니라 결과다(호출은 `ok: true`, `outcome.ok`만 거짓이며 `removed`·`kept`와 이유가 있다, R-51 M-1). 어댑터는 `status`를 읽는다.
@@ -551,6 +558,16 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
     - 보호 경로·무결성 경로·가릴 변수·검증기 제거
     - 명령 검증기 추가·변경(R-14 L-2, `b30bbce`): 실행마다 사람의 권한으로 돈다. 파일 규칙 검증기 추가는 넓히기가 아니다
     - 경로 토큰 복원, 계획 동작 허용
+    - U-183(DR-69 B-4): 쓸 수 있는 경로(`writablePaths`)를 넓힌다. 없으면 한정이 없고, 목록은 허용 목록이다(항목이 자기와 그 아래를 덮음). 설정·프로필·작업 종류 정의의 목록은 따로따로이고, 실행의 쓰기는 모든 목록에 들어야 한다. 그래서 목록마다 그 자리에서 판정한다.
+      - 목록이 없어짐(한정 없음으로 돌아감): `writable_paths_unlimited`(`policy.writablePaths`, `profiles.<이름>.policy.writablePaths`, `workflows.<id>.policy.writablePaths`). 프로필의 정책이 없어져도 그 프로필의 목록이 없어진 것이다.
+      - 예전 항목에 없던 항목: `writable_path_added`(그 항목 `…writablePaths[i]`). 항목을 더함, 더 넓은 접두사로 바꿈, 뿌리(`.`), 빈 목록(쓰기 없음)에 항목을 둠이 여기에 든다.
+      - V-8 M-1: 예전 항목 **안**의 항목(`a` → `a/b`)도 넓히기다.
+        - 관문은 허용 항목을 실경로로도 풀어 본다. 그래서 `a/b`가 다른 곳을 가리키는 링크나 정션이면, 글자로는 좁힌 변경이 실제로는 새 범위를 연다(V-8이 정션으로 재현).
+        - 설정·프로필·정의의 목록은 그 사람의 모든 작업 공간에서 쓰인다. 링크는 작업 공간마다 다르므로, 설정을 바꾸는 때에는 새 항목이 링크를 지나지 않는지 확인할 수 없다. 한 작업 공간을 풀어 봐도 다른 곳은 모른다. 확인할 수 없으면 넓히기다.
+      - 같은 항목인지는 정책 관문의 판정(`compilePathSet`의 `exact`: 조각 단위, Windows에서 대소문자 무시와 `\`, 끝의 `/`와 `./`는 없는 것)으로 본다. 쓸 수 없는 예전 목록은 어느 항목과도 같지 않다.
+      - 좁히기: 항목을 뺌, 같은 항목을 다른 순서나 표기로, 목록이 없던 자리에 새로 둠(한정 없음보다 어디서나 좁다), 빈 목록.
+      - 처음 판(ba7cec7)은 글자로 더 덮는 항목만 넓히기로 보았다. 예전 항목 안의 항목을 좁히기로 본 것을 V-8로 고쳤다.
+      - 아직 설정 파서는 이 필드를 받지 않는다(`unknown_field`, B-4까지). 판정이 먼저 안다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다.
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
       - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).
@@ -700,6 +717,7 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   6. 잠금. 다른 작업이 잡고 있으면 `workspace_locked`다(재시도 가능).
 - **판정은 적용 사전 점검의 것이다.** U-111: 엔진의 `preflightPlan`(U-105)을 그대로 부른다. `applyPlan`이 부르는 바로 그 고리라 판정을 복사하지 않는다. 적용 task의 설정으로 행동마다 본다.
   - 적용 task의 `planActions`와 정책 관문(`createPolicyGate`, `PLAN_ACTION_DESCRIPTORS`, 경로를 풀기 전과 후). 아니면 `denied`다.
+    - U-186: 관문은 적용 task의 쓰기 경로 목록(`writablePathSets`)도 받는다. 적용(CLI `runApply`의 관문, U-182)과 같다. 그래서 목록 밖의 동작은 점검에서도 `denied`다.
   - 그다음 tools의 `createPlanExecutor`의 `check`: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
   - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
   - 인벤토리 상한(DR-6)은 계획 보기가 센 것이다(같은 `createInventoryChecker`).
@@ -707,6 +725,7 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   - 하드 링크 시험은 원본 파일의 두 번째 이름을 잠깐 만든다. 같은 볼륨이면 상태 디렉터리 안에, 아니면 원본 옆에 만든다. 그래서 점검하는 동안 작업 공간 잠금을 잡는다.
   - 끝나기 전에, 실행기가 거두지 못한 이 프로세스의 시험 링크를 찾아 지운다. 대상은 점검 전에 없던 이름이고, 일반 파일만이다.
   - 그래도 남은 시험 링크의 수는 `probesLeft`, 풀지 못한 잠금은 `lockLeft: true`로 알린다. 숨기지 않는다. 잠금 풀기는 한 번 더 해 본다.
+    - U-193: store가 `false`(이미 이 점검의 잠금이 아님)를 주는 풀기도 풀지 못한 것으로 친다(V-1 L-1과 같은 규칙). 점검이 ok여도 `lockLeft`는 결과에 늘 있다.
   - R-81 L1: 점검하기 전에, 잠금 아래에서 상태 디렉터리와 계획의 원본 폴더에 있는 시험 링크 이름(`.codaryn-link-probe-<pid>-…`, 어느 프로세스의 것이든)을 모두 지운다. 일반 파일만이다.
     - 점검과 적용은 이 잠금을 쥐어야 시험 링크를 만든다. 그래서 그런 이름은 만들고 지우기 사이에 끝난 프로세스가 남긴 것이거나, 앞선 점검이 남았다고 알린 것이다.
     - 시험 링크는 언제나 다른 파일의 두 번째 이름이다. 그래서 하드 링크 수(nlink)가 2 이상인 일반 파일만 지운다. 그 이름의 유일한 파일(nlink 1)은 지우면 내용이 사라지므로 지우지 않고 `probesLeft`로 센다. **점검은 사람의 파일 내용을 없애지 않는다**(시험).

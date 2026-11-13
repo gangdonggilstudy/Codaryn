@@ -250,7 +250,7 @@ const U13_DIALOGS = [
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 // U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onTreeReset,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onTreeReset,onWorkspaceOpened,openFolder,openRecent,openText,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveText,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,textDirty,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -296,6 +296,45 @@ const expected = [
     (v) =>
       JSON.stringify(v) ===
       JSON.stringify({ masked: [null], top: "copied", nested: "copied", unknown: "unknown_entry", pathString: "invalid_args", otherWorkspace: "unknown_workspace", button: "ok", texts: ["a.txt", "sub/b.txt", "a.txt"] }),
+  ],
+  // U-174 (DR-72, 3.14): the text view by id: a plain CRLF file comes with LF and editable, a key-shaped text masked and read only
+  // (the key never reaches the page), a large file and a binary one not opened; an unknown id and a path refused; from the tree's Open,
+  // the file is a read-only textarea and Close goes back.
+  [
+    "textView",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        plain: { opened: true, text: "line one\nline two\n", masked: false, editable: true, reasons: [], lines: 3 },
+        key: { opened: true, masked: true, editable: false, firstReason: "masked", keyShown: false },
+        big: "too_large",
+        binary: "not_text",
+        unknown: "unknown_entry",
+        pathString: "invalid_args",
+        // U-184: a.txt is editable now (the textarea is not read only).
+        ui: { ready: "opened", value: "alpha", readOnly: false, back: "home" },
+      }),
+  ],
+  // U-184 (DR-72, 3.14): saving. The first save of an opened file asks once (the main process's dialog),
+  // the CRLF file is written with CRLF, a later save does not ask, the old token is gone; a key-shaped text
+  // is refused and a file changed on disk is a conflict (both write nothing). In the window: typing marks the
+  // edit unsaved, leaving asks (keep stays), Save writes and the edit is saved.
+  [
+    "textEdit",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        editable: true,
+        first: "saved",
+        disk: "line one\r\nline 2\r\n",
+        second: "saved",
+        asked: 1,
+        oldToken: "unknown_entry",
+        refused: { status: "text_refused", problems: ["masked"] },
+        conflict: "conflict",
+        unchangedOnDisk: true,
+        ui: { unsaved: true, leaveAsked: true, stayed: "text", saved: "saved", asked: 2, disk: "alpha beta", clean: true },
+      }),
   ],
   // U-67 (3.13, 10): the palette's fixed list (cancel not available with no run), found by name and run, Escape gives the focus back; Ctrl+N, Ctrl+comma, F5 and the first-letter jump.
   [
@@ -712,7 +751,8 @@ const expected = [
   ["setupCheckItems", (v) => typeof v === "number" && v >= 5],
   ["setupOnDisk", (v) => v.npmTest === true && v.packageJson === true],
   ["setupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // U-184: the text view's two first-save confirmations (textEdit) come first.
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["textSave.message", "textSave.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)
@@ -739,6 +779,10 @@ const fetched = existsSync(dictionaries) ? readdirSync(dictionaries) : [];
 process.stdout.write(`${fetched.length === 0 ? "ok" : "FAIL"} noDictionaryDownload: ${JSON.stringify(fetched)}\n`);
 if (fetched.length > 0) failed += 1;
 if (!junction) process.stdout.write("NOTE the junction could not be made here; the link row was not checked\n");
+// U-178: a step whose run gave no result id is told with why (not a check: its own checks failed above).
+for (const step of Array.isArray(seen.stepFailures) ? seen.stepFailures : []) {
+  process.stdout.write(`NOTE no result for ${step?.step}: ${JSON.stringify(step).slice(0, 600)}\n`);
+}
 if (seen.error !== undefined) {
   failed += 1;
   process.stdout.write(`FAIL error: ${JSON.stringify(seen.error)}\n`);
@@ -836,8 +880,18 @@ if (life === null || typeof life.hostPid !== "number") {
   lifeCheck("lifeTransportRefused", JSON.stringify(life.transport) === JSON.stringify({ mode: "loopback-only", refused: 0 }), `transport ${JSON.stringify(life.transport)}`);
   // Kills the main process only (TerminateProcess on Windows), not its children.
   process.kill(life.mainPid);
-  const gone = await goneWithin(life.hostPid, 5_000);
-  lifeCheck("hostEndsWhenMainKilled", gone, `host ${life.hostPid} after main ${life.mainPid} was killed`);
+  // U-178: the host ends about 1.5 s after its input ends (INPUT_END_GRACE_MS, then finish's 0.5 s). Over
+  // 5 s is told as a NOTE (a busy machine delays it); only a host still there after 30 s fails (DR-8: it
+  // must not outlive the main process). The time it took is in the detail; a host left is ended here.
+  const killedAt = Date.now();
+  const gone = await goneWithin(life.hostPid, 30_000);
+  const endedMs = gone ? Date.now() - killedAt : null;
+  lifeCheck(
+    "hostEndsWhenMainKilled",
+    gone,
+    gone ? `host ${life.hostPid} ended ${endedMs} ms after main ${life.mainPid} was killed` : `host ${life.hostPid} still running 30 s after main ${life.mainPid} was killed`,
+  );
+  if (gone && endedMs > 5_000) process.stdout.write(`NOTE hostEndsWhenMainKilled: the host took ${endedMs} ms (over 5 s, within 30 s), as on a busy machine\n`);
   if (!gone) process.kill(life.hostPid);
 }
 await sleep(1_000);

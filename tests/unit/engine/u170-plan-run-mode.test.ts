@@ -1,9 +1,9 @@
 /**
  * U-170 (DR-69, P1 bundle B, B-1 contract unit): plan mode `run` exists in the contract before
  * anything carries it out. The engine treats it as a plan run of its own mode: read tools and the
- * plan tool whose descriptor names `run` (ToolDescriptor.planMode), which no task can list yet. So
- * such a run reads, stores no plan, writes nothing and ends as `failed`/`model_error` without a
- * plan, as a plan run without its tool does. `apply` and `none` offer what they did before.
+ * plan tool whose descriptor names `run` (ToolDescriptor.planMode): `propose_changes` (U-180). A run
+ * whose task does not list it reads, stores no plan, writes nothing and ends as `failed`/`model_error`
+ * without a plan, as a plan run without its tool does. `apply` and `none` offer what they did before.
  */
 
 import assert from "node:assert/strict";
@@ -24,8 +24,9 @@ const RUN_PLAN_TASK: TaskOverrides = {
 const call = (id: string, name: string, args: ToolCall["args"]): ToolCall => ({ id, name, args });
 
 describe("U-170: offeredTools by plan mode", () => {
-  test("run: the read tools only, never the other mode's plan tool or a writing tool", () => {
-    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "run"), ["read_file", "search_files", "inspect_files"]);
+  test("run: the read tools and its own plan tool only, never the other mode's plan tool or a writing tool", () => {
+    // U-180 (B-3): propose_changes is a task type tool now, offered in a run plan run only.
+    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "run"), ["read_file", "search_files", "inspect_files", "propose_changes"]);
   });
 
   test("apply and none offer what they did before", () => {
@@ -35,7 +36,7 @@ describe("U-170: offeredTools by plan mode", () => {
   });
 });
 
-describe("U-170: a plan run of mode run before its tool exists", () => {
+describe("U-170: a plan run of mode run whose task does not list propose_changes", () => {
   test("reads, cannot write or store a moves plan, and ends without a plan", async () => {
     const requests: ModelRequest[] = [];
     const run = harness({

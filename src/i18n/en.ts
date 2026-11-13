@@ -143,6 +143,8 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.integrity_changed": "protected material check — changed or not checkable: {count} ({phase})",
   "progress.finished": "finished — {status} ({reason})",
   "progress.model_not_found": "The model was not found (HTTP 404). codaryn models lists the models the key can use.",
+  "progress.not_writable_hint":
+    "Writes denied because the file is not in writablePaths: {count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
   "progress.unknown_tool": "(unknown tool)",
   "progress.apply_started": "apply started — actions: {actions}, {approval}",
   "progress.plan_checked": "preflight — problems: {count}",
@@ -461,6 +463,8 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.commands.none": "no command is allowed and no command check is configured",
   "doctor.commands.extra_args_with_plan":
     "command rules that take further arguments while plan actions are on (policy.planActions): {count}; Codaryn does not check those arguments, so such a command can change files outside an approved plan",
+  "doctor.commands.writable_with_commands":
+    "command rules while writablePaths limits the file tools: {count}; writablePaths does not bind commands, so an allowed command can write files outside it",
   "doctor.workflow_policy.commands_dropped": "a run of this task type leaves out command rules of the configured policy: {count}",
   "doctor.workflow_policy.commands_narrowed": "a run of this task type narrows command rules of the configured policy: {count}",
   "doctor.workflow_policy.plan_actions_dropped": "a run of this task type leaves out plan actions of the configured policy: {count}",
@@ -492,6 +496,7 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.lock.parked_left":
     "files a revert could not put back are left in .codaryn/parked/: {count}; move them back or delete them, as nothing removes them",
   "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json and, if it is there, .codaryn/lock.json.reclaim.",
+  "lock.release_failed": "The workspace lock could not be released. The next run clears it once Codaryn has closed; if a run is refused before then, run codaryn doctor.",
 
   "error.invalid_arguments.what": "the command arguments are not valid",
   "error.invalid_arguments.fix": "See codaryn help <command> for a command's usage, and codaryn --help for the list of commands.",
@@ -538,8 +543,9 @@ export const EN_MESSAGES: MessageTexts = {
   "error.plan_already_applied.fix": "See codaryn report. To do it again, revert it, then make a new plan with codaryn run.",
   "error.plan_secrets_differ.what": "the secrets registered now hide the plan's paths differently from the plan run, so nothing was shown or changed",
   "error.plan_secrets_differ.fix": "Use the same task form as the plan run, and so the same secrets, or make the plan again.",
-  "error.plan_run_missing.what": "the plan run this apply used has no record (plan.json) any more, so nothing was changed",
-  "error.plan_run_missing.fix": "An apply can be reverted only while its plan run is kept. Restore that run's folder if you removed it.",
+  "error.plan_run_missing.what": "the plan run's record (plan.json) is gone, so nothing was changed",
+  "error.plan_run_missing.fix":
+    "To show or apply a plan, make it again with a new codaryn run. To revert an apply, its plan run must be kept; restore that run's folder if you removed it.",
   "error.plan_records_changed.what": "the plan run has a records-changed mark: something other than the run changed its records, so its plan may not be the one you read; nothing was asked or changed",
   "error.plan_records_changed.fix": "Make the plan again with a new codaryn run (codaryn plan only shows a plan), read the new plan, and apply that one. The marked run stays as evidence of what happened.",
   "error.run_not_awaiting_review.what": "that run is not waiting for a person's review, so nothing was written",
@@ -601,6 +607,8 @@ export const EN_MESSAGES: MessageTexts = {
   "tool.run_command": "run command",
   "tool.inspect_files": "inspect files",
   "tool.propose_plan": "propose a plan",
+  // U-180 (DR-69 B-3), draft for nb-i18n.
+  "tool.propose_changes": "propose the files to change",
 
   "revert.skip.changed_since_run": "changed again after the run",
   "revert.skip.missing_snapshot": "snapshot missing",

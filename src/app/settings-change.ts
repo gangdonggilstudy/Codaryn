@@ -15,7 +15,9 @@
  * limit raised or removed, a protected path or an integrity path removed, a secret variable no
  * longer masked, a verifier removed, a command verifier added or changed (R-14 L-2), path tokens restored, plan actions allowed, a different API
  * address (top-level or a provider's, GUI F-3), another provider for quick runs (F-3), a profile or
- * workflow definition changed. Narrowing changes need no confirmation.
+ * workflow definition changed, U-183 (DR-69 B-4): a list of writable paths with an entry it did not
+ * have (V-8 M-1: even one inside an old entry, which a link can point elsewhere), or that is gone
+ * (no limit). Narrowing changes need no confirmation.
  * The new text is the config as formatted JSON; the file's own formatting is not kept.
  */
 
@@ -25,6 +27,7 @@ import type { ApiProviderName, CodarynConfig, CommandRule, ConfirmableCommandRul
 import { writeConfigAtomic } from "../cli/models.js";
 import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
+import { compilePathSet } from "../policy/path-set.js";
 import { workflowDefinitions } from "../workflows/index.js";
 import { appError } from "./errors.js";
 import { checkConfigText, loadSettingsFile, policyNarrowingsOf } from "./settings.js";
@@ -97,6 +100,42 @@ function addressOf(config: CodarynConfig, provider: ApiProviderName): string {
 
 type PolicyRules = CodarynConfig["policy"];
 type VerifierRules = CodarynConfig["verifiers"];
+
+/** The separators the policy gate splits an entry on (path-set.ts: `\` too on Windows). */
+const ENTRY_SEPARATORS = process.platform === "win32" ? /[\\/]/ : /\//;
+
+/** An entry as the relative path the gate's matcher takes: "/" separated, "." for the root. */
+function asRelative(entry: string): string {
+  const segments = entry.split(ENTRY_SEPARATORS).filter((segment) => segment !== "" && segment !== ".");
+  return segments.length === 0 ? "." : segments.join("/");
+}
+
+/**
+ * U-183 (DR-69 B-4): one list of writable paths, `field` naming it. Absent is no limit; a list is
+ * an allow list where an entry covers itself and everything below it, and a run's write must be
+ * covered by every source's list (the config's, the applied profile's, the workflow definition's,
+ * the task file's), so each list is judged on its own.
+ * - The list gone (no limit again): `writable_paths_unlimited` at the list.
+ * - V-8 M-1: an entry that is not one of the old entries, by the policy gate's own matching
+ *   (compilePathSet `exact`: whole segments, `\` too and ignoring case on Windows, a trailing `/`
+ *   or `./` left out): `writable_path_added` at that entry, even one inside an old entry. The gate
+ *   resolves an allow entry to its real path, so an entry narrower by its letters (`a` -> `a/b`)
+ *   opens a new scope where `a/b` is a link or junction to elsewhere. These lists are used in
+ *   every workspace, each with its own links, so that cannot be checked when the settings change:
+ *   what cannot be checked is a widening. (An old list the gate cannot use matched no entry.)
+ * - Narrowing: no list before (no limit: a list in any workspace covers less), the same entries in
+ *   another order or spelling, an entry removed, an empty list.
+ */
+function writableWidening(before: readonly string[] | undefined, after: readonly string[] | undefined, field: string): SettingsWidening[] {
+  if (before === undefined) return [];
+  if (after === undefined) return [{ kind: "writable_paths_unlimited", field }];
+  const kept = compilePathSet(before, { match: "exact", onUnusable: "misses" });
+  const found: SettingsWidening[] = [];
+  for (const [index, entry] of after.entries()) {
+    if (typeof entry !== "string" || !kept.covers(asRelative(entry))) found.push({ kind: "writable_path_added", field: `${field}[${index}]` });
+  }
+  return found;
+}
 
 /** The policy checks of the judgment for one set of rules; `prefix` names whose (e.g. "workflows.docs."). */
 function policyWidening(before: PolicyRules, after: PolicyRules, prefix: string): SettingsWidening[] {
@@ -189,6 +228,7 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
   for (const action of after.policy?.planActions ?? []) {
     if (!oldActions.has(action)) found.push({ kind: "plan_action_allowed", field: "policy.planActions" });
   }
+  found.push(...writableWidening(before.policy?.writablePaths, after.policy?.writablePaths, "policy.writablePaths"));
   // GUI F-3, review R-27 I1: where the workspace's text and a provider's key go, as a run reads it
   // (src/cli/settings.ts resolveConnection): each API provider's address in the config (top-level
   // apiBaseUrl, or providers.<name>.apiBaseUrl when that entry is there), else its default. The
@@ -214,6 +254,14 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     if (old === undefined || profile.policy === undefined) continue;
     found.push(...commandWidening((old.policy ?? before.policy)?.commands ?? [], profile.policy.commands ?? [], `profiles.${name}.`));
   }
+  // U-183 (B-4): a profile's own writablePaths is one more list its runs must satisfy, besides the
+  // config's, so it is judged as that profile's list. A profile whose policy is gone has no list of
+  // its own any more; a profile removed is profile_changed only.
+  for (const [name, old] of Object.entries(before.profiles ?? {})) {
+    const profile = after.profiles?.[name];
+    if (profile === undefined) continue;
+    found.push(...writableWidening(old.policy?.writablePaths, profile.policy?.writablePaths, `profiles.${name}.policy.writablePaths`));
+  }
   // Review R-27 I4: a profile's own provider wins for its quick runs (SP-D10), so a profile that now
   // sends them to another provider says so, besides profile_changed.
   for (const [name, profile] of Object.entries(after.profiles ?? {})) {
@@ -230,6 +278,13 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
   const general = (field: string): string => field.replace(/^workflows\.[^.]+\./, "").replace(/\[\d+\]/g, "");
   const said = new Set(found.map((item) => `${item.kind} ${general(item.field)}`));
   found.push(...workflowRulesWidening(before, after).filter((item) => !said.has(`${item.kind} ${general(item.field)}`)));
+  // U-183 (B-4): a workflow definition's writablePaths is its own list (mergeWorkflowPolicy does not
+  // combine the lists), so it is judged as that workflow's even when the config's list changed alike.
+  const definitionsAfter = workflowDefinitions(after.workflows);
+  for (const [id, was] of Object.entries(workflowDefinitions(before.workflows))) {
+    const is = definitionsAfter[id];
+    if (is !== undefined) found.push(...writableWidening(was.policy?.writablePaths, is.policy?.writablePaths, `workflows.${id}.policy.writablePaths`));
+  }
   // One entry per kind and field.
   const seen = new Set<string>();
   return found.filter((item) => {

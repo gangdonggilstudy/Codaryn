@@ -142,6 +142,8 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.integrity_changed": "보호 대상 확인 — {count}개가 바뀌었거나 확인할 수 없음 ({phase})",
   "progress.finished": "끝 — {status} ({reason})",
   "progress.model_not_found": "모델을 찾지 못했습니다(HTTP 404). codaryn models로 키가 쓸 수 있는 모델을 보세요.",
+  "progress.not_writable_hint":
+    "writablePaths에 없는 파일이라 거부된 쓰기: {count}건. 그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.",
   "progress.unknown_tool": "(모르는 도구)",
   "progress.apply_started": "적용 시작 — 동작 {actions}개, {approval}",
   "progress.plan_checked": "적용 전 점검 — 문제 {count}개",
@@ -460,6 +462,8 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.commands.none": "허용한 명령도 명령 검증기도 없습니다",
   "doctor.commands.extra_args_with_plan":
     "추가 인수를 받는 명령 규칙 {count}개가 계획 동작(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
+  "doctor.commands.writable_with_commands":
+    "writablePaths가 파일 도구를 제한하는 중에 명령 규칙 {count}개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",
@@ -491,6 +495,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.lock.parked_left":
     "되돌리기가 제자리에 돌려놓지 못한 파일 {count}개가 .codaryn/parked/에 남아 있습니다. 저절로 지워지지 않으니 직접 제자리로 옮기거나 지우세요",
   "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
+  "lock.release_failed": "작업 공간 잠금을 풀지 못했습니다. Codaryn을 모두 닫으면 다음 실행이 정리합니다. 그 전에 실행이 막히면 codaryn doctor로 확인하세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",
   "error.invalid_arguments.fix": "codaryn help <명령>으로 그 명령의 사용법을, codaryn --help로 명령 목록을 확인하세요.",
@@ -537,8 +542,9 @@ export const KO_MESSAGES: MessageTexts = {
   "error.plan_already_applied.fix": "codaryn report로 결과를 보고, 다시 하려면 되돌린 뒤 codaryn run으로 새 계획을 만드세요.",
   "error.plan_secrets_differ.what": "지금 등록된 가릴 값이 계획 실행 때와 다르게 계획의 경로를 가려, 아무것도 보여 주거나 바꾸지 않았습니다",
   "error.plan_secrets_differ.fix": "계획 실행 때와 같은 작업 지정 방식(따라서 같은 가릴 값)으로 다시 하거나, 계획을 새로 만드세요.",
-  "error.plan_run_missing.what": "이 적용이 쓴 계획 실행의 기록(plan.json)이 없어, 아무것도 바꾸지 않았습니다",
-  "error.plan_run_missing.fix": "적용을 되돌리려면 그 계획 실행을 남겨 두어야 합니다. 지운 실행 폴더가 있으면 되살리세요.",
+  "error.plan_run_missing.what": "계획 실행의 기록(plan.json)이 없어 아무것도 바꾸지 않았습니다",
+  "error.plan_run_missing.fix":
+    "계획을 보거나 적용하려면 codaryn run으로 계획을 다시 만드세요. 적용을 되돌리려면 그 계획 실행이 있어야 하니, 지웠다면 그 실행 폴더를 되살리세요.",
   "error.plan_records_changed.what": "계획 실행에 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔 그 계획이 읽은 것과 다를 수 있어, 아무것도 묻거나 바꾸지 않았습니다",
   "error.plan_records_changed.fix": "codaryn run을 새로 실행해 계획을 다시 만들고(codaryn plan은 계획을 보여 주기만 합니다), 새 계획을 확인한 뒤 그것을 적용하세요. 표시가 있는 실행은 무슨 일이 있었는지의 증거로 남겨 두세요.",
   "error.run_not_awaiting_review.what": "그 실행은 사람의 검토를 기다리는 상태가 아닙니다. 아무것도 쓰지 않았습니다",
@@ -600,6 +606,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.run_command": "명령 실행",
   "tool.inspect_files": "파일 목록 보기",
   "tool.propose_plan": "계획 제안",
+  // U-180 (DR-69 B-3), nb-i18n 이 다듬을 초안.
+  "tool.propose_changes": "바꿀 파일 제안",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

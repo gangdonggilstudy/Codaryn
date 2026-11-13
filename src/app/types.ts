@@ -160,7 +160,15 @@ export interface SettingsWidening {
     /** GUI F-3: quick runs use another provider (`provider`), so the workspace's text goes to another API. */
     | "provider_changed"
     | "profile_changed"
-    | "workflow_changed";
+    | "workflow_changed"
+    /**
+     * U-183 (DR-69 B-4): an entry of a list of writable paths (the config's `policy.writablePaths`,
+     * a profile's, a workflow definition's) covers a path that list did not cover: an entry added, a
+     * broader prefix, the root. The field is the entry (`…writablePaths[i]`).
+     */
+    | "writable_path_added"
+    /** U-183 (DR-69 B-4): a list of writable paths is gone, so that limit is lifted (no limit). The field is the list. */
+    | "writable_paths_unlimited";
   /** Where: a field path such as "policy.commands[2]". Never a value. */
   readonly field: string;
 }
@@ -298,7 +306,18 @@ export interface RunObserver {
 }
 
 export type RunOutcome =
-  | { readonly ok: true; readonly result: EngineResult }
+  | {
+      readonly ok: true;
+      readonly result: EngineResult;
+      /**
+       * U-193 (after U-176): the run's workspace lock could not be released at its end (the release
+       * threw after its retries, or answered false). The result is the run's as written to
+       * result.json; nothing in it changes. The lock is held while this process lives (the app's
+       * engine runs in it), so a later start here is workspace_locked until the app closes; a run
+       * of another process then finds it stale. Absent: released. Message: lock.release_failed.
+       */
+      readonly lockLeft?: true;
+    }
   /** An internal error after the start (`internal_error`). The lock is released. */
   | { readonly ok: false; readonly error: AppError };
 
@@ -414,7 +433,8 @@ export interface CleanupApplied {
    * The store's outcome: what was removed entirely and what was kept and why (DR-44: partly_removed is
    * never reported as removed). `ok` is true for `removed` only, as in the CLI's JSON. A digest that
    * is not the plan's (cleanup_plan_changed) and a held lock (workspace_locked) are call errors, not
-   * outcomes.
+   * outcomes. U-193: its `lockLeft` (the contract's, when the store could not release the lock) is
+   * passed on as the store gives it.
    */
   readonly outcome: CleanupDoneOutcome;
 }

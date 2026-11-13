@@ -65,6 +65,7 @@ import type {
   ModelProviderName,
   PlanApplyState,
   RevertOutput,
+  RevertSummaryContext,
   RunId,
   RunListEntry,
   RunReason,
@@ -136,6 +137,15 @@ function withCode(title: string, code: string): string {
   return title.endsWith(":") ? `${title.slice(0, -1)} (${code}):` : `${title} (${code})`;
 }
 
+/**
+ * U-201 (U-176, U-193): the line after a run, an apply, a revert or a cleanup that finished but could
+ * not release the workspace lock (`lockLeft` true in its summary context or CleanupOutcome):
+ * `lock.release_failed`, which names no path (doctor's lock line names the file). Null otherwise.
+ */
+export function lockReleaseFailedLine(lockLeft: unknown, messages: MessageCatalog): string | null {
+  return lockLeft === true ? messages.format("lock.release_failed") : null;
+}
+
 function lines(out: readonly string[]): string {
   return `${out.map(finalLine).join("\n")}\n`;
 }
@@ -201,6 +211,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       return isCount(narrowing.count, 1) ? [catalog.format(`progress.workflow_policy.${narrowing.kind}`, { count: narrowing.count })] : [];
     });
   /** U-104: the summary's line of the checks drawn, when there were some and none found a change. */
+  /** U-201: lock.release_failed when a summary's context says the lock was left. */
+  const lockLines = (lockLeft: unknown): string[] => {
+    const line = lockReleaseFailedLine(lockLeft, catalog);
+    return line === null ? [] : [line];
+  };
   const integritySummary = (): string[] =>
     integrityChecks > 0 && integrityChanged === 0 ? [catalog.format("summary.integrity_unchanged", { count: integrityChecks })] : [];
 
@@ -516,6 +531,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         }
       }
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
+      // U-201: the run finished but its lock could not be released (RunSummaryContext.lockLeft).
+      out.push(...lockLines(context.lockLeft));
 
       const here = context.workspaceForm === "current";
       // DR-51 (U-38): the typed workspace in the hints, with workspaceForm "given" only.
@@ -659,7 +676,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
     // R-70 L-1 (PM): revert knows no registered values, so its hints never show a typed workspace,
     // whatever context a caller gives (RevertSummaryContext is not read): `<workspace>` always.
-    revertSummary(output: RevertOutput): string {
+    revertSummary(output: RevertOutput, context?: RevertSummaryContext): string {
       const reverted = Array.isArray(output.reverted) ? output.reverted : [];
       const skipped = Array.isArray(output.skipped) ? output.skipped : [];
       const title = output.dryRun === true ? "revert.dry_run_title" : "revert.done_title";
@@ -699,6 +716,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         const status = isOneOf(before.status, ["complete", "partial"] as const) ? before.status : null;
         if (status !== null) out.push(`${catalog.format("revert.reverted_before")} (${status}${time === null ? "" : `, ${time}`})`);
       }
+      // U-201: the revert finished but its lock could not be released (RevertSummaryContext.lockLeft).
+      out.push(...lockLines(context?.lockLeft));
       // DR-25: files skipped as unsafe_move go back on a revert with the person's consent.
       const revertedRun = toRunId(String(output.runId));
       if (output.dryRun !== true && revertedRun !== null && skipped.some((file) => file.reason === "unsafe_move")) {
@@ -907,6 +926,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         if (!kinds.includes(kind)) continue;
         out.push(kind === "plan_records_unchecked" && cause !== null ? catalog.format(`apply.notice.plan_records_unchecked.${cause}`) : catalog.format(`apply.notice.${kind}`));
       }
+      // U-201: the apply finished but its lock could not be released (ApplySummaryContext.lockLeft).
+      out.push(...lockLines(context.lockLeft));
       // DR-51 (U-38): the typed workspace in the hints, with workspaceForm "given" only.
       const workspace = givenWorkspace(context);
       out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0, workspace));

@@ -180,7 +180,8 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
     // What is still there is told already; the sweep below takes this check's own probes.
     const before = await probesIn([...dirs]);
     try {
-      const policy = createPolicyGate({ config: task.policy, workspace });
+      // U-186 (DR-69 B-4, after U-182): the apply task's writable path lists, as the apply's gate gets them.
+      const policy = createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) });
       const planActions = task.policy.planActions ?? [];
       const executor = createPlanExecutor({ workspace, workspaceRoot: workspace.root, runId: lockId, ...(operations.fileOps === undefined ? {} : { fileOps: operations.fileOps }) });
       // U-111: the engine's own preflight loop (U-105), the one applyPlan calls; never stopped here.
@@ -202,8 +203,8 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
     let released = false;
     for (let attempt = 0; attempt < 2 && !released; attempt += 1) {
       try {
-        await release({ workspaceRoot: workspace.root, runId: lockId });
-        released = true;
+        // U-193 (as V-1 L-1): the store answers false when the lock is not this check's any more; not taken back either.
+        released = (await release({ workspaceRoot: workspace.root, runId: lockId })) === true;
       } catch {
         // Tried once more, then told.
       }

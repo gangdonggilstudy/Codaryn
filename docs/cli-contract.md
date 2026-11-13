@@ -84,6 +84,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 - `limits`와 그 필드는 설정 파일이 채울 수 있으면 생략해도 된다. 설정 파일의 한도는 상한이다. task는 필드마다 그 값 이하로만 정할 수 있다(11절 "한도", S-7). 예산 한도 넷(`maxModelTurns`, `maxToolCalls`, `maxTotalTokens`, `maxDurationMs`) 중 어디에도 없는 필드가 있으면 `invalid_task`다. anthropic 제공자에서는 `maxTotalTokens: null`을 쓸 수 없다.
 - 재수정 한도 `maxRepairAttempts`(0 이상 정수)와 `maxSameFailures`(1 이상 정수)는 두 파일 모두에서 생략할 수 있고, 그때는 0과 2다(`DEFAULT_MAX_REPAIR_ATTEMPTS`, `DEFAULT_MAX_SAME_FAILURES`). 0이면 단계 1과 같이 첫 검증 실패에서 끝난다(12절).
 - `policy.protectedPaths`는 선택이다(13절).
+- `policy.writablePaths`는 선택이다(13.1절, U-182).
 - 파일 형식은 `TaskSpec`, CLI가 해석해 엔진에 넘기는 형은 `ResolvedTaskSpec`(경로는 절대 경로, 한도 여섯 개가 모두 정해짐)이다. `EngineDeps.task`는 `ResolvedTaskSpec`이다.
 - task 파일과 설정 파일은 UTF-8이며 BOM이 있어도 읽는다.
 - 검증기는 `command`(`executable`, `args`, 선택 `cwd`·`timeoutMs`·`expectExitCode`)와 `file_rules`(`exists`, `absent`, `contains`, `not_contains`, `markdown_headings`, `markdown_links`) 두 종류다. `timeoutMs`는 1~2,147,483,647ms다(S-7). 결과에는 `outcome`(pass/fail/inconclusive), `evidence`, `checked`, `limits`가 있다.
@@ -377,6 +378,13 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - env 파일이 새로 설정한 8자 이상 값은 모두 가릴 값으로 등록하므로 `postgres` 같은 흔한 값도 가려질 수 있다(S-4의 부작용).
 - 작업 디렉터리가 UNC 경로이면 모든 상대 경로가 거부된다. POSIX에서는 `/dev/` 아래만 장치 경로로 본다.
 
+알려진 한계(경로 확인과 사용 사이의 폴더 바꿔치기, DR-73):
+
+- 작업 공간 계층과 계획 실행기는 `resolve`한 실경로 문자열로 다시 연다(폴더 손잡이 기준 호출이 없음). 확인과 사용 사이의 폴더 바꿔치기는 닫지 못한다. 위의 "파일 위치 확인과 파일 읽기 사이" 한계가 쓰기, 목록, 계획 적용에도 같다.
+- 행위자는 허용된 명령의 배경 프로세스와 같은 PC의 다른 프로그램이다.
+- 닿을 수 있는 곳: 작업 공간 밖, 그리고 쓰기는 작업 공간 안의 보호 경로와 `writablePaths` 밖(게이트가 판정한 실경로와 도구가 다시 푼 실경로가 다를 수 있다). 계획 이동은 원본 쪽 폴더가 바뀌면 밖의 파일 이름을 지울 수 있다(`unlink`).
+- 근거는 코드 조사(na-core, main `21107dc`)이고 경합은 재현하지 않았다. 앱 계층의 작업 공간 글 읽기·쓰기에 남은 같은 틈은 Codex가 재현했다(V-1b, [privacy.md](privacy.md) 13절).
+
 ## 11. 설정 (1b)
 
 ### 설정 파일 (`CodarynConfig`)
@@ -577,6 +585,35 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - task 파일이나 설정 파일(간편 형식의 `policy`)만 정할 수 있다. 모델, task의 다른 필드, 작업 공간의 파일로는 풀 수 없다. 생략하거나 빈 목록이면 보호 경로가 없다.
 - 판정은 정책(`src/policy`, F2)이 한다. CLI는 검증한 값을 `task.policy`로 넘기고, 조립이 그 값으로 `createPolicyGate`를 만든다.
 
+### 13.1 쓰기 허용 경로 `writablePaths` (U-182, DR-69 B-4, B-8)
+
+- `policy.writablePaths`는 파일 도구가 쓸 수 있는 작업 공간 기준 경로 목록이다. 그 밖에 쓰면 권한 `path`, 코드 `path_not_writable`로 거부한다. 읽기와 검색은 막지 않는다.
+- **형식과 맞춤은 `protectedPaths`와 같다(13절).**
+  - 같은 `checkProtectedPaths`로 검사하고 같은 메시지를 쓴다(`policy.writablePaths[i] …`). 진단은 그 필드 자리를 말한다(`SCHEMA_FIELD_NAMES`에 `writablePaths`).
+  - 경로 조각 단위의 접두로 맞춘다. 항목은 자기와 그 아래를 덮는다.
+  - 링크를 푼 뒤의 경로로만 판정한다(U-175). Windows에서는 대소문자를 구분하지 않는다.
+  - 허용 목록이므로 쓸 수 없는 항목은 아무것도 덮지 않는다(fail closed).
+- **생략과 빈 목록:** 생략하면 제한이 없다. 빈 목록 `[]`이면 파일 도구는 아무것도 쓰지 못한다.
+- **둘 수 있는 곳:** task 파일, 설정 파일, 프로필, 설정 파일의 작업 종류 정의. 넷 모두 `policy` 안이다.
+- **좁히기만 한다.** 목록을 둔 원천마다 목록 하나가 된다(`ResolvedTaskSpec.writablePathSets`, `WRITABLE_PATH_SOURCES` 순서: config, profile, definition, task). 쓰기는 모든 목록이 덮어야 한다.
+  - 목록은 하나로 합치지 않는다. `mergeWorkflowPolicy`도 합치지 않는다. 링크를 풀면 글자로 만든 교집합이 원래 목록보다 넓어질 수 있기 때문이다.
+  - 설정 파일 자신의 목록과 프로필의 목록은 task 파일로 실행할 때도 걸린다. task 파일이면 그 자신의 정책만 쓰는 다른 필드(18.1.1)와 다르다. task 파일은 설정을 좁힐 수 있지만 넓힐 수 없다.
+  - 프로필의 `policy`가 설정의 `policy`를 대신해도, 설정 파일 자신의 목록은 따로 남는다.
+  - 간편 형식에는 task 목록이 없다. 그 정책은 설정이나 프로필의 것이다.
+  - 아무 원천도 목록을 두지 않으면 `writablePathSets`가 없고, 실행은 이전과 같다.
+- **거는 곳:** 실행의 게이트(`assembleRun`)와 적용의 게이트(`runApply`, DR-5대로 적용 task의 목록).
+  - 그래서 파일 도구의 쓰기뿐 아니라 계획 실행이 제안한 계획 동작과 적용의 동작도 판정한다.
+  - 적용 전 점검이 막은 동작은 `plan_checked`의 `denied`이고, 적용은 아무것도 옮기지 않고 `failed`/`plan_stale`로 끝난다.
+- 보호 경로와 다른 거부는 그 위에서 여전히 막는다. 보호 경로가 먼저 보고된다.
+- **명령은 묶지 않는다(B-8).** 허용한 명령은 이 목록과 상관없이 쓸 수 있는 곳에 쓴다.
+  - doctor의 `commands` 점검은 목록과 명령 규칙이 함께 있으면 `warn`이다. 문구는 `doctor.commands.writable_with_commands`이고 `count`는 명령 규칙 수다.
+  - 그 점검이 다른 경고나 문제를 말하면 그 글을 두고 이 문구를 `notes`에 붙인다. 명령 검증기는 세지 않는다.
+- **사람과 모델에게 알리는 것**
+  - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
+  - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
+- **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
+- **계획 run:** `plan: "run"`은 B-4 전까지 거부된다(18.1, U-177). 승인된 계획의 파일 목록(`plan` 원천)은 B-3이 더한다.
+
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 
 ### 스냅샷 (`ChangeRecorder`)
@@ -763,6 +800,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `init`: 터미널이고 키가 없으면 `init.next` 뒤에 `first_use.try_without_key`.
 - `run`의 오류: stderr가 터미널이고 `provider_not_configured`이면 오류 설명 끝에 `first_use.try_without_key`.
 - 설정 파일이 아예 없을 때(`--config`도 `CODARYN_CONFIG`도 없고 기본 위치에 파일이 없음) 간편 형식·한 줄 실행의 설정 오류(`invalid_config`)는 힌트 `config_missing`(U-37 방식, `CLI_ERROR_HINTS`)을 단다. 사람용 줄은 `error.hint.config_missing`(설정 파일이 아직 없다, `codaryn init`으로 만든다)이다. 이것만은 터미널 여부와 상관없다. 오류 JSON에 `hint` 값이 하나 더 생길 뿐 `message`·`diagnostic`·`code`·종료 코드는 그대로다. `--config`로 준 파일이나 기본 위치의 파일이 있으면, 기본 위치가 아예 없으면 힌트가 없다.
+  - U-190(AXM-21): 이 힌트가 있을 때 사람용 오류의 진단 줄은 `invalid_value`("값이 올바르지 않습니다")가 아니라 `missing_field`("필드가 없습니다")로 보인다. 그래서 힌트 줄(설정 파일이 아직 없다)과 어긋나지 않는다. CLI가 렌더러에 넘기는 사본만 그렇고(`src/cli/error-text.ts`), JSON의 `diagnostic.code`는 `invalid_value` 그대로다(DR-48).
+  - 첫 줄(`error.invalid_config.what`, "설정 파일을 읽을 수 없거나 값이 올바르지 않습니다")은 코드로만 고르는 글이라 그대로다.
 - 시험: `tests/unit/cli/g-u115-first-use.test.ts`(렌더러와 실행, 터미널이 아니면 그대로), `tests/unit/cli/g-u115-terminal.test.ts`(실제 CLI, `u115-terminal-preload`로 흐름을 터미널로 보임), `tests/unit/cli/g-u132-first-use-r91.test.ts`(R-91의 넷).
 
 ### init이 제공자를 묻는다 (U-26, UXM-11, DR-46)
@@ -1004,6 +1043,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
     - 주인이 끝난 reclaim 파일과, 온전하지만 이해할 수 없는 reclaim 파일은 다음 실행이 지우므로 `lock.json`의 판정을 따른다(store 규칙).
     - `lock.remove_hint` 문구도 reclaim 파일을 가리킨다(N-B 문구).
 - **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 문구는 `doctor.commands.extra_args_with_plan`이다.
+- **doctor `commands` 점검(U-182, B-8)**: 쓰기 허용 목록(`writablePaths`, 13.1)과 명령 규칙이 함께 있으면 `warn`이다(`doctor.commands.writable_with_commands`). 앞의 경고나 다른 문제가 있으면 그 글을 두고 이 문구를 `notes`에, 메시지 뒤에 붙인다.
 
 ### 17.7 오류 코드 추가
 
@@ -1056,6 +1096,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 작업 종류 정의가 적용되면(간편 형식의 `--workflow`나 프로필의 `workflowRef`, task 파일의 `workflowRef`) 주어진 정책을 정의의 정책과 합친다(`mergeWorkflowPolicy`). 정의의 규칙은 그 작업 종류의 안전 규칙이라, 어떤 정책도 그것을 풀지 못한다.
   - 주어진 정책: 간편 형식은 프로필의 정책, 없으면 설정의 정책. task 파일은 그 자신의 정책.
   - 보호 경로는 합집합이다. 명령은 양쪽이 모두 허용한 명령 줄만 남는다. 계획 동작은 주어진 정책이 말하면 양쪽이 모두 가진 것만 남고, 말하지 않으면 정의의 것 그대로다. `restorePathTokens`는 둘 다 허용할 때만 참이다.
+  - 쓰기 허용 경로(`writablePaths`)는 여기서 합치지 않는다. 설정, 프로필, 정의, task 파일의 목록이 각각 따로 남고 쓰기는 모두가 덮어야 한다(13.1, U-182). 설정과 프로필의 목록은 task 파일 실행에도 걸린다.
   - 정의가 명령을 허용하지 않을 때(`organize`): task 파일 자신의 명령 규칙은 먼저 `invalid_task`로 거부한다(GT-D10, 합치기 전에 센다). 프로필·설정의 규칙은 빠진다.
   - 정의가 없는 task 파일은 자기 정책을 그대로 쓴다.
 - 검증기도 같다(DR-43 (a), R-31 L-2). 주어진 검증기는 정의의 검증기를 대체하지 않고 더해진다(`mergeWorkflowVerifiers`).
@@ -1202,6 +1243,7 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 - `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`
 - `plan_secrets_differ`(DR-28, 18.3): 지금 가릴 값이 계획 실행과 다르게 가린다. 계획을 읽은 직후에 확인한다.
 - `plan_run_missing`(R-9c C-1): 계획 실행이 `plan_pending`으로 끝났는데 `plan.json`이 없다(`plan`, `apply`). 적용 실행의 되돌리기에서는 그 계획 실행이나 계획이 사라졌다(14절).
+  - 사람용 두 줄(`error.plan_run_missing.what`·`.fix`)은 렌더러가 코드로만 고르므로, 두 경우에 모두 맞는 글이다(U-190, AXM-21). 무엇이 일어났나는 적용을 말하지 않는다. 고치는 법은 계획을 보거나 적용하려면 `codaryn run`으로 다시 만들고, 적용을 되돌리려면 그 계획 실행을 남기거나 되살리라고 한다.
 - 뜻은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES` 주석과 위 절을 따른다.
 
 ### 18.9 아직 없는 것

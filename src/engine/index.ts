@@ -362,8 +362,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   let lastFinal: MaskedText | null = null;
   /** U-55 (AXM-9): the model error that ended the run (EngineResult.modelError); null otherwise. */
   let endingModelError: RunModelError | null = null;
-  const endedByModelError = (kind: ModelErrorKind, turn: number, httpStatus?: number): End => {
-    const retryable = modelErrorRetryable(kind, httpStatus);
+  // U-82 (DR-68): `verdict` is the outcome's own retryable, which comes first.
+  const endedByModelError = (kind: ModelErrorKind, turn: number, httpStatus?: number, verdict?: boolean): End => {
+    const retryable = modelErrorRetryable(kind, httpStatus, verdict);
     endingModelError = retryable === undefined ? { kind, turn } : { kind, turn, retryable };
     return { status: "failed", reason: "model_error" };
   };
@@ -1103,7 +1104,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         if (message !== null) {
           await record({ type: "model_error", turn, kind: outcome.kind, message });
         }
-        return endedByModelError(outcome.kind, turn, outcome.httpStatus);
+        return endedByModelError(outcome.kind, turn, outcome.httpStatus, outcome.retryable);
       }
 
       const response = outcome.response;

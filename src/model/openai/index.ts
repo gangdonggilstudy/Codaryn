@@ -259,12 +259,14 @@ function parseUsage(value: unknown): ModelUsage | null {
   return { inputTokens: input_tokens, outputTokens: output_tokens };
 }
 
+// U-82: a malformed reply and a refusal come back the same when asked again. A response the provider
+// says failed, was cancelled or is incomplete for another reason has no verdict (unknown).
 function malformed(message: string): Failure {
-  return { ok: false, kind: "malformed_response", message: `malformed response: ${message}` };
+  return { ok: false, kind: "malformed_response", message: `malformed response: ${message}`, retryable: false };
 }
 
 function declined(why: string): Failure {
-  return { ok: false, kind: "api_error", message: `the model declined the request (${why})` };
+  return { ok: false, kind: "api_error", message: `the model declined the request (${why})`, retryable: false };
 }
 
 const quoted = (value: string): string => JSON.stringify(value.slice(0, 40));
@@ -444,11 +446,13 @@ export const createOpenAIProvider: CreateApiProvider = (settings: ResolvedApiSet
   /** The responses returned so far, in order (memory only; dropped with this object). */
   const kept: KeptResponse[] = [];
 
-  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number): Failure => ({
+  // U-82 (DR-68): `retryable` is the transport's verdict for what was sent, or the adapter's own.
+  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number, retryable?: boolean): Failure => ({
     ok: false,
     kind,
     message: redact(message),
     ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(retryable === undefined ? {} : { retryable }),
   });
   const aborted = (when: string): Failure => fail("aborted", `cancelled ${when}`);
 
@@ -456,15 +460,15 @@ export const createOpenAIProvider: CreateApiProvider = (settings: ResolvedApiSet
     if (signal.aborted) return aborted("before the request was sent");
     if (!keyUsable) {
       // No position, length or character code: any of them would describe the key.
-      return fail("not_configured", UNUSABLE_KEY_MESSAGE);
+      return fail("not_configured", UNUSABLE_KEY_MESSAGE, undefined, false);
     }
     const built = buildBody(settings, request, kept);
-    if (typeof built === "string") return fail("api_error", `request not sent: ${built}`);
+    if (typeof built === "string") return fail("api_error", `request not sent: ${built}`, undefined, false);
 
     const sent = await sendWithRetries(transport, { method: "POST", url, body: built.body }, signal);
-    if (!sent.ok) return fail(sent.kind, sent.message, sent.httpStatus);
+    if (!sent.ok) return fail(sent.kind, sent.message, sent.httpStatus, sent.retryable);
     const parsed = parseResponseBody(sent.text);
-    if (!parsed.ok) return fail(parsed.kind, parsed.message);
+    if (!parsed.ok) return fail(parsed.kind, parsed.message, undefined, parsed.retryable);
     if (parsed.kept !== null) kept.push(parsed.kept);
     return { ok: true, response: parsed.response };
   }
@@ -543,11 +547,12 @@ export const listOpenAIModels: ListModels = async (
 ): Promise<ListModelsOutcome> => {
   const apiKey = typeof settings?.apiKey === "string" ? settings.apiKey : "";
   const redact = createRedactor(apiKey, KEY_SHAPES);
-  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number): ListModelsOutcome => ({
+  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number, retryable?: boolean): ListModelsOutcome => ({
     ok: false,
     kind,
     message: redact(message),
     ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(retryable === undefined ? {} : { retryable }),
   });
 
   try {
@@ -557,16 +562,16 @@ export const listOpenAIModels: ListModels = async (
     } catch (error) {
       // The checks throw fixed text only; anything else is not quoted.
       const reason = error instanceof TypeError ? error.message.replace(/^openai provider: /, "") : "invalid settings";
-      return fail("not_configured", `model listing not started: ${reason}; nothing was sent`);
+      return fail("not_configured", `model listing not started: ${reason}; nothing was sent`, undefined, false);
     }
     if (signal.aborted) return fail("aborted", "cancelled before the request was sent");
-    if (!isUsableApiKey(apiKey)) return fail("not_configured", UNUSABLE_KEY_MESSAGE);
+    if (!isUsableApiKey(apiKey)) return fail("not_configured", UNUSABLE_KEY_MESSAGE, undefined, false);
 
     const transport = transportFor(apiKey, settings, deps, false);
     const sent = await sendWithRetries(transport, { method: "GET", url: `${base}${OPENAI_MODELS_PATH}` }, signal);
-    if (!sent.ok) return fail(sent.kind, sent.message, sent.httpStatus);
+    if (!sent.ok) return fail(sent.kind, sent.message, sent.httpStatus, sent.retryable);
     const parsed = parseModelList(sent.text, createKeyMaterialCheck(apiKey, KEY_SHAPES));
-    if (!parsed.ok) return fail("malformed_response", `malformed response: ${parsed.message}`);
+    if (!parsed.ok) return fail("malformed_response", `malformed response: ${parsed.message}`, undefined, false);
     return { ok: true, models: parsed.models };
   } catch {
     if (signal.aborted) return fail("aborted", "cancelled during the request");

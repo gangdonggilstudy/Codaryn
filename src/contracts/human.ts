@@ -1208,6 +1208,7 @@ export const FIXED_MESSAGES = {
   // contract (U-219), the words for nb-i18n to confirm.
   // U-201: the run, apply and revert summaries say it when their context's `lockLeft` is true
   // (RunSummaryContext, ApplySummaryContext, RevertSummaryContext), right before their next commands.
+  // U-257: and a confirmed cleanup's text (CleanupOutcome.lockLeft), as its last line.
   "lock.release_failed": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 

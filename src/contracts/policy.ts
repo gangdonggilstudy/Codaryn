@@ -111,7 +111,9 @@ export type ConfirmationBy = (typeof CONFIRMATION_BY)[number];
 /**
  * U-74: EngineDeps.confirm, as the app layer's RunObserver.confirm. `signal` aborts when the run is
  * cancelled or its time is up; the engine treats a throw or an answer that is not one of
- * CONFIRM_ANSWER_DECISIONS as `dismissed`.
+ * CONFIRM_ANSWER_DECISIONS as `dismissed`. U-106 (R-79 L-3): the engine reads the answer's
+ * `decision` once, right after it came, and only as an own property: a read that throws or a
+ * `decision` on the prototype is `dismissed` too.
  */
 export type ConfirmPermission = (request: ConfirmRequest, signal: AbortSignal) => Promise<ConfirmAnswer>;
 

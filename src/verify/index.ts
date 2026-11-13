@@ -1,6 +1,7 @@
 /**
- * Verifier runner: `command` (exit code), `file_rules` (literal file checks) and, from G-D,
- * `data_checks` (VF-04, `./data-checks.ts`, tables read with `src/tabular`).
+ * Verifier runner: `command` (exit code), `file_rules` (literal file checks, and from U-116 the
+ * Markdown rules of `./markdown.ts`) and, from G-D, `data_checks` (VF-04, `./data-checks.ts`,
+ * tables read with `src/tabular`).
  * Nothing here uses Git. Every path goes through `Workspace.resolve`.
  *
  * Also exports `createIntegrityChecker` (U-1, K2, `./integrity.ts`): the SHA-256 list of protected
@@ -10,11 +11,12 @@
 
 import { stat } from "node:fs/promises";
 
-import { DEFAULT_COMMAND_TIMEOUT_MS, MAX_COMMAND_OUTPUT_BYTES } from "../contracts/index.js";
+import { DEFAULT_COMMAND_TIMEOUT_MS, MARKDOWN_RULE_LIMITS, MARKDOWN_RULE_TYPES, MAX_COMMAND_OUTPUT_BYTES, markdownRuleLabel } from "../contracts/index.js";
 import type {
   CommandVerifierConfig,
   FileRule,
   FileRulesVerifierConfig,
+  MarkdownFileRule,
   RawVerifierResult,
   RunCommandPayload,
   VerifierConfig,
@@ -23,6 +25,7 @@ import type {
   Workspace,
 } from "../contracts/index.js";
 import { runDataChecksVerifier } from "./data-checks.js";
+import { checkMarkdownHeadings, checkMarkdownLinks } from "./markdown.js";
 import { createRawVerifierResult } from "./result.js";
 
 export { createIntegrityChecker } from "./integrity.js";
@@ -164,10 +167,19 @@ function describeRule(rule: FileRule): string {
       return `"${rule.path}" contains the literal text ${describeText(rule.text)}`;
     case "not_contains":
       return `"${rule.path}" does not contain the literal text ${describeText(rule.text)}`;
+    case "markdown_headings":
+    case "markdown_links":
+      // U-116: the contract's label (the headings listed, as the evidence lists them).
+      return markdownRuleLabel(rule);
   }
 }
 
+const isMarkdownRule = (rule: FileRule): rule is MarkdownFileRule => (MARKDOWN_RULE_TYPES as readonly string[]).includes(rule.type);
+
 async function checkRule(rule: FileRule, workspace: Workspace): Promise<RuleVerdict> {
+  // U-116: the Markdown rules read their file themselves (up to MAX_MARKDOWN_RULE_FILE_BYTES).
+  if (rule.type === "markdown_headings") return checkMarkdownHeadings(rule, workspace);
+  if (rule.type === "markdown_links") return checkMarkdownLinks(rule, workspace);
   const resolved = await workspace.resolve(rule.path, "read");
   if (!resolved.ok) return { state: "undecided", note: `path rejected (${resolved.code})` };
 
@@ -244,6 +256,7 @@ async function runFileRulesVerifier(
   if (rules.some((rule) => rule.type === "contains" || rule.type === "not_contains")) {
     limits.push("text rules are literal substring matches; structure, meaning and link targets are not checked");
   }
+  if (rules.some(isMarkdownRule)) limits.push(...MARKDOWN_RULE_LIMITS);
   return createRawVerifierResult({
     id: config.id,
     kind: "file_rules",

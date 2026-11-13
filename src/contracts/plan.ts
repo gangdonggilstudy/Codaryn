@@ -458,6 +458,14 @@ export interface PlanExecutor {
     signal: AbortSignal,
     options?: { readonly allowUnsafeMove: boolean },
   ): Promise<PlanItemOutcome>;
+  /**
+   * U-105 (app layer U-91): how many hard link probes this executor made (`check`, DR-21) and
+   * could not take back: the removal failed, and not because the probe was already gone. Such a
+   * probe is a second name of a source file, in the state directory or next to the source. A count
+   * only, never a name (a name holds a path). Changes nothing. Optional for other executors (test
+   * doubles); tools' `createPlanExecutor` always gives it.
+   */
+  probesLeft?(): number;
 }
 
 export interface PlanExecutorOptions {
@@ -551,6 +559,26 @@ export type ApplyJournalEvent =
 export type ApplyJournalEventType = ApplyJournalEvent["type"];
 
 /**
+ * U-105 (app layer U-90): every ApplyJournalEventType at run time, as JOURNAL_EVENT_TYPES is for
+ * runs. The table names each type once; `satisfies` makes a type added to ApplyJournalEvent fail to
+ * compile until it is listed here. Order: as in ApplyJournalEvent.
+ */
+const APPLY_JOURNAL_EVENT_TYPE_TABLE = {
+  apply_started: true,
+  plan_checked: true,
+  file_moved: true,
+  file_discarded: true,
+  plan_item_failed: true,
+  verifier_result: true,
+  integrity_checked: true,
+  state_checked: true,
+  run_finished: true,
+} as const satisfies Record<ApplyJournalEventType, true>;
+
+/** U-105: the record types an apply journal shows (ApplyJournalEventType), in ApplyJournalEvent's order. */
+export const APPLY_JOURNAL_EVENT_TYPES: readonly ApplyJournalEventType[] = Object.keys(APPLY_JOURNAL_EVENT_TYPE_TABLE) as ApplyJournalEventType[];
+
+/**
  * R-9 I-4: written right before the executor carries out action `index`, after the checks for a
  * cancel and the duration. An action is done first and recorded (`file_moved`, `file_discarded`)
  * after, so a journal that ends between the two (the process stopped) still names the action, and
@@ -568,6 +596,20 @@ export interface PlanItemStartedEvent {
 
 /** What an apply run appends to its journal: the shown records plus the start records. */
 export type ApplyJournalEntry = ApplyJournalEvent | PlanItemStartedEvent;
+
+export type ApplyJournalEntryType = ApplyJournalEntry["type"];
+
+/** U-105: the shown types and the start record; `satisfies` as for APPLY_JOURNAL_EVENT_TYPES. */
+const APPLY_JOURNAL_ENTRY_TYPE_TABLE = {
+  ...APPLY_JOURNAL_EVENT_TYPE_TABLE,
+  plan_item_started: true,
+} as const satisfies Record<ApplyJournalEntryType, true>;
+
+/**
+ * U-105: every type a stored line of an apply journal may have: APPLY_JOURNAL_EVENT_TYPES, then
+ * `plan_item_started` (R-9 I-4), which readers count but do not show.
+ */
+export const APPLY_JOURNAL_ENTRY_TYPES: readonly ApplyJournalEntryType[] = Object.keys(APPLY_JOURNAL_ENTRY_TYPE_TABLE) as ApplyJournalEntryType[];
 
 /**
  * A stored line of an apply journal: the event plus the fields every journal adds. Lines of
@@ -807,6 +849,55 @@ export type PlanRecordsUncheckedCause = (typeof PLAN_RECORDS_UNCHECKED_CAUSES)[n
 
 /** Signature of `applyPlan`, exported by `src/engine/index.ts` (G-B). */
 export type ApplyPlan = (deps: ApplyDeps) => Promise<ApplyResult>;
+
+/**
+ * U-105 (app layer U-91, gap survey GUI 3.9): what `preflightPlan` judges, the apply preflight's
+ * judgement of each action as `applyPlan` makes it (ApplyDeps step 2, after the inventory).
+ */
+export interface PlanPreflightDeps {
+  /** The stored plan's actions, in plan order. */
+  readonly actions: readonly ResolvedPlanAction[];
+  /** As ApplyDeps.planActions: the apply task's `policy.planActions` (absent: empty). */
+  readonly planActions: readonly PlanActionKind[];
+  /** As ApplyDeps.policy: created from the apply task's policy (DR-5). */
+  readonly policy: PolicyGate;
+  /** Only `check` is called. */
+  readonly executor: Pick<PlanExecutor, "check">;
+  /**
+   * Asked before each action. True stops the preflight there, with no further action judged
+   * (`applyPlan` passes its cancel and duration limit). Absent: never stops.
+   */
+  readonly stop?: () => boolean;
+}
+
+/** What `preflightPlan` found: the parts of `plan_checked` it judges, or a stop. */
+export type PlanPreflightOutcome =
+  | {
+      readonly stopped: false;
+      /** As `plan_checked.problems`: actions that cannot be applied, in plan order. */
+      readonly problems: readonly { readonly index: number; readonly problem: PlanItemProblem }[];
+      /** As `plan_checked.unsafeMoves`: actions that need the person's consent (DR-21), in plan order. */
+      readonly unsafeMoves: readonly number[];
+    }
+  | { readonly stopped: true };
+
+/**
+ * Signature of `preflightPlan`, exported by `src/engine/index.ts` (U-105). It is the apply's own
+ * preflight loop, which `applyPlan` calls, so a caller that checks a plan before applying it (the
+ * app layer's checkApply) does not judge again. Each action, in plan order:
+ * 1. its kind must be in `planActions`, else `denied`;
+ * 2. the policy gate before and after (PLAN_ACTION_DESCRIPTORS, call id `action-<index>`, the
+ *    action's path fields; the paths are already effective); a denial or a gate that throws is
+ *    `denied`, and the executor is not asked;
+ * 3. `executor.check`; one that throws is `io_error`. `unsafe_move` goes to `unsafeMoves`, any
+ *    other problem to `problems`.
+ * Nothing is moved, recorded or claimed. The executor's hard link probe is made and taken back as
+ * in the apply; `PlanExecutor.probesLeft` tells one it could not take back.
+ * Not in it, because the caller has them: the DR-28 masking comparison, the inventory (DR-6), the
+ * lock, the records checks and the consent. The apply has them around this loop; the app layer
+ * has them from the plan view and its own lock.
+ */
+export type PreflightPlan = (deps: PlanPreflightDeps) => Promise<PlanPreflightOutcome>;
 
 /**
  * `codaryn plan (--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <file>]

@@ -75,7 +75,10 @@ function itemFailure(problem: PlanItemProblem): PlanItemOutcome {
   return { ok: false, problem };
 }
 
-export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
+/** U-105: tools' executor always tells the probes it left (PlanExecutor.probesLeft). */
+export type CountingPlanExecutor = PlanExecutor & { probesLeft(): number };
+
+export function createPlanExecutor(deps: PlanExecutorDeps): CountingPlanExecutor {
   const { workspace, runId } = deps;
   if (deps.workspaceRoot !== workspace.root) {
     throw new Error("plan executor: workspaceRoot must be the workspace's real root");
@@ -92,12 +95,15 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
 
   /** PQ-6: hard link support, probed once per volume (device id) of the sources. */
   const linkSupport = new Map<bigint, "supported" | "unsupported">();
+  /** U-105: probes made and not taken back (probeHardLink's `onLeft`). */
+  let probesLeft = 0;
 
   /**
    * PQ-6, DR-18 (b): tells the preflight before any action whether moves are possible on the
    * source's volume. The probe goes into the state directory when it is on the same volume (no
    * name appears among the person's files), else next to the source, and is taken back at once.
    * A definite answer is kept for the volume; "unknown" is not, so the apply decides per move.
+   * U-105: a probe that cannot be taken back is counted (`probesLeft`); the answer is unchanged.
    */
   async function hardLinkProblem(sourceAbsolute: string, identity: FileIdentity): Promise<PlanItemProblem | null> {
     const known = linkSupport.get(identity.dev);
@@ -109,7 +115,9 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
     } catch {
       // No state directory: probe next to the source.
     }
-    const probed = await probeHardLink(sourceAbsolute, dir, ops);
+    const probed = await probeHardLink(sourceAbsolute, dir, ops, () => {
+      probesLeft += 1;
+    });
     if (probed === "unknown") return null;
     linkSupport.set(identity.dev, probed);
     return probed === "unsupported" ? HARD_LINK_UNAVAILABLE_PROBLEM : null;
@@ -229,6 +237,10 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
       } catch {
         return itemFailure("io_error");
       }
+    },
+
+    probesLeft() {
+      return probesLeft;
     },
   };
 }

@@ -127,6 +127,7 @@ import type { ArgsProblem } from "./validate-args.js";
 
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
 export { APPLY_FIXED_TEXTS, applyPlan } from "./apply.js";
+export { preflightPlan } from "./preflight.js";
 export { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
 export {
   EVIDENCE_CAPTURE_NOTE,

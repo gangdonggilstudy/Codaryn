@@ -330,9 +330,46 @@ export const BUILTIN_TOOLS: { readonly [N in ToolName]: ToolDescriptor & { reado
  */
 export interface ToolDefinition {
   readonly description: string;
-  /** JSON Schema of the args object. It mirrors the engine's shape validation. */
+  /**
+   * JSON Schema of the args object. It mirrors the engine's shape validation. U-143 (SP-U10): it
+   * uses only TOOL_SCHEMA_KEYWORDS, the part of JSON Schema both providers are given.
+   */
   readonly inputSchema: JsonObject;
 }
+
+/**
+ * U-143 (SP-U10, second-provider.md 4.9): the JSON Schema keywords a tool's `inputSchema` may use,
+ * the subset both providers receive. Every adapter sends the schema as it is (Anthropic
+ * `input_schema`, OpenAI `parameters` with `strict: false`, SP-D6), so a tool definition that keeps
+ * to this subset means the same to both. Within it:
+ * - `type` is one JSON type name, or a name and "null" (`["string", "null"]`);
+ * - `additionalProperties` is `false` only;
+ * - every name in `required` is a key of the same object's `properties`.
+ * Tool names keep to TOOL_NAME_PATTERN_SOURCE. Whether OpenAI accepts each keyword in strict mode
+ * is not relied on: strict is off (C-7 was not checked against the real API).
+ */
+export const TOOL_SCHEMA_KEYWORDS = [
+  "type",
+  "properties",
+  "required",
+  "items",
+  "enum",
+  "const",
+  "anyOf",
+  "pattern",
+  "minLength",
+  "maxLength",
+  "minimum",
+  "maximum",
+  "minItems",
+  "maxItems",
+  "additionalProperties",
+  "description",
+] as const;
+export type ToolSchemaKeyword = (typeof TOOL_SCHEMA_KEYWORDS)[number];
+
+/** U-143 (SP-U10): a tool name both providers accept as a function name. */
+export const TOOL_NAME_PATTERN_SOURCE = "^[a-zA-Z0-9_-]{1,64}$";
 
 const PATH_PROPERTY: JsonObject = {
   type: "string",

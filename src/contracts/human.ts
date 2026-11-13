@@ -493,6 +493,9 @@ export const FIXED_MESSAGES = {
   "summary.denied_not_planned": { count: "count" },
   "summary.denied_not_planned_hint": {},
   "summary.denied_not_writable": { count: "count" },
+  // U-221 (nd-docs): no longer written by runSummary. The CLI writes the same advice in its progress
+  // line (progress.not_writable_hint) right before the end summary whenever deniedNotWritable is
+  // above 0, so the summary keeps the count only and the advice is said once.
   "summary.denied_not_writable_hint": {},
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
@@ -537,6 +540,9 @@ export const FIXED_MESSAGES = {
   // DR-51 (U-38): `summary.form.given` with the typed workspace, when the context has `workspaceShown`.
   "summary.form.typed": { workspace: "workspace" },
   "summary.plan_ready": { actions: "count" },
+  // U-221 (ne-verify's U-217 F-1; draft for nb-i18n): summary.plan_ready for a run plan
+  // (EngineResult.plan.kind "changes"): `{count}` the files to write, as plan.changes.heading says it.
+  "summary.plan_ready_changes": { count: "count" },
   "summary.next_plan": { form: "text", runId: "runId" },
   "summary.next_apply": { form: "text", runId: "runId" },
   "summary.review_checklist": { count: "count" },
@@ -605,6 +611,11 @@ export const FIXED_MESSAGES = {
   "plan.changes.summary_label": {},
   "plan.changes.next_apply": { runId: "runId" },
   "plan.changes.digest_guarantee": {},
+  // U-221 (drafts for nb-i18n): a run plan carried out is named as the report names it ("carried out
+  // by run …"), in place of plan.status.applied in plan.changes.heading and of plan.applied_by. The
+  // JSON keeps `status: "applied"` and `appliedBy`.
+  "plan.changes.status_carried_out": {},
+  "plan.changes.carried_by": { runId: "runId" },
   "apply.question": {},
   // U-198 (DR-69 B-3, B-8; the ids confirmed by the contract, U-219; the words are drafts for
   // nb-i18n): apply's terminal question for a `run` plan, after its plan view (renderChangesPlan):
@@ -816,6 +827,15 @@ export const FIXED_MESSAGES = {
   "runs.plan_applying": { runId: "runId" },
   "runs.plan_apply_reverted": { runId: "runId" },
   "runs.plan_apply_missing": { runId: "runId" },
+  // U-221 (drafts for nb-i18n): the same states for a run plan, whose applier in the list is a run
+  // that carried it out (an entry with planRunId whose kind is not "apply"), in the report's words:
+  // carried out by `{runId}` (done), carried out and ended as `{reason}` (no_verifier: its work done
+  // without checks), being carried out or stopped without a result, carried out then reverted.
+  // Without the applier in the list the plan's kind is not known, and runs.plan_apply_missing stays.
+  "runs.plan_carried_out": { runId: "runId" },
+  "runs.plan_carried_ended": { runId: "runId", reason: "reason" },
+  "runs.plan_carrying": { runId: "runId" },
+  "runs.plan_carried_reverted": { runId: "runId" },
   // U-129 (1), PM: an apply run's changes cell (RunListEntry.changes, its applied actions) says they
   // are actions, not files: `runs.apply_action_one` when there is one, else `runs.apply_actions`
   // (English "1 action", "{count} actions"; Korean "동작 {count}"). The JSON keeps the number.
@@ -1377,8 +1397,9 @@ export interface RunSummaryContext {
    *   rarely, a planned file whose path now leads elsewhere); `summary.denied_not_planned`, then
    *   `summary.denied_not_planned_hint` (make a new plan that names the file);
    * - deniedNotWritable: every one in any other run: a list of the settings (config file, profile,
-   *   task type, task file) does not cover the write; `summary.denied_not_writable`, then
-   *   `summary.denied_not_writable_hint` (add the file to every writablePaths list).
+   *   task type, task file) does not cover the write; `summary.denied_not_writable`. U-221: without
+   *   `summary.denied_not_writable_hint` (kept in the catalogs), since the CLI's progress line
+   *   (progress.not_writable_hint) gives that advice right before the summary.
    * `tool_decision` names only the code, so the kind of run tells them apart, never which list
    * refused; in one run at most one of the two is above 0. Among deniedToolCalls; right after
    * `summary.denied`, the plan's first. Optional: absent counts as 0, no line.

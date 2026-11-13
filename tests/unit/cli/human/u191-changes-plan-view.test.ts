@@ -159,8 +159,9 @@ describe("U-191: renderChangesPlan", () => {
     const at = "2026-11-13T13:00:05.000Z";
     const applied: ChangesPlanOutput = { ...output(loaded), status: "applied", appliedBy: { runId: CARRY_RUN, at } };
     const lines = renderChangesPlan(applied, null, en).trimEnd().split("\n");
-    assert.equal(lines[0], `Plan of run ${PLAN_RUN}: 2 file(s) to write, applied`);
-    assert.equal(lines.at(-2), `Applied by run ${CARRY_RUN} (${formatLocalTime(Date.parse(at))})`);
+    // U-221: in the report's words (it read "applied" and "Applied by run" before); the JSON keeps status applied.
+    assert.equal(lines[0], `Plan of run ${PLAN_RUN}: 2 file(s) to write, carried out`);
+    assert.equal(lines.at(-2), `Carried out by run ${CARRY_RUN} (${formatLocalTime(Date.parse(at))})`);
     assert.ok(!lines.some((line) => line.startsWith("To have a run")));
     const marked = renderChangesPlan({ ...output(loaded), recordsChanged: true }, null, en).trimEnd().split("\n");
     assert.equal(marked[0], en.format("plan.records_changed"));

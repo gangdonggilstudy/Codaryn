@@ -111,12 +111,13 @@ function runIdOf(value: string): RunId {
 /**
  * The text of a `run` plan's view, in the shape of renderPlan's:
  * - plan.records_changed first when the plan run has a records-changed mark;
- * - plan.changes.heading (the number of files, plan.status.<status>), plan.digest_label and the digest;
+ * - plan.changes.heading (the number of files, plan.status.<status>; U-221: plan.changes.status_carried_out
+ *   once carried out, as the report and the run list name it), plan.digest_label and the digest;
  * - one line per file: its number, plan.change.<change> padded to the widest change word in terminal
  *   columns and two more, and its masked path, cleaned and with key shapes hidden;
  * - plan.changes.summary_label and the summary as the model's words (quoteModelText). Every row is
  *   shown: the summary is part of what a person approves (R-99 L-1);
- * - plan.applied_by with the local time once carried out; else plan.cannot_apply when marked; else
+ * - plan.changes.carried_by (U-221) with the local time once carried out; else plan.cannot_apply when marked; else
  *   plan.changes.next_apply and the digest's first MIN_PLAN_DIGEST_PREFIX characters;
  * - plan.changes.digest_guarantee last.
  * `messages`: English when not given.
@@ -132,7 +133,11 @@ export function renderChangesPlan(output: ChangesPlanOutput, currentKey: KnownKe
   const width = Math.max(...PLANNED_FILE_CHANGES.map((change) => displayWidth(words[change]))) + 2;
   const lines: string[] = [
     ...(marked ? [messages.format("plan.records_changed")] : []),
-    messages.format("plan.changes.heading", { runId, count: output.files.length, status: messages.format(`plan.status.${output.status}`) }),
+    messages.format("plan.changes.heading", {
+      runId,
+      count: output.files.length,
+      status: output.status === "applied" ? messages.format("plan.changes.status_carried_out") : messages.format(`plan.status.${output.status}`),
+    }),
     // The digest is an item after its label (G-A: no message takes a digest).
     `${messages.format("plan.digest_label")}: ${output.digest}`,
     ...output.files.map((file, index) => `  ${index + 1}. ${words[file.change]}${" ".repeat(width - displayWidth(words[file.change]))}${shown(file.path)}`),
@@ -143,7 +148,7 @@ export function renderChangesPlan(output: ChangesPlanOutput, currentKey: KnownKe
   if (appliedBy !== null) {
     // UXM-23, as renderPlan: the local wall time, left out when it is not a run timestamp.
     const time = isRunTimestamp(appliedBy.at) ? ` (${formatLocalTime(Date.parse(appliedBy.at))})` : "";
-    lines.push(`${messages.format("plan.applied_by", { runId: runIdOf(appliedBy.runId) })}${time}`);
+    lines.push(`${messages.format("plan.changes.carried_by", { runId: runIdOf(appliedBy.runId) })}${time}`);
   } else if (marked) {
     lines.push(messages.format("plan.cannot_apply"));
   } else {

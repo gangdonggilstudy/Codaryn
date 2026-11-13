@@ -2,9 +2,11 @@
  * Unit U-293 (the CLI migration's C-6a, the third of its five commits; docs/reviews/2026-11-13-cli-migration-plan.md
  * 6.1 to 6.4, PM after p5a's C-6a preparation, U-289 and U-292): the app layer's startRun runs a run's
  * life itself from step 8 on (the model, the cancel source, the assembly, the engine, the notices, the
- * end) instead of borrowing the CLI's runCli, while the CLI still runs its own (src/cli/run.ts
- * runPrepared) until the CLI is turned around. Both lives run here on the same inputs, each in a folder
- * of its own made the same way, and must give the same:
+ * end) instead of borrowing the CLI's runCli. Until U-296 (C-6a's fourth commit) the CLI ran its own
+ * (src/cli/run.ts runPrepared), and these cases set the two lives against each other; since then the
+ * CLI's run goes through the same life (runCli → runThroughApp → runLife, drawing from onStoredRecord),
+ * so they hold that the CLI's wrapper gives on what the life gives, unchanged. Each runs the CLI's run
+ * and the app's startRun on the same inputs, in a folder of its own made the same way, and wants the same:
  * - the end summary's counts: the app gives them beside the result (`tally`), counted from the records
  *   as the engine appended them, with the CLI's counting code moved to the app layer; they equal what
  *   runCli's notes give its end summary (info.summary);

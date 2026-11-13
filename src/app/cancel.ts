@@ -7,9 +7,10 @@
  * before it and is thrown on (the start is refused as before), and each removal is tried on its own;
  * a removal's exception never reaches the run, so it cannot take the run's end with it. The file is
  * looked for at once and then every RUN_CANCEL_FILE_POLL_MS, as the CLI's. Its options and source have
- * the CLI's shapes, stated here so the app imports nothing of src/cli for it (the CLI's helper could
- * then pass this one on without a cycle; its other users, apply's run plan and a plan of moves, keep
- * the CLI's until C-6b and C-7b).
+ * the CLI's shapes, stated here so the app imports nothing of src/cli for it. U-296 (C-6a's fourth
+ * commit): the CLI's helper (src/cli/cancel.ts) passes this one on under its old names, so every
+ * cancel source of a run has these edges: codaryn run, apply's run of a run plan and apply's plan of
+ * moves (main.ts), and a run through the app layer (app.ts).
  */
 
 /** The same fields as the CLI's CancelSourceOptions (src/cli/cancel.ts). */

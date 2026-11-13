@@ -841,9 +841,22 @@ if (life === null || typeof life.hostPid !== "number") {
   if (!gone) process.kill(life.hostPid);
 }
 await sleep(1_000);
-rmSync(lifeFile, { force: true });
-rmSync(sandboxAppData, { recursive: true, force: true });
-rmSync(join(gui, "build", "life-profile"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+// U-144: the last cleanup is not a check. Electron's own child processes of the killed main process
+// (not this script's to end, G-7) may still hold files of the life profile a while on a busy machine;
+// what they hold is left for the next run and named, and the script still gives its count (EPERM had
+// ended it here before the count).
+const leftBehind = [];
+const cleanUp = (target, options = {}) => {
+  try {
+    rmSync(target, { recursive: true, force: true, ...options });
+  } catch (error) {
+    leftBehind.push(`${basename(target)} (${error?.code ?? "error"})`);
+  }
+};
+cleanUp(lifeFile);
+cleanUp(sandboxAppData);
+cleanUp(join(gui, "build", "life-profile"), { maxRetries: 10, retryDelay: 200 });
+if (leftBehind.length > 0) process.stdout.write(`left for the next run: ${leftBehind.join(", ")}\n`);
 
 const total = expected.length + 1 + switchChecks + lifeChecks;
 // U-51: how the request count reached the app (not a check): whole replacements, and the writes a read

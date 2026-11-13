@@ -115,7 +115,7 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
 - 의존 방향
   - 목표: `cli` → `app` → (`engine`, `store`, `tools`, `policy`, `privacy`, `verify`, `workspace`, `model`) → `contracts`.
   - 지금(이행 C-4 뒤, U-285. U-272가 main 6ef6e3a의 코드에서 센 수에서 C-3a~C-4가 옮긴 것을 뺐다): 두 방향이다.
-    - `app` → `cli`: 앱 계층의 8파일이 CLI 모듈 15개를 부른다. 검사를 복사하지 않으려고 그렇게 했다(AC-D16). 실행의 조립(`createAssemble` 한 벌, U-237, 4절)은 C-4부터 `src/app/assembly.ts`에 있다. 앱의 감싸개(`src/app/assemble.ts`)는 아직 옛 자리 `src/cli/assemble.ts`의 다시 내보내기로 그것을 부르고, 그 파일에는 되돌리기 명령(`createRevertCommand`, C-9a)이 남아 있어 15개에 그대로 든다. 입력 층은 `src/app/input/`에 있다: 보안 검사·글 정리·설치 확인·실행 id·모델 글 꼴(C-3a), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b). 옛 자리(`src/cli/security/index.ts`, `src/cli/settings.ts` 등)는 시험과 고정 파일, GUI가 경로로 부르는 곳을 위한 다시 내보내기다.
+    - `app` → `cli`: 앱 계층의 8파일이 CLI 모듈 15개를 부른다. 검사를 복사하지 않으려고 그렇게 했다(AC-D16). 실행의 조립(`createAssemble` 한 벌, U-237, 4절)은 C-4부터 `src/app/assembly.ts`에 있다. 앱의 감싸개(`src/app/assemble.ts`)와 `app.ts`는 그것을 바로 부른다(U-286). 옛 자리 `src/cli/assemble.ts`는 시험을 위한 다시 내보내기와 되돌리기 명령(`createRevertCommand`, C-9a)을 갖고, `app.ts`가 그 명령을 부르므로 15개에 그대로 든다. 입력 층은 `src/app/input/`에 있다: 보안 검사·글 정리·설치 확인·실행 id·모델 글 꼴(C-3a), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b). 옛 자리(`src/cli/security/index.ts`, `src/cli/settings.ts` 등)는 시험과 고정 파일, GUI가 경로로 부르는 곳을 위한 다시 내보내기다.
     - `cli` → `app`: `src/cli/changes.ts`와 `main.ts` 두 파일이 앱 계층의 명령을 부른다. 전에 있던 `protocol/*`는 DR-66으로 지웠다(U-81). C-3a 뒤로는 CLI의 다른 모듈도 `src/app/input/`과 `src/app/model-text.ts`를 가져온다(목표 방향).
   - 목표로 가는 이행 1~5(7.2)는 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다. 그때까지 AC-D16이 그대로 유효하다.
 - 이름은 `src/app`이다(AC-D1 채택).
@@ -157,7 +157,7 @@ export interface AppEnvironment {
   - 지금 CLI는 변수 파일을 `process.env`에 적재하고, 실행기는 거기서 허용 목록 변수를 자식 명령에 넘긴다. 사본으로 옮겨도 같은 결과가 나오게 넘긴다.
   - 실제로 자식에 가는 것은 값이 8자 미만인 허용 목록 변수뿐이다(R-4 I-1). 변수 파일이 새로 설정한 8자 이상 값은 비밀로 등록되고(S-4), 실행기는 등록 비밀이 든 변수를 자식 환경에서 뺀다(T-1). 그래서 변수 파일의 긴 `PATH`·`TEMP`는 CLI에서도 앱 계층에서도 자식에 가지 않는다.
   - 같은 프로세스 어댑터에서는 호스트의 환경이 자식에 새지 않는다.
-  - 이를 위해 A-1은 조립을 앱 계층에 두었다(`src/app/assemble.ts`). CLI의 `assembleRun`과 순서가 같고 `parentEnv`만 다르다.
+  - 이를 위해 조립은 앱 계층의 것이다: 한 벌(`createAssemble`, U-237)이 C-4(U-285)부터 `src/app/assembly.ts`에 있다. 앱의 감싸개(`src/app/assemble.ts`)는 부모 환경으로 그 사본을 주고, CLI의 `assembleRun`은 고리 없이 부른다(`process.env`). 그래서 둘은 `parentEnv`만 다르다.
   - U-237(p4g의 R-108 H-2, na-core의 U-210과 함께): 조립은 한 벌이다. 앱의 실행은 CLI의 조립(`createAssemble`)에 앱의 고리(`parentEnv`, `platform`, `onAssembled`)를 주어 만든다. 앱이 따로 두던 사본은 같은 꼴로 두 번 뒤처졌다(U-186 앞의 쓰기 목록, U-210의 읽기 제외와 k). 이제 관문, 도구 실행기, 검증기, 무결성 대상, 수행하는 계획의 관문(`approvedPlan.policyFor`)이 모두 CLI와 같은 한 곳(`runGuards`)에서 실행의 읽기 제외 목록(모든 원천을 합친 것)과 k를 받는다. 풀지 못한 잠금은 CLI의 `finish`가 주는 표시(U-220)를 보고 `onLockLeft`로 알린다(U-193).
     - 시험 `tests/unit/app/u237-app-unreadable.test.ts`: 앱으로 실행하면 설정 파일의 목록 아래 읽기가 `unreadable_path`로 거부되고, 검색과 `query_table`이 그 아래를 빼며, 모델로 간 것과 기록 어디에도 표지(행, 이름, k보다 작은 묶음의 키)가 없다(`tests/support/private-canary.ts`). task 파일의 목록도 같다.
 

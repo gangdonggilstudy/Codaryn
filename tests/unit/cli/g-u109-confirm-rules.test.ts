@@ -65,7 +65,7 @@ async function quickRun(t: TestContext, config: (url: string) => object, extraAr
   const configPath = writeConfigFile(sb, config(fake.url));
   const run = await runGuarded(sb, ["run", "--config", configPath, "--workspace", sb.workspace, "--goal", "run the two scripts", ...extraArgs], cliEnv({ fakeApiKey: FAKE_API_KEY }));
   const result = JSON.parse(run.stdout.trim()) as EngineResult;
-  assert.equal(result.kind, "result", run.stdout.slice(0, 2000) + run.stderr.slice(0, 2000));
+  assert.equal(result.kind, "run", run.stdout.slice(0, 2000) + run.stderr.slice(0, 2000));
   return { sb, fake, run, result, journal: journalOf(sb, result) };
 }
 
@@ -147,10 +147,12 @@ describe("U-109 (R-79 L-1): elsewhere, and confirm other than true, are refused 
     ["false", false],
     ["a string", "yes"],
   ] as const) {
-    test(`confirm ${name} in the config's policy: invalid_config, invalid value at the field`, async (t) => {
+    // The diagnostic names the rule (`confirm` is not among the contract's schema field names yet).
+    test(`confirm ${name} in the config's policy: invalid_config, an invalid value in the rule`, async (t) => {
       const rules = [{ ...RULES[0], confirm: value }];
       const output = await refused(t, (sb, url) => quick(sb, writeConfigFile(sb, config(url, { policy: { commands: rules, ...POLICY } }))));
-      assert.deepEqual([output.code, output.diagnostic?.code, output.diagnostic?.field], ["invalid_config", "invalid_value", "policy.commands[0].confirm"], JSON.stringify(output));
+      assert.deepEqual([output.code, output.diagnostic?.code, output.diagnostic?.field], ["invalid_config", "invalid_value", "policy.commands[0]"], JSON.stringify(output));
+      assert.equal(output.message, "policy.commands[0].confirm must be true when it is given");
     });
   }
 

@@ -560,6 +560,81 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
   - 쓰기는 CLI의 `writeConfigAtomic`(`models --use`와 같은 함수)이다. 바꾸는 순간에 파일이 달라졌으면 다시 거부한다.
   - 쓴 파일은 정해진 형식의 JSON이며, 원래 파일의 들여쓰기·순서는 남지 않는다.
 
+### 5.12 작업 공간 목록 [구현 U-89] (standalone-gui 3.3)
+
+GUI의 파일 나무가 쓴다. 작업 공간의 한 디렉터리를 한 단계만 준다. 읽기만 한다: 잠금·기록·실행 디렉터리를 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/workspace-dir.ts`, 시험은 `tests/unit/app/u89-workspace-dir.test.ts`다.
+
+```ts
+listWorkspaceDir({ settings: TaskForm, dir, offset, limit? }) → WorkspaceDirListing
+  // { kind: "workspace_dir", status: "listed", masking: "current_secrets", entries, total, offset, nextOffset }
+  // 또는 { kind: "workspace_dir", status: "refused" | "not_found" | "not_dir" | "too_large" | "unreadable" }
+  // entries: { name: string | null, shown, kind: "dir" | "file" | "link" | "state" | "other", masked, protected }[]
+```
+
+- **설정.** `changes`(5.7)와 같은 읽기 준비(`prepareTask`의 1~7단계, 실행하지 않는 명령)로 작업 공간, 지금 등록한 비밀, 효력 있는 정책의 보호 경로를 얻는다. 설정이 풀리지 않으면 그 오류(예: `secret_env_missing`)이고 아무것도 읽지 않는다.
+- **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
+  - `dir`: 뿌리는 `""`, 그 밖은 `/`로 이은 상대 조각. 빈 조각, `.`, `..`, `\`, `:`, 제어 문자는 안 된다. 조각마다 255자, 깊이 64까지다.
+  - `offset`: 0 이상의 정수. 앞 쪽의 `nextOffset`을 넘긴다.
+  - `limit`: 1~500(`WORKSPACE_PAGE_SIZE`). 없으면 500이다.
+- **링크를 따라가지 않는다.**
+  - 경로는 먼저 엔진의 작업 공간 규칙(`Workspace.resolve`)을 거친다. 뿌리 밖, 상태 디렉터리(`.codaryn`), 규칙이 거부하는 이름은 `refused`다.
+  - 이어서 경로의 조각마다 `lstat`으로 본다. 도중에 링크나 junction이 있으면 `refused`다. 그 안의 경로도 마찬가지다.
+  - 항목은 자기 종류로 읽는다(`readdir`의 `withFileTypes`, 링크를 따라가지 않음). 링크·junction은 `link`, 뿌리의 `.codaryn`은 `state`이고 둘 다 다시 펼치지 않는다.
+- **이름은 가려서 준다.**
+  - 제어 문자(C0, DEL, C1)가 든 이름은 아예 보이지 않는다(`shown: ""`).
+  - 그 밖은 `cleanText`, 키 모양과 지금 설정된 모든 API 키 값(`hideKeys`, `knownKeyValues`), 지금 등록한 값(게이트웨이의 `mask`, AC-D14) 순서로 가린다. 가리기가 실패하면 `""`이다.
+  - `shown`이 원래 이름과 다르면 `masked: true`이고 `name`은 `null`이다. **가린 항목의 원래 이름은 앱 계층 밖으로 나가지 않는다.** 그래서 어댑터는 그 항목을 열거나 고를 수 없다.
+  - `name`은 어댑터가 아래 경로를 만들 때만 쓴다. 보여 줄 때는 `shown`을 쓴다.
+- **보호.** `protected`는 효력 있는 정책의 보호 경로가 항목의 상대 경로를 덮는지다(정책의 `compileProtectedPaths`, 정책이 경로를 판정하는 그대로 글자 기준).
+- **크기와 순서.**
+  - 항목이 `MAX_WORKSPACE_DIR_ENTRIES`(100,000)를 넘으면 `too_large`다. 일부만 주지 않는다.
+  - 디렉터리(`dir`, `state`)가 먼저, 그다음 나머지다. 각 묶음은 숫자를 아는 정렬(`Intl.Collator("en", { numeric, sensitivity: "base" })`) 뒤 코드 포인트 순서로 정한다. 같은 디렉터리는 같은 순서다.
+  - 쪽은 `offset`부터 `limit`개다. `total`은 디렉터리 전체 수, 끝 쪽의 `nextOffset`은 `null`이다. 끝을 넘은 `offset`은 빈 쪽이다.
+- **읽기 결과는 호출 오류가 아니다.** `not_found`(없음, 또는 도중이 파일), `not_dir`(마지막이 파일), `unreadable`(그 밖의 읽기 오류)은 `ok: true`의 상태다. 작업 공간 자체가 없으면 `workspace_not_found`다.
+- **한계.** 읽는 동안 디렉터리가 바뀌면 쪽 사이에 항목이 빠지거나 겹칠 수 있다. 쪽은 매번 새로 읽는다.
+
+### 5.13 실행 사건 목록 [구현 U-90] (standalone-gui 3.7 "기록" 탭)
+
+끝난 실행이나 도는 중인 실행의 저장된 레코드를 쪽으로 준다. 읽기만 한다: 잠금·기록을 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/run-events.ts`, 시험은 `tests/unit/app/u90-run-events.test.ts`다.
+
+```ts
+listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEventsPage
+  // { kind: "run_events", runId, runKind: "run" | "apply", status: "complete" | "incomplete", recordsChanged?: true,
+  //   masking: "current_secrets", records: StoredRunRecord[], total, skipped, offset, nextOffset }
+  // StoredRunRecord: { seq, at, runId, type: RunEventType, [field]: unknown }
+```
+
+- **설정.** `changes`(5.7)와 같은 읽기 준비로 작업 공간과 지금 등록한 비밀을 얻는다. 설정이 풀리지 않으면 그 오류이고 아무것도 읽지 않는다.
+- **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
+  - `runId`: 실행 id 꼴. `"latest"`는 받지 않는다(실행 목록의 id를 쓴다).
+  - `offset`: 0 이상의 정수. 검사를 지난 레코드 사이의 자리이고 `seq`가 아니다.
+  - `limit`: 1~1,000(`MAX_RUN_EVENTS_PAGE`). 없으면 200(`RUN_EVENTS_PAGE_SIZE`)이다.
+  - `types`: 비지 않은 목록, `RUN_EVENT_TYPES`의 이름만. 없으면 모든 종류다.
+- **실행 판정이 먼저다.** store의 `inspectRun`으로 실행 목록·`report`·`changes`와 같이 판정한다(R-14 L-1).
+  - 정확히 그 이름의 항목이 없으면 `run_not_found`다.
+  - 손상이면 `invalid_run_record`이고 아무것도 보이지 않는다.
+  - journal이나 result.json이 일반 파일이 아니거나 `MAX_REPORT_FILE_BYTES`를 넘어도 `invalid_run_record`다.
+- **줄마다 꼴을 본다.** 실행 중 허용된 명령이 journal에 줄을 더할 수 있다(R-4 H-1). 그래서 다음을 모두 만족하는 줄만 레코드로 준다. 아닌 줄은 `skipped`로 세고 주지 않는다.
+  - JSON 객체다(배열 아님).
+  - `runId`가 그 실행이다.
+  - `seq`가 마지막으로 받은 레코드의 다음 수다(1부터). 그래서 끼워 넣은 줄 뒤의 진짜 줄도 받는다.
+  - `at`이 실제 시각이다(store의 `isRunTimestamp`).
+  - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름).
+  - 모든 단계의 필드 이름이 낙타 꼴의 평범한 낱말이고 가리기가 바꾸지 않는다. 깊이는 64까지다. 비밀을 필드 이름에 담은 줄이 빠진다.
+  - 종류마다의 필드는 하나하나 검사하지 않는다. 대신 모든 글을 가리고, 어댑터는 필드를 바깥 자료처럼 읽는다(`StoredRunRecord`의 다른 필드는 `unknown`). 꼴이 맞는 위조 줄은 가린 채 보일 수 있다. 그런 실행은 보통 기록 변경 표시가 있다(아래).
+- **적용의 시작 레코드.** `plan_item_started`(R-9 I-4)는 받되(번호를 셈) 주지 않는다. 적용 이벤트와 같다.
+- **다시 가림.** 이벤트와 같다(DR-15).
+  - 모델 실행은 `sanitizeRecord`(도구 이름 제한 `(unknown tool)`)를, 적용은 `maskStrings`를 지금 등록한 값의 게이트웨이로 거친다.
+  - 그다음 키 모양과 지금 설정된 모든 키 값을 가린다(`hideKeysInStrings`, `knownKeyValues`).
+  - 가릴 수 없는 레코드는 빼고 `skipped`로 센다. 토큰은 복원하지 않는다. 실행 때 등록하지 않았던 값도 지금 등록했으면 가려진다.
+- **상태.**
+  - result.json이 없으면 `incomplete`다(도는 중이거나 그것 없이 멈춤). 이때 끝나지 않은 마지막 줄은 세지 않고 뺀다. `complete`이면 그 줄은 `skipped`로 센다.
+  - 기록 변경 표시가 있으면 `recordsChanged: true`다(store의 `hasRecordsChangedMark`, 확인하지 못해도 표시로 셈, DR-38). 레코드는 그래도 준다(`report`와 같음).
+- **쪽.** 검사와 필터를 지난 레코드에서 `offset`부터 `limit`개를 주되, 레코드 JSON이 2 MiB(`MAX_RUN_EVENTS_PAGE_BYTES`, UTF-8)에 이르기 전에 끊는다. 그보다 큰 레코드는 혼자 한 쪽이 되므로 쪽은 늘 나아간다. `total`과 `skipped`는 쪽마다 journal 전체로 센다.
+- **한계.**
+  - 쪽마다 journal 전체를 다시 읽고 가린다. 이 기계에서 가리기는 MiB당 약 0.1초, 키 가리기는 약 0.2초였다. 큰 journal이면 쪽마다 그만큼 걸린다.
+  - 등록 값 가리기의 한계는 5.7과 같다(지금 등록한 값만 가린다).
+
 ## 6. 프로세스 밖 어댑터용 줄 프로토콜 [DR-20으로 추진하지 않음 — 참고용]
 
 > 사용자 결정 DR-20으로 이 절은 추진하지 않는다. GUI는 같은 프로세스 어댑터(엔진 전용 프로세스)로 5절 함수를 직접 부른다. 아래는 결정 전의 설계와 구현 기록으로 남긴다.
@@ -661,6 +736,8 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 비교(DR-7) | 원본·지금 내용이 지금 등록한 비밀로 가려짐, 나중 편집·삭제의 상태, 실행·잠금을 만들지 않음, 설정이 풀리지 않으면 그 오류 |
 | 조립 | 보호 경로가 있으면 무결성 점검 사건이 그대로 온다 |
 | 읽기 명령 | `report`(complete, `run_not_found`), `revert`, `doctor`(점검 id마다 하나: 지금 18개, `DOCTOR_CHECK_IDS`. 설계 당시 12개, W-5) |
+| 작업 공간 목록(5.12) | 종류·순서·보호·`state`, 등록 값·키 모양·제어 문자 이름이 가려지고 `name: null`, 링크·junction과 그 안의 경로는 `refused`, `not_found`·`not_dir`, 맞지 않는 인자, 500개씩의 쪽과 숫자 순서, 상한을 넘으면 `too_large`, 상태 디렉터리를 만들지 않음, 설정 오류 |
+| 실행 사건 목록(5.13) | 끝난 실행의 레코드가 그 실행의 이벤트와 같음(`at` 제외), 꼴이 맞지 않는 줄(JSON 아님, 배열, 다른 실행, 다음 번호 아님, 시각 아님, 모르는 종류, 다른 실행 종류의 종류, 비밀을 담은 필드 이름, 끝나지 않은 꼬리)이 빠지고 셈, 그 뒤 맞는 줄은 가려서 줌, 지금 등록한 값과 키 모양을 가림, 적용 실행(시작 레코드 빠짐, 번호 유지), 기록 변경 표시, 도는 중(`incomplete`), 없음·손상·맞지 않는 인자, 종류 필터와 쪽, 2 MiB 끊기와 큰 레코드 혼자, 잠금 없음·journal 그대로, 설정 오류 |
 
 - 시험의 힘을 변이로 확인했다. 아래 셋은 각각 관련 시험이 실패했고, 되돌린 뒤 통과했다.
   - 변수 파일을 사본 대신 호출자 env에 적재

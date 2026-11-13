@@ -200,6 +200,10 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.plan_applying": "계획 적용 중이거나 적용이 멈춤(적용 실행 {runId}, 결과 없음)",
   "runs.plan_apply_reverted": "계획을 적용했다가 되돌림(적용 실행 {runId})",
   "runs.plan_apply_missing": "적용 실행 {runId}의 기록 없음(지웠거나 확인할 수 없음)",
+  // U-129 (PM 초안, nb-i18n 확인): 적용 실행의 변경 칸, 결과 칸의 사람 판정.
+  "runs.apply_actions": "동작 {count}",
+  "runs.apply_action_one": "동작 1",
+  "runs.review": "검토: {verdict}",
   "report.records_changed": "이 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 보고서가 실제로 일어난 일과 다를 수 있습니다.",
   "report.final_message": "에이전트의 마지막 답입니다. 에이전트의 말이며 검증된 사실이 아닙니다.",
   "changes.records_changed": "이 실행에는 기록 변경 표시가 있어 파일 글을 보이지 않습니다. 경로와 상태만 보입니다.",

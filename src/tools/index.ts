@@ -40,6 +40,7 @@ import type {
 
 import { takeJudged } from "../workspace/judged.js";
 import { createCommandRunner } from "./command-runner.js";
+import { retryDeadline } from "../workspace/guard.js";
 import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
@@ -261,10 +262,10 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     return resolved;
   }
 
-  async function readFile(args: ReadFileArgs): Promise<RawToolOutcome> {
+  async function readFile(args: ReadFileArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");
     if (!resolved.ok) return resolved;
-    const read = await workspace.readText(resolved.path);
+    const read = await workspace.readText(resolved.path, { signal });
     if (!read.ok) return fail(read.code, `cannot read file: ${read.code}`);
     const text: string = read.snapshot.text;
     const hadBom = text.startsWith(BOM);
@@ -282,7 +283,9 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   async function searchFiles(args: SearchFilesArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");
     if (!resolved.ok) return resolved;
-    const listed = await workspace.list(resolved.path);
+    // U-213: the listing and every read below share one time limit for their tries again.
+    const retryUntil = retryDeadline();
+    const listed = await workspace.list(resolved.path, { signal, retryUntil });
     if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
 
     // Matching works on masked text only: the path names and the file contents a model would
@@ -301,7 +304,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         // Each file is resolved again, so a link that leaves the root is never read.
         const file = await workspace.resolve(entry.relative, "read");
         if (!file.ok) continue;
-        const read = await workspace.readText(file.path);
+        const read = await workspace.readText(file.path, { signal, retryUntil });
         if (!read.ok) {
           // U-189 (Codex V-10b): a file that could not be read (io_error: the read saw its folders change on
           // every try, or another I/O failure) may hold the text: the result is not complete, and says so.
@@ -355,13 +358,13 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     return createHash("sha256").update(maskedPartsEncoding(maskedParts(masked.text)), "utf8").digest("hex") as ContentHash;
   }
 
-  async function writeFile(args: WriteFileArgs): Promise<RawToolOutcome> {
+  async function writeFile(args: WriteFileArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "write");
     if (!resolved.ok) return resolved;
 
     // 1. Local snapshot of the current file (raw, never leaves this function except to the
     //    change recorder, which keeps it in the state directory).
-    const read = await workspace.readText(resolved.path);
+    const read = await workspace.readText(resolved.path, { signal });
     let original: RawText | null;
     let currentText: string | null;
     let currentHash: string | null;
@@ -514,11 +517,11 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         if (signal.aborted) return fail("cancelled", "cancelled before start");
         switch (call.name) {
           case "read_file":
-            return await readFile(call.args);
+            return await readFile(call.args, signal);
           case "search_files":
             return await searchFiles(call.args, signal);
           case "write_file":
-            return await writeFile(call.args);
+            return await writeFile(call.args, signal);
           case "run_command":
             return await runCommand(call.args, signal);
         }

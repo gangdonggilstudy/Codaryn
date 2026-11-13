@@ -35,7 +35,12 @@
  *   groups (there is none: they are merged into suppressedGroups, a number of groups only).
  * - describe: a column's nonEmpty or numeric below k is null, as when the table's rows are hidden.
  *
- * Codex V-28 M1 and V-28b (U-277, PM): whether a query is refused never turns on what a cell holds.
+ * Codex V-28 M1 and V-28b (U-277, PM): no refusal turns on whether a cell of a sum's or mean's column
+ * is a number, nor on where such cells lie. That is all (Codex V-28c, U-283): the table's other
+ * refusals still turn on the table, each by its own rule: too_large on the file's size; not_text and
+ * not_table on the file's form (describe meets the same); unknown_column and duplicate_column on its
+ * header; too_many_groups on how many keys the groupBy columns hold (Q-5, MAX_QUERY_COUNTED_GROUPS);
+ * after_not_found, for a well-formed cursor, on how many groups are shown.
  * On a table under unreadablePaths:
  * - No query is not_number. A cell that is not a number in a sum's or mean's column is always read as
  *   an empty one: left out of the value, as describe's `numeric` leaves it out. A count counts it, as
@@ -254,8 +259,9 @@ export type QueryTableProblem = (typeof QUERY_TABLE_PROBLEMS)[number];
  * (FIXED_MODEL_TEXTS): nothing read from the table or the call in them.
  * Under unreadablePaths a message also leaves out the data row and the line it names elsewhere, so
  * nothing of a single row reaches the model (DR-70); the operation's index stays. U-277 (Codex V-28
- * M1, V-28b): nor does what a cell holds decide whether such a table's query is refused: it has no
- * not_number, so the not_number hint goes to a table outside unreadablePaths only (above).
+ * M1, V-28b): nor does whether a cell is a number decide that such a table's query is refused: it has
+ * no not_number, so the not_number hint goes to a table outside unreadablePaths only. The other
+ * problems keep their own rules (above, U-283).
  */
 export const QUERY_TABLE_PROBLEM_HINTS: { readonly [P in QueryTableProblem]: string } = {
   not_text: "The file is not UTF-8 text, so it cannot be read as a table.",

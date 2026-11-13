@@ -16,8 +16,9 @@
  *   reading's tally, U-277).
  * - Codex V-28 M1, V-28b (U-277): on such a table a cell that is not a number is always read as an
  *   empty one: left out of sums and means (as describe's `numeric` leaves it out), counted by a count.
- *   No query of such a table is not_number, so whether one is refused never turns on a cell's type;
- *   a sum or mean of fewer than k numbers is null in `fewCells` as above.
+ *   No query of such a table is not_number, so no refusal turns on whether a cell is a number (the
+ *   other refusals keep their own rules, query.ts in the contracts, U-283); a sum or mean of fewer
+ *   than k numbers is null in `fewCells` as above.
  * - Groups come MAX_QUERY_RESULT_GROUPS at a time; `next` is a cursor of the shown groups' ordinals
  *   (QUERY_CURSOR_PATTERN_SOURCE), never a key.
  * - A failure's message names a code and a row, line or argument index, never a cell's text or a

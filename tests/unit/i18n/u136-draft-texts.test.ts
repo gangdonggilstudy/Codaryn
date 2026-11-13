@@ -126,9 +126,9 @@ describe("U-136 (PM, second part): UXM-22, UXM-18, U-129's cells, help.output", 
 
   test("U-129: an apply run's changes cell counts actions, and the verdict reads as review, in both languages", () => {
     const { en, ko } = MESSAGE_TEXTS;
-    // The PM's cells, pinned by U-129's own test (a counter 개 would change them; the report proposes it).
-    assert.equal(ko["runs.apply_actions"], "동작 {count}");
-    assert.equal(ko["runs.apply_action_one"], "동작 1");
+    // U-145 (PM): the counter 개, as plan says "동작 3개".
+    assert.equal(ko["runs.apply_actions"], "동작 {count}개");
+    assert.equal(ko["runs.apply_action_one"], "동작 1개");
     assert.equal(en["runs.apply_actions"], "{count} actions");
     assert.equal(en["runs.apply_action_one"], "1 action");
     assert.equal(en["runs.review"], "review: {verdict}");

@@ -86,7 +86,20 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 - `policy.protectedPaths`는 선택이다(13절).
 - 파일 형식은 `TaskSpec`, CLI가 해석해 엔진에 넘기는 형은 `ResolvedTaskSpec`(경로는 절대 경로, 한도 여섯 개가 모두 정해짐)이다. `EngineDeps.task`는 `ResolvedTaskSpec`이다.
 - task 파일과 설정 파일은 UTF-8이며 BOM이 있어도 읽는다.
-- 검증기는 `command`(`executable`, `args`, 선택 `cwd`·`timeoutMs`·`expectExitCode`)와 `file_rules`(`exists`, `absent`, `contains`, `not_contains`) 두 종류다. `timeoutMs`는 1~2,147,483,647ms다(S-7). 결과에는 `outcome`(pass/fail/inconclusive), `evidence`, `checked`, `limits`가 있다.
+- 검증기는 `command`(`executable`, `args`, 선택 `cwd`·`timeoutMs`·`expectExitCode`)와 `file_rules`(`exists`, `absent`, `contains`, `not_contains`, `markdown_headings`, `markdown_links`) 두 종류다. `timeoutMs`는 1~2,147,483,647ms다(S-7). 결과에는 `outcome`(pass/fail/inconclusive), `evidence`, `checked`, `limits`가 있다.
+  - U-116(P1 묶음 C, 계약 `MarkdownFileRule`): `markdown_headings`는 `path`, `headings`(1~`MAX_MARKDOWN_RULE_HEADINGS` 50개; 항목마다 `text`는 앞뒤 공백을 뗀 뒤 1~`MAX_MARKDOWN_HEADING_CHARS` 200자(코드 포인트)이고 뗀 글로 저장, 선택 `level`은 1~6 정수), 선택 `order`(`any` 기본, `in_order`)만 받는다. `markdown_links`는 `path`만 받는다. 그 밖의 필드나 값은 `invalid_task`(설정의 검증기면 `invalid_config`)다.
+  - 이 오류의 진단(`diagnostic.field`)은 그 규칙(`verifiers[i].rules[j]`)을 가리킨다. 메시지는 정확한 자리(`…headings[k].text` 등)를 말한다. `headings`·`level`·`order`가 계약의 `SCHEMA_FIELD_NAMES`에 아직 없어서다.
+  - 파일을 읽고 판정하는 것은 검증기다(제목은 ATX·Setext를 앞뒤 공백과 닫는 `#`를 뗀 글자로 정확히 비교, 링크는 상대 경로의 대상이 작업 공간 안에 있는지, 파일 1 MiB까지, 네트워크 없음). CLI는 모양만 검사한다.
+  - 읽는 규칙과 한계(U-150, main의 `src/verify/markdown.ts`대로; R-89의 고침 U-116):
+    - 줄 끝은 LF, CR LF, 홀로 있는 CR이다(CommonMark). 앞의 BOM은 버린다.
+    - 펜스 코드(``` 또는 ~~~)는 통째로, 블록 안의 코드 스팬도 건너뛴다. 들여 쓴 코드 블록은 알아보지 않고 보통 글로 읽는다.
+    - HTML은 CommonMark의 HTML 블록 일곱 가지와 블록 안의 HTML 주석(`<!-- … -->`)을 건너뛴다. 그 안의 것은 제목도 링크도 아니다. 일곱 가지: `<script`·`<pre`·`<style`·`<textarea`부터 그 닫는 태그까지, `<!--`부터 `-->`까지, `<?`부터 `?>`까지, `<!X`부터 `>`까지, `<![CDATA[`부터 `]]>`까지, 블록 수준 태그나 한 줄을 차지한 여는·닫는 태그부터 다음 빈 줄까지. 그 밖의 인라인 HTML은 글로 읽는다.
+    - 링크 대상의 괄호는 CommonMark처럼 32단까지다. 괄호로 싼 제목 안에 탈출하지 않은 `(`가 있으면 링크가 아니다.
+    - 상한 둘(R-89 M-1, PM 결정)을 넘으면 그 규칙은 실패가 아니라 판정 불가(검증기 결과 `inconclusive`)다. 근거에 까닭을 적는다.
+      - 줄: `MAX_MARKDOWN_LINE_CHARS`(100,000자, UTF-16 단위)보다 긴 줄. 두 규칙 모두 판정 불가다(`line N is longer than 100000 characters, not read`). 펜스 코드와 HTML 블록 안의 줄은 해석하지 않으므로 세지 않는다.
+      - 대괄호: 한 블록에서 짝이 맞은 `[` `]`의 중첩이 `MAX_MARKDOWN_BRACKET_DEPTH`(32)보다 깊으면 `markdown_links`만 판정 불가다(`brackets nested deeper than 32 levels at line N, not read`). `markdown_headings`는 대괄호를 읽지 않으므로 같은 문서에서도 판정한다. 짝 없는 `[`(예: 구간 표기 `[0, 1)`)는 글이라 세지 않는다.
+      - 두 상수는 지금 `src/verify/markdown.ts`에 있다. 계약으로 옮길지는 p4g-general이 정한다.
+    - 실행의 신호(취소, 시간 한도)로 멈추면 그 규칙은 판정 불가다: 문서를 읽기 전이면 `cancelled before the document was read`, 대상을 보는 중이면 `cancelled while the link targets were checked`.
 
 ## 4. scripted 모델 파일 (`ScriptedModelScript`)
 
@@ -1307,6 +1320,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 모든 질문의 한 줄 읽기(`src/cli/terminal.ts`의 `askLine`, 답은 줄 · 답 없음 · 끊음)는 입력이 끝나면 답 없음으로 끝난다. readline의 `question()`만으로는 입력 끝에서 끝나지 않아, `apply`·`revert`·`models`·`init`의 질문도 입력 끝에서 멈춰 있었다. 이제 그 질문들도 입력 끝을 '아니오'(또는 답 없음)로 받는다.
   - 이미 끝난 입력(R-88 L2): 입력이 한 번 끝났으면 그 뒤의 질문은 묻지 않고 곧 답 없음이다. 예전에는 끝나지 않아 종료 13으로 끝났고(결과·`result.json` 없음, 잠금 남음), 이제 실행은 결과를 내고 잠금을 푼다.
   - 질문이 끝난 뒤(R-88 L1): 묻는 동안만 표준 입력이 프로세스를 붙잡고, 끝나면 읽기를 멈추고 놓는다(`pause`, `unref`). 예전에는 Ctrl+D·Ctrl+C로 질문을 닫으면 명령이 끝나도 입력이 열린 동안 프로세스가 끝나지 않았다(main의 `apply`도 같았다).
+  - 줄 없이 끝난 질문(U-141, R-88b I1): 입력 끝, 터미널의 Ctrl+D·Ctrl+C면 질문을 쓴 흐름에 줄 끝 하나를 써서 다음 글(진행 줄, 오류 설명, 다음 출력)이 제 줄에서 시작한다. 줄을 친 경우(그 줄이 끝냄), 질문이 취소된 경우(readline이 줄을 지우며 스스로 끝냄), 묻기 전에 이미 끝난 입력(묻지 않음)에는 쓰지 않는다. 권한 질문·`apply`·`models`·`init`의 질문을 흉내 낸 터미널로 시험했다(`tests/unit/cli/g-u141-question-newline.test.ts`).
 - **실제 터미널로는 확인하지 못했다.** Windows 콘솔과 Unix pty로 돌려 보지 않았다. 시험과 검토 R-88은 흉내다: 미리 읽는 모듈이 흐름의 `isTTY`를 참으로 두고, 표준 입력은 파이프여서 readline이 터미널 방식으로 읽는다(Ctrl+C는 0x03, Ctrl+D는 0x04 바이트). 실제 터미널의 raw 방식(`setRawMode`)과 신호는 그대로 재현되지 않는다. 판단은 Node 소스와 이 흉내에 기댄다.
 - 진행 줄: 질문 기록마다 영어 진행 줄(`progressLine`, U-74)이 있다. 고른 언어의 진행 줄(사람용 렌더러 `src/cli/human`)은 `confirmation_answered`마다 `progress.confirmation_allowed` 또는 `progress.confirmation_denied.<by>`다(R-85 M1, nc-human 몫).
 - 끝 요약(R-85 M1): `run`은 질문 뒤 거부된 호출을 누가 정했는지(`user`, `default`, `cancelled`)와 이 실행이 물을 수 있었는지(`couldAsk`)를 `RunSummaryContext.confirmationDenied`로 렌더러에 넘긴다. 그런 거부가 없으면 필드가 없다. 그 호출은 `deniedCommandCalls`에도 들어 있다.
@@ -1314,3 +1328,13 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - 대신 0보다 큰 것마다 한 줄: `summary.confirm_denied.user`(사람이 거부), `.cancelled`(기다리는 동안 취소), `default`는 `couldAsk`면 `.unanswered`(입력 끝이나 시간 한도), 아니면 `.unasked`(이 실행은 물을 수 없었다: 터미널이 아니거나 `--quiet`).
   - 앱 계층의 실행(GUI)은 이 필드를 아직 채우지 않는다(선택 필드라 지금 출력 그대로).
 - 시험: `tests/unit/cli/g-u110-r88-terminal.test.ts`(R-88: 끊음, 끝난 입력, 놓음; 실제 CLI의 실행 취소와 init의 멈춤, `u110-terminal-preload`로 흉내), `tests/unit/cli/g-u110-terminal-confirm.test.ts`(실행 안의 질문과 답, `--quiet`, 통로 없음), `tests/unit/cli/g-u110-terminal-line.test.ts`(한 줄 읽기, 질문 글, 답 규칙, 파이프로 넣은 `y`는 답이 되지 않음).
+
+### 18.18 기록과 맞게 고친 글 다섯 (U-131, U-129의 넘김)
+
+- 모두 사람용 글만 바꾼다. `report --json`, `review --json`, `changes --json`, 적용 결과(JSON)는 그대로다.
+- `report`의 사람 확인 절(N1, AXM-21): 판정이 없을 때만 "The run waits for a person's verdict (…)"를 낸다. 판정이 있으면 그 줄이 없고, 판정 줄 뒤에 ``A later review replaces it: `codaryn review --run <id> --accept | --reject`.``가 온다.
+- `report`의 계획 줄(N2, UXM-5): 계획 실행의 적용을 실행 목록의 규칙(`planApplyStateOf`, `runs`와 계획 보기와 같음)으로 본다. 적용이 없으면 예전처럼 "waiting for approval"이다. `applied`면 ``- Plan: N action(s), applied by run `<id>` (its report: `codaryn report --run <id>`).``이고, `unfinished`·`applying`·`reverted`·`record_missing`은 `runs.plan_*`와 같은 뜻의 영어다. 글을 낼 때만 실행 목록을 읽는다(`--json`이면 읽지 않는다).
+- `review --reject`(N3, AXM-21): 그 실행이 바꾼 파일이 있으면(`result.changes`가 1건 이상) 끝에 되돌리는 명령(`summary.next_revert`, `--workspace`를 쳤으면 `summary.next_revert_typed`, DR-51)을 낸다. 받아들였거나 바꾼 파일이 없으면 예전 그대로다.
+- 계획 실행의 `changes`(N4, UXM-4·5): `changes.none` 대신 `changes.plan_only`(계획만 만들고 스스로 바꾼 파일은 없음), 적용이 있으면 이어서 `changes.plan_applied`(그 적용 실행이 끝났으면) 또는 `changes.plan_apply_other`(`codaryn runs`가 그 끝을 보여 줌). 실행 목록은 앱 계층의 `listRuns`로 그 실행의 작업 공간(친 `--workspace`, 또는 task 파일의 `workspaceRoot`)에서 읽는다. 읽지 못하면 예전 글(`changes.none`)이다.
+- 다른 작업으로 만든 계획의 적용(N5, UXM-15): 계획 실행의 작업 id(`planTaskIdOf`)가 이 적용의 것과 다르면, `apply.notice.plan_task_differs`를 적용 시작 줄 바로 다음 진행 줄로, 터미널이면 승인 질문(`apply.question`) 바로 앞에도 낸다. 끝 요약의 알림(결과의 `notices`)은 그대로다. 같은 작업 id를 엔진(`ApplyDeps.planTaskId`)에 준다. 기록과 계약은 바뀌지 않는다.
+- 시험: `tests/unit/cli/g-u131-handoffs.test.ts`(실제 CLI, 대본 모델, net guard; 터미널 질문은 `u115-terminal-preload`로 흉내).

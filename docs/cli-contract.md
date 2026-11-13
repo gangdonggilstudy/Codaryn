@@ -887,7 +887,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 대상 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.
 - 줄은 기록(가림본)에서만 만들고, 실행의 개인정보 게이트로 다시 가린 뒤 제어 문자를 바꾼다. 내장 도구가 아닌 도구 이름은 `(unknown tool)`, 형식에 맞지 않는 id는 `?`로 쓴다.
-- DR-43 (b), R-31 L-1: 기록 하나가 여러 줄을 낼 수 있다(렌더러가 준 줄마다 따로 가리고 쓴다, `writeProgressLines`). 이행 C-6a(U-296)부터 `run`은 저장된 기록(`RunObserver.onStoredRecord`, 엔진이 가린 그대로)마다 줄을 그리고 실행의 게이트로 가린다. 승인된 run 계획의 실행은 C-6b까지 `withProgress`다.
+- DR-43 (b), R-31 L-1: 기록 하나가 여러 줄을 낼 수 있다(렌더러가 준 줄마다 따로 가리고 쓴다, `writeProgressLines`). 이행 C-6a(U-296)부터 `run`은 저장된 기록(`RunObserver.onStoredRecord`, 엔진이 가린 그대로)마다 줄을 그리고 실행의 게이트로 가린다. 승인된 run 계획의 실행도 C-6b(U-300)부터 같다.
   - 실행 시작(`run_started`)에 `policyNarrowings`가 있으면 시작 줄 아래에 하나씩 쓴다(종류와 수만, `progress.workflow_policy.*`).
   - 영어 줄(`progressLines`, 렌더러가 없을 때)은 카탈로그의 영어 글과 같다. 사람용 렌더러(`HumanOutput.progressLine`, N-C)의 줄은 그쪽 변경을 기다린다.
 - 실행 전 오류에는 진행 표시가 없다. `--quiet`이면 쓰지 않는다. stderr 쓰기 실패는 실행에 영향을 주지 않는다. stdout은 그대로 JSON 한 줄이다.
@@ -1178,7 +1178,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - CLI(`src/cli/run.ts`)는 사람이 보는 것을 그린다: 진행 줄, 기본 설정 줄, 권한 질문, Y-4 줄, writablePaths 줄, 끝 요약.
   - 실행 환경은 CLI의 것 그대로다(`process.env`, 변수 파일, CLI의 조립. DR-4는 전과 같다).
   - 취소 원천(SIGINT, SIGTERM, 취소 파일)은 실행 전 검사와 8단계 모델 뒤, 조립 바로 앞에 한 번 만든다. 실행이 끝나 잠금이 풀린 뒤에 뗀다. 그래서 실행 전 검사 중의 SIGINT는 Node 기본대로 프로세스를 끝낸다(시험 `tests/unit/cli/u299-c6a-life-edges.test.ts`).
-  - 승인된 run 계획의 실행(`codaryn apply`)은 C-6b까지 CLI의 `runPrepared`다.
+  - 승인된 run 계획의 실행(`codaryn apply`, 앱의 `applyPlan`)도 C-6b(U-300)부터 같은 `runLife`다(승인 분기, U-303). 계획 claim, 잠금 아래의 재확인, 계획 밖 거부의 수가 그 안에 있다(R-115 I-1).
 
 #### 18.1.1 정책 합치기 (DR-41)
 
@@ -1271,7 +1271,7 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
   - 묻거나 보내거나 쓰기 전에 거부한다: 이미 수행한 계획(`plan_already_applied`), 기록 변경 표시(`plan_records_changed`), 위험한 이동 동의(`--allow-unsafe-move`나 adapter의 동의, `invalid_arguments`: 이동에만 쓴다), 가린 조각이 다름(`plan_secrets_differ`), goal을 읽을 수 없는 계획 실행(`invalid_run_record`).
   - 승인은 이동 계획과 같다(`--digest`, run 계획의 보기를 보이는 터미널 질문, adapter). 다른 task로 만든 계획의 알림(U-131)도 같다. 실행 환경이 없는 빌드는 `internal_error`다.
     - U-228(U-198의 글): 터미널 질문은 run 계획의 보기, 다른 task의 알림, 승인이 시작하는 것(`apply.changes.what`: 파일 도구가 이 파일들에만 쓰는 실행, 요약이 보이면 `apply.changes.summary_note`, task가 명령을 허용하면 `apply.changes.commands_note`), 그다음 `apply.changes_question`과 `[y/N]`이다. 이동 계획의 `apply.question`이 아니다.
-  - 실행: 실행 환경(`ApplyCommandEnvironment.run`, CLI는 `run`과 같은 환경)으로 `runPrepared`가 승인된 계획을 넘겨 돈다. 조립은 계획 실행을 claim할 수 있게 만들어지고(`AssemblyInput.planRunId`), 엔진의 `runApprovedPlan`이 계획 파일을 확인하고, 계획을 한 번만 claim하고(`applied.json`), 계획 파일만 쓰게 한다.
+  - 실행: 실행 환경(`ApplyCommandEnvironment.run`, CLI는 `run`과 같은 환경)으로 `runPrepared`가 승인된 계획을 넘긴다. C-6b(U-300)부터 그 실행은 앱의 `runLife`(`src/app/run-life.ts`)가 돈다. 조립은 계획 실행을 claim할 수 있게 만들어지고(`AssemblyInput.planRunId`), 엔진의 `runApprovedPlan`이 계획 파일을 확인하고, 계획을 한 번만 claim하고(`applied.json`), 계획 파일만 쓰게 한다.
   - **잠금 아래 다시 봄(PM, 이동 계획의 U-1과 같게):** 조립이 잠금을 잡은 뒤 엔진이 시작하기 전에 계획 실행의 기록 변경 표시를 다시 본다. 표시가 있거나 볼 수 없으면 `plan_records_changed`이고, 기록·요청·쓰기·claim 없이 잠금을 놓는다.
   - **goal:** 계획을 만든 실행의 goal이다. 그 실행 journal의 첫 모델 요청의 user 메시지(그 실행이 가린 글)이고, task 형식과 상관없다. 모델의 요약은 goal이 아니라 엔진이 시스템 글에 승인된 계획으로 넣는다.
   - 출력은 그 실행의 `CliOutput`(`EngineResult`)이고 `planRunId`와 `planDigest`가 있다. 진행 줄, 끝 요약, `result.json`, 되돌리기(`codaryn revert --run <그 실행>`)는 실행과 같다.

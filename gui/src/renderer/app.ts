@@ -111,6 +111,8 @@ async function start(): Promise<void> {
       newTask: () => shell?.show("newtask"),
       settings: () => shell?.show("settings"),
       refresh: readAgain,
+      // U-184 (3.14): the text view with an unsaved edit asks before it is left (or drawn again).
+      leaving: (from, to) => from !== "text" || text.leave(to),
       treeWidth: (width) => {
         treeWidth = width;
         void api.saveUi({ treeWidth: width });
@@ -126,10 +128,10 @@ async function start(): Promise<void> {
     shell = frame;
     frame.mount(root);
     // U-174 (DR-72, 3.14): the read-only text view of a tree or changes entry, by the main process's id.
-    const text = textScreen({ texts, api, current: () => current, back: (id) => shell?.show(id) });
+    const text = textScreen({ texts, api, current: () => current, back: (id) => shell?.show(id), running: runGoing, watchRun: (listener) => run.subscribe(listener) });
     const openText = (node: string, name: string, from: string): void => {
-      text.choose({ node, name }, from);
-      shell?.show("text");
+      // U-184: with an unsaved edit the view asks first, and opens the file once the edit is let go.
+      if (text.choose({ node, name }, from)) shell?.show("text");
     };
     // U-65: a changed file chosen in the tree opens its run's comparison at that file.
     tree = new TreeView(texts, api, frame.filePanel, {

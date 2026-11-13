@@ -22,7 +22,8 @@ import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
 import { reportMarkdownValue } from "./report.js";
 import { runEventsValue } from "./run-events.js";
 import { planCheckValue } from "./plan-check.js";
-import { textValue } from "./text.js";
+import { textValue, textWrittenValue } from "./text.js";
+import { MAX_TEXT_CHARS } from "../shared/ipc.js";
 import { initValue, suggestionsValue } from "./setup.js";
 import type { Shown } from "./settings.js";
 import type { ModelText } from "./model-text.js";
@@ -69,6 +70,8 @@ export interface HostApp {
   listRunEvents(request: { readonly settings: HostTaskForm; readonly runId: string; readonly offset: number }): Promise<unknown>;
   /** U-174 (U-172, adapter-contract 5.15): a workspace text file for the text view (text.ts). */
   readWorkspaceText(request: { readonly settings: HostTaskForm; readonly path: string }): Promise<unknown>;
+  /** U-184 (U-172, adapter-contract 5.15): a person's edit, judged and written by the app layer (text.ts). */
+  writeWorkspaceText(request: { readonly settings: HostTaskForm; readonly path: string; readonly text: string; readonly baseDigest: string }): Promise<unknown>;
   /** U-103 (U-89, adapter-contract 5.12): one directory of the workspace for the file tree (tree.ts). */
   listWorkspaceDir(request: { readonly settings: HostTaskForm; readonly dir: string; readonly offset: number }): Promise<unknown>;
   /** U-11 (3.11): the config file with the defaults (init without questions), and init's fixed suggestions for a workspace. */
@@ -297,6 +300,15 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const path = args["path"];
         if (typeof path !== "string" || path === "" || path.length > MAX_PATH_CHARS || path.includes("\0")) throw new ArgsError();
         return textValue(await deps.app.readWorkspaceText({ settings: taskForm(workspace, null, null), path }), shownText);
+      }
+      case "writeText": {
+        // U-184 (DR-72, 3.14): the person's text for the file the view opened; the app layer judges it again and writes.
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "path", "text", "baseDigest"]);
+        const { path, text, baseDigest } = args;
+        if (typeof path !== "string" || path === "" || path.length > MAX_PATH_CHARS || path.includes(" ")) throw new ArgsError();
+        if (typeof text !== "string" || text.length > MAX_TEXT_CHARS || typeof baseDigest !== "string" || !/^[0-9a-f]{64}$/.test(baseDigest)) throw new ArgsError();
+        return textWrittenValue(await deps.app.writeWorkspaceText({ settings: taskForm(workspace, null, null), path, text, baseDigest }));
       }
       case "configFile":
         // U-69: for the main process only (show the config file in the folder).

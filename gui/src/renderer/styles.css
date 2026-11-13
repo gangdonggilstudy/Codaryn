@@ -463,3 +463,9 @@ button:focus-visible,
     color: #aaa;
   }
 }
+/* U-184 (3.14): Save and Back to when opened under the text. */
+.text-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.4rem 0;
+}

@@ -40,6 +40,8 @@ export interface ShellHandlers {
   readonly newTask?: () => void;
   readonly settings?: () => void;
   readonly refresh?: () => void;
+  /** U-184 (3.14): whether the shown screen may give way to `to` (false: it asks first and stays). */
+  readonly leaving?: (from: string, to: string) => boolean;
 }
 
 export class Shell {
@@ -110,6 +112,8 @@ export class Shell {
   show(id: string): void {
     const screen = this.screens.find((candidate) => candidate.id === id);
     if (screen === undefined) return;
+    // U-184: a screen holding an unsaved edit asks before it is left or drawn again.
+    if (this.current !== null && this.handlers.leaving?.(this.current, id) === false) return;
     this.current = id;
     for (const [screenId, tab] of this.buttons) {
       if (screenId === id) tab.setAttribute("aria-current", "page");

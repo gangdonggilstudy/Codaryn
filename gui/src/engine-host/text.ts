@@ -92,3 +92,43 @@ export function textValue(outcome: unknown, shownText: (text: string) => string)
     readOnlyReasons: finalReasons,
   };
 }
+
+const WRITE_STATUSES = ["written", "unchanged", "conflict", "workspace_locked", "not_editable", "text_refused", "path_changed", "write_failed", ...TEXT_NOT_OPENED] as const;
+const PROBLEMS = ["masked", "control_characters", "too_large"] as const;
+
+export type TextWrittenValue =
+  | {
+      readonly ok: true;
+      readonly status: (typeof WRITE_STATUSES)[number];
+      readonly digest: string | null;
+      readonly readOnlyReasons: readonly TextReadOnlyReason[];
+      readonly textProblems: readonly (typeof PROBLEMS)[number][];
+      readonly lockLeft: boolean;
+    }
+  | { readonly ok: false; readonly code: string };
+
+/**
+ * U-184 (DR-72, adapter-contract 5.15): `writeWorkspaceText`'s outcome as the host's value: the
+ * status, the new digest (written, unchanged), the reasons (not_editable) or problems (text_refused),
+ * and whether the lock was left. Anything else is host_error; an app error comes as its code.
+ */
+export function textWrittenValue(outcome: unknown): TextWrittenValue {
+  if (!isObj(outcome)) return HOST_ERROR;
+  if (outcome["ok"] !== true) {
+    const code = isObj(outcome["error"]) ? outcome["error"]["code"] : undefined;
+    return { ok: false, code: typeof code === "string" && CODE.test(code) ? code : "host_error" };
+  }
+  const output = outcome["output"];
+  if (!isObj(output) || output["kind"] !== "workspace_text_write") return HOST_ERROR;
+  const { status, digest, lockLeft, textProblems } = output;
+  const reasons = reasonsOf(output["readOnlyReasons"]);
+  if (typeof status !== "string" || !(WRITE_STATUSES as readonly string[]).includes(status) || typeof lockLeft !== "boolean" || reasons === null) return HOST_ERROR;
+  if (!(digest === null || (typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest)))) return HOST_ERROR;
+  if (!Array.isArray(textProblems) || textProblems.length > PROBLEMS.length) return HOST_ERROR;
+  const problems: (typeof PROBLEMS)[number][] = [];
+  for (const problem of textProblems) {
+    if (typeof problem !== "string" || !(PROBLEMS as readonly string[]).includes(problem) || problems.includes(problem as (typeof PROBLEMS)[number])) return HOST_ERROR;
+    problems.push(problem as (typeof PROBLEMS)[number]);
+  }
+  return { ok: true, status: status as (typeof WRITE_STATUSES)[number], digest, readOnlyReasons: reasons, textProblems: problems, lockLeft };
+}

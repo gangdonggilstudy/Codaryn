@@ -288,6 +288,58 @@ startGui({
             const back = await js("document.getElementById('work')?.getAttribute('data-screen') ?? null");
             return { ready, value: area?.value ?? null, readOnly: area?.readOnly ?? null, back };
           })();
+          // U-184 (DR-72, 3.14): saving, by the edit token and the text only.
+          results["textEdit"] = await (async () => {
+            type Saved = { ok: boolean; saved?: boolean; status?: string; textProblems?: string[]; editToken?: string; code?: string };
+            const save = async (token: string, body: string): Promise<Saved> => (await js(`window.codaryn.saveText(${JSON.stringify(token)}, ${JSON.stringify(body)})`)) as Saved;
+            const outcome = (reply: Saved): string => (reply.ok ? (reply.saved === true ? "saved" : (reply.status ?? "")) : (reply.code ?? ""));
+            const asked = (): number => dialogs.filter((id) => id === "textSave.message").length;
+            const askedBefore = asked();
+            const opened = (await open(idOf("plain.txt"))) as Reply & { editToken?: string | null };
+            const firstToken = opened.editToken ?? "";
+            const first = await save(firstToken, "line one\nline 2\n");
+            const disk = readFileSync(join(dir, "plain.txt"), "utf8");
+            const second = await save(first.editToken ?? "", "line one\nline 3\n");
+            const oldToken = await save(firstToken, "line one\nline 4\n");
+            const before = readFileSync(join(dir, "plain.txt"), "utf8");
+            const refused = await save(second.editToken ?? "", `line one\nsecret ${keyShaped}\n`);
+            writeFileSync(join(dir, "plain.txt"), "changed elsewhere\r\n");
+            const conflict = await save(second.editToken ?? "", "line one\nline 5\n");
+            const unchangedOnDisk = readFileSync(join(dir, "plain.txt"), "utf8") === "changed elsewhere\r\n" && before === "line one\r\nline 3\r\n";
+            const apiAsked = asked() - askedBefore;
+            // The window: open a.txt, type, try to leave (asked, keep), save (a new opened file asks once more).
+            const aBefore = readFileSync(join(SECOND, "a.txt"), "utf8");
+            const ui = await (async () => {
+              await js("[...document.querySelectorAll('.tree [data-kind=\"file\"]')].find((li) => li.textContent.trim().endsWith('a.txt'))?.click(); true");
+              await js("document.getElementById('tree-open')?.click(); true");
+              await waitFor("document.getElementById('text')?.getAttribute('data-editable') === 'true' ? 'ok' : null");
+              await js("(() => { const a = document.getElementById('text-content'); a.value = 'alpha beta'; a.dispatchEvent(new Event('input')); return true; })()");
+              const unsaved = await js("document.getElementById('text-save')?.hasAttribute('disabled') === false");
+              await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+              const leaveAsked = await js("document.getElementById('text-leave')?.hasAttribute('hidden') === false");
+              await js("document.getElementById('text-leave-keep')?.click(); true");
+              const stayed = await js("document.getElementById('work')?.getAttribute('data-screen') ?? null");
+              await js("document.getElementById('text-save')?.click(); true");
+              const saved = await waitFor("document.querySelector('#text-result [data-save]')?.getAttribute('data-save') ?? null");
+              const clean = await js("document.getElementById('text-save')?.hasAttribute('disabled') === true");
+              return { unsaved, leaveAsked, stayed, saved, asked: asked() - askedBefore, disk: readFileSync(join(SECOND, "a.txt"), "utf8"), clean };
+            })();
+            // a.txt goes back to what the later checks expect.
+            writeFileSync(join(SECOND, "a.txt"), aBefore);
+            await js("document.getElementById('text-close')?.click(); true");
+            return {
+              editable: opened.editable,
+              first: outcome(first),
+              disk,
+              second: outcome(second),
+              asked: apiAsked,
+              oldToken: outcome(oldToken),
+              refused: { status: outcome(refused), problems: refused.textProblems ?? [] },
+              conflict: outcome(conflict),
+              unchangedOnDisk,
+              ui,
+            };
+          })();
           return {
             plain: { opened: plain.opened, text: plain.text, masked: plain.masked, editable: plain.editable, reasons: plain.readOnlyReasons, lines: plain.lines },
             key: { opened: key.opened, masked: key.masked, editable: key.editable, firstReason: key.readOnlyReasons?.[0] ?? null, keyShown: (key.text ?? "").includes(keyShaped) },

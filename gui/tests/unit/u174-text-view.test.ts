@@ -127,7 +127,8 @@ test("U-174: the host reads with the tree's form (no profile, no task type) and 
 
 test("U-174: the main process passes the text, the marks and the reasons; never the digest, line ending or byte order mark", () => {
   const reply = toTextReply(textValue(opened(), same));
-  assert.deepEqual(reply, { ok: true, opened: true, text: "first\nsecond\n", masked: false, protected: false, editable: true, readOnlyReasons: [], lines: 3 });
+  // U-184: the token is the main process's to add (toTextReply gives none).
+  assert.deepEqual(reply, { ok: true, opened: true, text: "first\nsecond\n", masked: false, protected: false, editable: true, readOnlyReasons: [], lines: 3, editToken: null });
   assert.equal(JSON.stringify(reply).includes(DIGEST), false);
   assert.deepEqual(toTextReply({ ok: true, status: "too_large" }), { ok: true, opened: false, reason: "too_large" });
   assert.deepEqual(toTextReply({ ok: false, code: "unknown_entry" }), { ok: false, code: "unknown_entry" });

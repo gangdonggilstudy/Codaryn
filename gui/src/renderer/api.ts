@@ -46,6 +46,9 @@ import type {
   TextReadOnlyReason,
   TextNotOpened,
   TextReply,
+  SaveTextReply,
+  TextProblem,
+  TextSaveRefusal,
 } from "../shared/ipc.js";
 import type { CleanupPlanView, CleanupResultView, StateSummaryView } from "../shared/cleanup.js";
 
@@ -59,6 +62,10 @@ export interface CodarynApi {
   reveal(workspace: string, node: string): Promise<unknown>;
   /** U-174 (DR-72, 3.14): the text view of a tree or changes entry, by its id (the main process resolves and checks it). */
   openText(workspace: string, node: string): Promise<unknown>;
+  /** U-184 (DR-72, 3.14): saves the text view's text with its edit token (the main process asks once per opened file and the app layer judges). */
+  saveText(token: string, text: string): Promise<unknown>;
+  /** U-184: tells the main process whether the text view holds an unsaved edit (closing the window asks then). */
+  textDirty(dirty: boolean): Promise<unknown>;
   /** U-62: copies a run id or a digest's first 12 characters (the main process takes nothing else). */
   copyText(text: string): Promise<unknown>;
   /** U-103 (3.3): copies a tree entry's relative path, by its id (the main process resolves and checks it). */
@@ -215,9 +222,34 @@ export function asText(value: unknown): TextReply {
     text,
     masked,
     protected: value["protected"] === true,
-    editable: value["editable"] === true && given.length === 0 && !masked,
+    editable: value["editable"] === true && given.length === 0 && !masked && str(value["editToken"]) && HEX.test(value["editToken"]),
     readOnlyReasons: reasons,
     lines,
+    editToken: str(value["editToken"]) && HEX.test(value["editToken"]) ? value["editToken"] : null,
+  };
+}
+
+const TEXT_PROBLEMS: readonly string[] = ["masked", "control_characters", "too_large"];
+const SAVE_REFUSALS: readonly string[] = ["conflict", "workspace_locked", "not_editable", "text_refused", "path_changed", "write_failed", ...TEXT_NOT_OPENED];
+
+/** U-184: a save's reply (the main process checked it already); unknown reasons or problems are dropped. */
+export function asSaveText(value: unknown): SaveTextReply {
+  if (!isObj(value) || value["ok"] !== true) return failed(value);
+  const lockLeft = value["lockLeft"] === true;
+  if (value["saved"] === true) {
+    const token = value["editToken"];
+    return str(token) && HEX.test(token) ? { ok: true, saved: true, unchanged: value["unchanged"] === true, lockLeft, editToken: token } : { ok: false, code: "host_error" };
+  }
+  const status = value["status"];
+  if (value["saved"] !== false || !str(status) || !SAVE_REFUSALS.includes(status)) return { ok: false, code: "host_error" };
+  const list = (field: string, known: readonly string[]): string[] => (Array.isArray(value[field]) ? (value[field] as unknown[]).filter((item): item is string => str(item) && known.includes(item)) : []);
+  return {
+    ok: true,
+    saved: false,
+    status: status as TextSaveRefusal,
+    readOnlyReasons: list("readOnlyReasons", TEXT_REASONS) as TextReadOnlyReason[],
+    textProblems: list("textProblems", TEXT_PROBLEMS) as TextProblem[],
+    lockLeft,
   };
 }
 

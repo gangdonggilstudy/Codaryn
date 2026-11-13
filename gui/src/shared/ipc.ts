@@ -17,6 +17,8 @@ export const IPC_CHANNELS = {
   runEvents: "codaryn:runs:events",
   checkPlan: "codaryn:plan:check",
   openText: "codaryn:workspace:opentext",
+  saveText: "codaryn:workspace:savetext",
+  textDirty: "codaryn:workspace:textdirty",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -974,6 +976,11 @@ export type TextReply =
       readonly editable: boolean;
       readonly readOnlyReasons: readonly TextReadOnlyReason[];
       readonly lines: number;
+      /**
+       * U-184: when editable, the main process's token for saving this file as opened (bound there to
+       * the workspace, the path and the digest read); null otherwise. The page sends it back with the text.
+       */
+      readonly editToken: string | null;
     }
   | { readonly ok: true; readonly opened: false; readonly reason: TextNotOpened }
   | { readonly ok: false; readonly code: string };
@@ -999,7 +1006,88 @@ export function toTextReply(value: unknown): TextReply {
   }
   // Editable exactly when nothing keeps it read only; masked text is never editable.
   if (editable !== (reasons.length === 0) || (masked && !reasons.includes("masked"))) return fail;
-  return { ok: true, opened: true, text, masked, protected: marked, editable, readOnlyReasons: reasons, lines: text === "" ? 1 : text.split("\n").length };
+  return { ok: true, opened: true, text, masked, protected: marked, editable, readOnlyReasons: reasons, lines: text === "" ? 1 : text.split("\n").length, editToken: null };
+}
+
+/** U-184: the digest the engine host's opened text was read with (checked by toTextReply first), or null. */
+export function textDigestOf(value: unknown): string | null {
+  return isObj(value) && value["ok"] === true && value["status"] === "opened" && typeof value["digest"] === "string" && /^[0-9a-f]{64}$/.test(value["digest"]) ? value["digest"] : null;
+}
+
+/**
+ * U-184 (DR-72, 3.14; adapter-contract 5.15): a person's save of a text the view opened editable.
+ * The page sends the main process's edit token and the textarea's text (LF line breaks, no byte order
+ * mark) only; the main process asks the person once per opened file and the app layer judges and writes.
+ */
+export const TEXT_PROBLEMS = ["masked", "control_characters", "too_large"] as const;
+export type TextProblem = (typeof TEXT_PROBLEMS)[number];
+export const TEXT_SAVE_REFUSALS = ["conflict", "workspace_locked", "not_editable", "text_refused", "path_changed", "write_failed", ...TEXT_NOT_OPENED] as const;
+export type TextSaveRefusal = (typeof TEXT_SAVE_REFUSALS)[number];
+
+export type SaveTextReply =
+  | {
+      readonly ok: true;
+      readonly saved: true;
+      /** The text was the file's already: nothing was written. */
+      readonly unchanged: boolean;
+      /** The workspace lock could not be taken back (the app layer says so; never hidden). */
+      readonly lockLeft: boolean;
+      /** The token for the next save (the file as written now). */
+      readonly editToken: string;
+    }
+  | {
+      readonly ok: true;
+      readonly saved: false;
+      readonly status: TextSaveRefusal;
+      readonly readOnlyReasons: readonly TextReadOnlyReason[];
+      readonly textProblems: readonly TextProblem[];
+      readonly lockLeft: boolean;
+    }
+  | { readonly ok: false; readonly code: string };
+
+/** `saveText` arguments: `{token, text}`; the text a string of well-formed UTF-16 (its size is judged after). */
+export function parseSaveTextArgs(value: unknown): { readonly token: string; readonly text: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["token", "text"])) return null;
+  const { token, text } = value;
+  if (!isHandle(token) || typeof text !== "string") return null;
+  // A lone surrogate cannot be written as UTF-8 (the app layer refuses it too).
+  return /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text) ? null : { token, text };
+}
+
+/** `textDirty` arguments: `{dirty}`, whether the text view holds an unsaved edit. */
+export function parseTextDirtyArgs(value: unknown): boolean | null {
+  return isObj(value) && hasOnlyKeys(value, ["dirty"]) && typeof value["dirty"] === "boolean" ? value["dirty"] : null;
+}
+
+/** A known list, each value once, or null. */
+function knownList<T extends string>(value: unknown, known: readonly T[]): T[] | null {
+  if (!Array.isArray(value) || value.length > known.length) return null;
+  const out: T[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !(known as readonly string[]).includes(item) || out.includes(item as T)) return null;
+    out.push(item as T);
+  }
+  return out;
+}
+
+/**
+ * The engine host's write value, checked field by field. `saved` comes with the new digest (for the
+ * next token, which the caller issues); a refusal with its reasons or problems only.
+ */
+export function toSaveOutcome(value: unknown): { readonly saved: true; readonly unchanged: boolean; readonly digest: string; readonly lockLeft: boolean } | Exclude<SaveTextReply, { readonly saved: true }> {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { status, digest, lockLeft } = value;
+  const reasons = knownList(value["readOnlyReasons"], TEXT_READ_ONLY_REASONS);
+  const problems = knownList(value["textProblems"], TEXT_PROBLEMS);
+  if (typeof lockLeft !== "boolean" || reasons === null || problems === null) return fail;
+  if (status === "written" || status === "unchanged") {
+    return typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest) && reasons.length === 0 && problems.length === 0 ? { saved: true, unchanged: status === "unchanged", digest, lockLeft } : fail;
+  }
+  if (typeof status !== "string" || !(TEXT_SAVE_REFUSALS as readonly string[]).includes(status) || digest !== null) return fail;
+  // Reasons go with not_editable only, problems with text_refused only, and those two are never empty.
+  if ((status === "not_editable") !== reasons.length > 0 || (status === "text_refused") !== problems.length > 0) return fail;
+  return { ok: true, saved: false, status: status as TextSaveRefusal, readOnlyReasons: reasons, textProblems: problems, lockLeft };
 }
 
 /** U-118: `runEvents` arguments: the run, its form, and the page's offset. */

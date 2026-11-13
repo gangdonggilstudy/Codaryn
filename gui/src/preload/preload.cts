@@ -19,6 +19,8 @@ const CHANNELS = {
   runEvents: "codaryn:runs:events",
   checkPlan: "codaryn:plan:check",
   openText: "codaryn:workspace:opentext",
+  saveText: "codaryn:workspace:savetext",
+  textDirty: "codaryn:workspace:textdirty",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -99,6 +101,9 @@ const api = Object.freeze({
   reveal: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.reveal, { workspace: text(workspace), node: text(node) }),
   // U-174 (DR-72, 3.14): the text view of a tree or changes entry, by its id (the page names no path).
   openText: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.openText, { workspace: text(workspace), node: text(node) }),
+  // U-184: a save, by the edit token and the text only (the main process asks and judges); whether an edit is unsaved.
+  saveText: (token: unknown, body: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.saveText, { token: text(token), text: text(body) }),
+  textDirty: (dirty: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.textDirty, { dirty: dirty === true }),
   copyText: (value: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyText, { text: text(value) }),
   copyPath: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyPath, { workspace: text(workspace), node: text(node) }),
   revealConfig: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revealConfig),

@@ -7,7 +7,7 @@
  * - checkApply: a release that answers false (the lock is not this check's any more) is a lock
  *   left too, as for writeWorkspaceText (V-1 L-1).
  * - applyCleanup: the store's CleanupOutcome gains `lockLeft?` (the contract line of this unit); the
- *   app passes it on. The store fills it in nc-human's part, so that test stays todo until then.
+ *   app passes it on. U-201: the store fills it (nc-human), so that test is no longer todo.
  * The handle cases need Windows: another process (PowerShell) opens the lock file sharing reading
  * only, as U-176's tests do, past the release's retries. Temporary folders, scripted model.
  */
@@ -121,7 +121,7 @@ describe("U-193: checkApply's release", () => {
 });
 
 describe("U-193: applyCleanup passes the store's lockLeft", () => {
-  test("the lock held open at the cleanup's release: lockLeft in the outcome", { todo: "the store fills CleanupOutcome.lockLeft (nc-human's part of U-176's hand-off)", skip: windowsOnly }, async () => {
+  test("the lock held open at the cleanup's release: lockLeft in the outcome", { skip: windowsOnly }, async () => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const work = path.join(base, "work");
     const first = createCodarynApp(await appEnvironment(base));

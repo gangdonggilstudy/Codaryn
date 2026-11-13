@@ -56,6 +56,7 @@ import {
   markdownLineTooLongNote,
 } from "../contracts/index.js";
 import type { MarkdownEvidenceItem, MarkdownHeading, MarkdownHeadingsRule, MarkdownLinksRule, Workspace } from "../contracts/index.js";
+import { FILE_NOT_JUDGED_NOTE } from "./unreadable.js";
 
 /** The contract's reader bounds (R-89 M-1, U-143), exported here as well for this module's readers. */
 export { MAX_MARKDOWN_BRACKET_DEPTH, MAX_MARKDOWN_LINE_CHARS };
@@ -721,6 +722,8 @@ export async function loadMarkdown(rulePath: string, workspace: Workspace, maxBy
 export interface MarkdownVerdict {
   readonly state: "held" | "not_held" | "undecided";
   readonly note: string;
+  /** U-276: not compared, since a file it looks at is under unreadable paths. */
+  readonly notCompared?: true;
 }
 
 /** M-2: whether a document heading is the listed one. */
@@ -746,6 +749,11 @@ export interface MarkdownCheckOptions {
   readonly maxBytes?: number;
   /** The run's signal (cancellation, time limit), looked at between the long steps (R-89 M-1, L-2). */
   readonly signal?: AbortSignal;
+  /**
+   * U-276 (V-28 H1): whether a real path relative to the root is under the run's unreadable paths. A
+   * links rule with a target there is not compared, whether the target is there or not.
+   */
+  readonly isUnreadable?: (relative: string) => Promise<boolean>;
 }
 
 /** `markdown_headings`: the listed headings are in the document (in the listed order with "in_order"). */
@@ -786,12 +794,14 @@ export async function checkMarkdownHeadings(rule: MarkdownHeadingsRule, workspac
 }
 
 /** What looking at one target found. */
-type TargetLook = { readonly kind: "exists" | "missing" | "outside" } | { readonly kind: "unsure"; readonly code: string };
+type TargetLook = { readonly kind: "exists" | "missing" | "outside" | "unreadable" } | { readonly kind: "unsure"; readonly code: string };
 
-async function lookAtTarget(relative: string, workspace: Workspace): Promise<TargetLook> {
+async function lookAtTarget(relative: string, workspace: Workspace, isUnreadable?: (relative: string) => Promise<boolean>): Promise<TargetLook> {
   const resolved = await workspace.resolve(relative, "read");
   // A link inside that leads outside, or a name the workspace refuses (it cannot exist there).
   if (!resolved.ok) return { kind: resolved.code === "invalid_path" ? "missing" : "outside" };
+  // U-276: before anything is looked at there.
+  if (isUnreadable !== undefined && (await isUnreadable(resolved.path.relative))) return { kind: "unreadable" };
   try {
     await fs.stat(resolved.path.absolute);
     return { kind: "exists" };
@@ -823,9 +833,11 @@ export async function checkMarkdownLinks(rule: MarkdownLinksRule, workspace: Wor
     let look = looked.get(judged.relative);
     if (look === undefined) {
       if (stopped(options.signal)) return CANCELLED_WHILE_CHECKING;
-      look = await lookAtTarget(judged.relative, workspace);
+      look = await lookAtTarget(judged.relative, workspace, options.isUnreadable);
       looked.set(judged.relative, look);
     }
+    // U-276: one target under unreadable paths and the rule is not compared, nothing of it said.
+    if (look.kind === "unreadable") return { state: "undecided", note: FILE_NOT_JUDGED_NOTE, notCompared: true };
     if (look.kind === "missing" || look.kind === "outside") broken.push({ text: link.target, detail: `line ${link.line}, ${look.kind}` });
     else if (look.kind === "unsure") unsure.push({ text: link.target, detail: `line ${link.line}, ${look.code}` });
   }

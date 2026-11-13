@@ -233,7 +233,8 @@ describe("U-208: query_table on a table under the unreadable paths", () => {
   test("describe: counts of a table of at least k rows; of fewer, the column names only", async () => {
     const people = shapeOf(await query({ path: "private/people.csv", describe: true }, PRIVATE));
     assert.equal(people.rows, 15);
-    assert.deepEqual(people.columns[1], { name: "city", nonEmpty: 14, numeric: 0 });
+    // V-19: a count below k is hidden (no cell of city is a number).
+    assert.deepEqual(people.columns[1], { name: "city", nonEmpty: 14, numeric: null });
     const few = shapeOf(await query({ path: "private/few.csv", describe: true }, PRIVATE));
     assert.deepEqual(few, {
       kind: "describe",

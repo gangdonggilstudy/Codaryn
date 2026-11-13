@@ -129,6 +129,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 
 - `change`는 `{kind:"replace_all", content}` 또는 `{kind:"replace_text", oldText, newText}`다.
 - U-189(Codex V-10b): `search_files`의 `truncated`는 상한(항목 수, 파일마다 맞는 줄 수)에 닿았을 때와 함께, 내용 찾기에서 읽지 못해(`io_error`: 읽기가 매번 폴더의 바뀜을 봄, 또는 다른 입출력 실패) 건너뛴 파일이 있을 때도 참이다. 결과가 다 갖춰지지 않았다는 뜻이다. 텍스트가 아니거나 너무 크거나 목록 뒤 없어진 파일은 지금처럼 말없이 건너뛴다. 도구 정의는 바뀌지 않는다.
+- U-213(ne-verify의 읽기 거부 측정, 그 제안 P5): `read_file`, `search_files`, `inspect_files`, `write_file`이 쓰기 전에 읽는 것은 경로 위 폴더의 바뀜을 보면 다시 시도한다. 곧바로 두 번 하고, 그 뒤 50·200·500 ms를 기다리며 한다(모두 6번). 그래도 매번 바뀌면 지금처럼 `io_error`다. 기다림은 처음 세 번이 모두 바뀜일 때만 생긴다. 그래서 보통의 읽기는 느려지지 않고, 1초 안팎의 몰아치기(npm install, git checkout) 동안 한 번의 읽기가 가장 길게 약 0.75초 더 걸린다. 목록, `inspect_files`, 그리고 `search_files`의 목록과 그 모든 읽기는 시작부터 2초가 지난 뒤 새 시도를 시작하지 않는다(큰 트리에서 시도가 쌓이지 않게). 실행이 취소되면 기다림은 곧바로 끝나고 더 시도하지 않는다. 도구 정의, 오류 코드, 오류 글은 바뀌지 않는다(`inspect_files`는 기다림 중 취소되면 이미 있는 `cancelled` 글을 준다).
 - DR-72(U-173): `write_file`이 남길 파일이 디스크 바이트(UTF-8, BOM 포함)로 `MAX_WRITE_BYTES`(16 MiB)를 넘으면 `too_large`다. 원본을 남기지 않고 아무것도 쓰지 않는다. 읽기 상한 `MAX_READ_BYTES`(256 KiB)와 따로 둔다. 검증기는 그보다 큰 문서·표를 읽기 때문이다(`MAX_MARKDOWN_RULE_FILE_BYTES`, `MAX_DATA_TABLE_BYTES`). 그래서 256 KiB보다 크게 쓴 파일은 지금처럼 `read_file`·`write_file`이 다시 읽지 못한다. 도구 정의(`TOOL_DEFINITIONS`)는 바뀌지 않는다.
 - 요구 권한, 복원 가능 필드, 문서 필드는 `BUILTIN_TOOLS`에 고정되어 있다. 모델과 task가 낮출 수 없다. 오류 코드는 `TOOL_ERROR_CODES`, 상한은 `MAX_READ_BYTES` 등 `tool.ts`의 상수를 쓴다. 자식 프로세스 환경은 `CHILD_ENV_ALLOWLIST`만 전달한다.
 - 거부된 호출은 실행을 끝내지 않는다. `ok:false`인 `ToolResult`로 모델에 돌아간다.
@@ -318,6 +319,8 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `key_in_config` | `key_in_file` | — | 설정 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `config_missing` | `invalid_config` | — | 간편 형식·한 줄 실행에서 설정 파일이 아예 없음(`codaryn init`으로 만든다, 15절 "처음 시작 안내") |
 | `plan_run_not_available` | `invalid_task`, `invalid_config` | — | U-177이 B-4 전까지 `plan: "run"`을 받지 않을 때 쓰던 힌트. U-195부터 주지 않는다(값은 더하기만이라 남는다, 18.1) |
+| `plan_kind_differs` | `run_not_plan` | — | U-228: 그 실행에는 계획이 있지만 `apply`에 준 task가 수행하는 종류가 아님(바꿀 파일 계획에 계획 방식 `apply`나 계획 방식 없는 task, 이동 계획에 계획 방식 `run`이나 계획 방식 없는 task). 사람용 오류는 `run_not_plan`의 줄 대신 `error.run_not_plan.other_kind`를 쓰고, 이 힌트를 고치는 법으로 준다 |
+| `plan_tool_missing` | `invalid_task`, `invalid_config` | — | U-228(U-224): 작업 종류가 계획 방식의 계획 도구 없이 해석됨(`run`에는 `propose_changes`, `apply`에는 `propose_plan`). 문제 코드 `plan_tool_missing` |
 | `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
 | `key_field_in_task` | `key_in_file` | `field`: 필드 자리 | task 파일의 그 필드에 키 필드나 키 값이 있음 |
 | `key_field_in_config` | `key_in_file` | `field`: 필드 자리 | 설정 파일의 그 필드에 키 필드나 키 값이 있음 |
@@ -1129,6 +1132,8 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - `plan: "apply"`는 약하게 바꿀 수 없다.
   - U-195(DR-69 B-4): 파서(`parsePlanMode`)는 `PLAN_MODES`의 값을 모두 받는다. U-177(검토 R-99 M-2)이 B-4 전까지 하던 `plan: "run"`의 거부는 없어졌고 그 힌트 `plan_run_not_available`은 주지 않는다. 틀린 값은 `plan must be one of none, apply, run`이다.
     - `plan: "run"`의 계획 실행이 계획을 저장하려면 그 실행의 도구에 `propose_changes`가 있어야 한다. 지금 내장 작업 종류에는 그 도구를 둔 것이 없으므로, 설정 파일의 작업 종류 정의(`tools`에 `propose_changes`, `plan: "run"`)와 그것을 가리키는 `workflowRef`나 `--workflow`로 쓴다.
+    - U-224(p4g): 계획 방식이 `run`인데 도구에 `propose_changes`가 없거나, `apply`인데 `propose_plan`이 없으면 해석에서 거부한다(`plan_tool_missing`, 자리는 정의의 `workflows.tools`, task의 `tools`, task의 `plan` 가운데 고칠 곳). 전에는 모델까지 가서 `failed`/`model_error`로 끝났다.
+    - U-228: 그 오류에는 힌트 `plan_tool_missing`(계획 방식마다 필요한 도구와 고치는 법)이 붙는다. doctor는 실행처럼 작업 종류를 해석해, 이 문제일 때 고칠 파일의 점검을 `fail`로 한다. 정의나 프로필이면 `config_file`(`doctor.config_file.plan_tool_missing`), 아니면 `task_file`(`doctor.task_file.plan_tool_missing`)이다. 메시지는 실행의 글이다. 다른 해석 문제는 전처럼 실행이 말한다.
   - `plan_weakened`(U-180: task는 정의의 `apply`·`run`을 그대로 두거나 `none` 정의 아래에서만 정한다)의 글은 task와 정의의 방식을 둘 다 말한다. 정의 `apply`에 task `none`이면 전과 같은 `plan cannot be "none" under a workflow with plan "apply"`다(U-195).
   - `allowCommands: false`인 작업 종류에서는 `policy.commands`를 쓸 수 없다.
     - 이 금지는 모델이 부를 수 있는 명령(정책의 명령 규칙)에 대한 것이다(GT-D10). 사람이 task나 설정에 둔 `command` 검증기는 막지 않는다(설계 4.3). 그 검증기는 적용 뒤, 인벤토리 점검 다음에 실행되므로, 거기서 바꾼 파일은 인벤토리가 보지 않는다(검토 R-11 L-3, PM 판단 P-3 대기).
@@ -1204,6 +1209,7 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
 - `--run latest`는 받지 않는다. 승인이 계획 하나를 가리켜야 하기 때문이다.
 - 거부 조건(모두 종료 2, 아무것도 옮기지 않는다)
   - task가 `plan: "apply"` 작업 종류로 해석되지 않으면 `run_not_plan`
+    - U-228: task가 계획 방식 없이 해석되면 먼저 그 실행의 계획을 읽는다. 계획이 있으면 메시지가 그 종류를 말하고(`that run made a plan of files to write (plan "run"), but the task given to apply resolves to no plan mode; …`, 이동 계획이면 `a plan of moves and discards (plan "apply")`) 힌트 `plan_kind_differs`가 붙는다. 계획이 없으면 `the task given to apply resolves to no plan mode (neither plan "apply" nor plan "run"); nothing was moved or run`이다.
   - 이미 적용된 계획이면 `plan_already_applied`
 - 승인
   - `--digest`가 저장된 다이제스트의 앞부분이어야 한다(`MIN_PLAN_DIGEST_PREFIX` = 12자 이상).
@@ -1233,8 +1239,10 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
   - 그 동의의 경로는 `adapter`, 다이제스트는 적용하는 계획의 전체 다이제스트여야 한다. 아니면 실행 전에 `invalid_arguments`다. 동의가 null이면 `consent_required`로 끝나고 다시 묻지 않는다. GUI가 사람에게 묻고 다시 부른다.
 - **run 계획의 적용(U-195, DR-69 B-3, B-4, B-7):** task가 `plan: "run"`으로 해석되면 `apply`는 run 계획(`kind: "changes"`)을 모델 실행으로 수행한다.
   - 종류가 맞지 않으면 양쪽 다 `run_not_plan`이다(이동 계획 task에 run 계획, run 계획 task에 이동 계획).
+    - U-228: 그 실행에는 계획이 있으므로 힌트 `plan_kind_differs`가 붙는다. 사람용 오류는 `run_not_plan`의 줄(계획이 없는 실행의 글과 `plan_pending` 안내) 대신 `error.run_not_plan.other_kind`와, 고치는 법으로 그 힌트(계획을 만든 실행이 쓴 task를 준다)를 낸다. JSON의 `code`와 두 메시지는 그대로다.
   - 묻거나 보내거나 쓰기 전에 거부한다: 이미 수행한 계획(`plan_already_applied`), 기록 변경 표시(`plan_records_changed`), 위험한 이동 동의(`--allow-unsafe-move`나 adapter의 동의, `invalid_arguments`: 이동에만 쓴다), 가린 조각이 다름(`plan_secrets_differ`), goal을 읽을 수 없는 계획 실행(`invalid_run_record`).
   - 승인은 이동 계획과 같다(`--digest`, run 계획의 보기를 보이는 터미널 질문, adapter). 다른 task로 만든 계획의 알림(U-131)도 같다. 실행 환경이 없는 빌드는 `internal_error`다.
+    - U-228(U-198의 글): 터미널 질문은 run 계획의 보기, 다른 task의 알림, 승인이 시작하는 것(`apply.changes.what`: 파일 도구가 이 파일들에만 쓰는 실행, 요약이 보이면 `apply.changes.summary_note`, task가 명령을 허용하면 `apply.changes.commands_note`), 그다음 `apply.changes_question`과 `[y/N]`이다. 이동 계획의 `apply.question`이 아니다.
   - 실행: 실행 환경(`ApplyCommandEnvironment.run`, CLI는 `run`과 같은 환경)으로 `runPrepared`가 승인된 계획을 넘겨 돈다. 조립은 계획 실행을 claim할 수 있게 만들어지고(`AssemblyInput.planRunId`), 엔진의 `runApprovedPlan`이 계획 파일을 확인하고, 계획을 한 번만 claim하고(`applied.json`), 계획 파일만 쓰게 한다.
   - **잠금 아래 다시 봄(PM, 이동 계획의 U-1과 같게):** 조립이 잠금을 잡은 뒤 엔진이 시작하기 전에 계획 실행의 기록 변경 표시를 다시 본다. 표시가 있거나 볼 수 없으면 `plan_records_changed`이고, 기록·요청·쓰기·claim 없이 잠금을 놓는다.
   - **goal:** 계획을 만든 실행의 goal이다. 그 실행 journal의 첫 모델 요청의 user 메시지(그 실행이 가린 글)이고, task 형식과 상관없다. 모델의 요약은 goal이 아니라 엔진이 시스템 글에 승인된 계획으로 넣는다.

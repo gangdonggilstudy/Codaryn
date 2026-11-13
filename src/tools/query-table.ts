@@ -10,6 +10,10 @@
  *   (guard.ts); a change seen is tried again, still seen it is `io_error`.
  * - A table under unreadable paths: count, sum and mean only (`op_not_allowed`) and the run's k; any
  *   other table: all five operations and k 1 (nothing hidden).
+ * - Codex V-19: on such a table a value into which fewer than k cells went is null too, its index in
+ *   the group's `fewCells` (shownValues), and describe hides each count below k (shownShape). The
+ *   cells of a sum or mean are its column's non-empty cells in the group, read with one more count of
+ *   that column, which is not given.
  * - Groups come MAX_QUERY_RESULT_GROUPS at a time; `next` is a cursor of the shown groups' ordinals
  *   (QUERY_CURSOR_PATTERN_SOURCE), never a key.
  * - A failure's message names a code and a row, line or argument index, never a cell's text, a path
@@ -31,8 +35,9 @@ import {
   queryCursorOf,
   shownGroups,
   shownShape,
+  shownValues,
 } from "../contracts/index.js";
-import type { QueryTableArgs, QueryTableProblem, RawWorkflowToolOutcome, TableFormat, ToolErrorCode, Workspace } from "../contracts/index.js";
+import type { QueryGroup, QueryOperation, QueryTableArgs, QueryTableProblem, RawWorkflowToolOutcome, TableFormat, ToolErrorCode, Workspace } from "../contracts/index.js";
 import type { PathSet } from "../policy/path-set.js";
 import { queryTable, tableShape } from "../tabular/index.js";
 import type { TableQueryOutcome, TableReadFailure, TableShapeOutcome } from "../tabular/index.js";
@@ -152,6 +157,34 @@ function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>): Failur
   }
 }
 
+/**
+ * V-19: the operations to read and, for each asked one, the index of the read value that counts its
+ * cells: a count is its own; a sum or mean takes a count of its column added after the asked ones
+ * (every non-empty cell of that column in a group is a number, or the query is not_number). With
+ * k 1 nothing is added.
+ */
+function withCellCounts(operations: readonly QueryOperation[], minGroupSize: number): { readonly read: readonly QueryOperation[]; readonly cells: readonly number[] } {
+  if (minGroupSize <= 1) return { read: operations, cells: operations.map((_, index) => index) };
+  const read: QueryOperation[] = [...operations];
+  const counted = new Map<string, number>();
+  const cells = operations.map((operation, index) => {
+    if (operation.op === "count") return index;
+    const known = counted.get(operation.column);
+    if (known !== undefined) return known;
+    read.push({ op: "count", column: operation.column });
+    counted.set(operation.column, read.length - 1);
+    return read.length - 1;
+  });
+  return { read, cells };
+}
+
+/** V-19: a computed group as it may be given: the asked values, those of fewer than k cells left null. */
+function shownGroup(group: QueryGroup, asked: number, cells: readonly number[], minGroupSize: number): QueryGroup {
+  const counts = cells.map((index) => group.values[index] ?? 0);
+  const shown = shownValues(group.values.slice(0, asked), counts, minGroupSize);
+  return { keys: group.keys, rows: group.rows, values: shown.values, ...(shown.fewCells.length > 0 ? { fewCells: shown.fewCells } : {}) };
+}
+
 /** True when groupBy names one column twice (it holds at most MAX_QUERY_GROUP_COLUMNS, 2). */
 function duplicateGroupBy(groupBy: readonly string[]): boolean {
   return groupBy.length === 2 && groupBy[0] === groupBy[1];
@@ -194,11 +227,12 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
   }
 
   const limits = { maxBytes: deps.maxTableBytes ?? MAX_QUERY_TABLE_BYTES, chunkBytes: deps.chunkBytes ?? CHUNK_BYTES };
+  const reading = withCellCounts(operations, k);
   let outcome: TableQueryOutcome | TableShapeOutcome | "changed" | "not_found" | "not_file" | "too_large" | "io_error";
   try {
     outcome = await retried(() =>
       readChunks<TableQueryOutcome | TableShapeOutcome>(workspace, resolved.path.relative, resolved.path.absolute, limits, signal, (chunks) =>
-        args.describe === true ? tableShape(chunks, format) : queryTable(chunks, format, { groupBy: args.groupBy ?? [], operations, maxGroups: MAX_QUERY_COUNTED_GROUPS }),
+        args.describe === true ? tableShape(chunks, format) : queryTable(chunks, format, { groupBy: args.groupBy ?? [], operations: reading.read, maxGroups: MAX_QUERY_COUNTED_GROUPS }),
       ),
     );
   } catch (error) {
@@ -221,10 +255,12 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
   // problems and the first place's own (src/tabular leaves this to the tool).
   if (duplicateGroupBy(args.groupBy ?? []) && !problemBefore(result, 1)) return rejected("duplicate_column", "groupBy[1]");
   if (!result.ok) return queryFailure(result);
-  // DR-70: only the groups of at least k rows; the others merged into their number.
+  // DR-70: only the groups of at least k rows; the others merged into their number. V-19: in those,
+  // only the values of at least k cells.
   const shown = shownGroups(result.groups, k);
+  const given = shown.groups.map((group) => shownGroup(group, operations.length, reading.cells, k));
   // A cursor names a shown group; one at or past the end names none (`next` is null there).
-  if (args.after !== undefined && start >= shown.groups.length) return rejected("after_not_found");
+  if (args.after !== undefined && start >= given.length) return rejected("after_not_found");
   const end = start + MAX_QUERY_RESULT_GROUPS;
   return {
     ok: true,
@@ -232,9 +268,9 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
       kind: "groups",
       groupBy: [...(args.groupBy ?? [])],
       operations: operations.map((operation) => ({ op: operation.op, column: operation.column })),
-      groups: shown.groups.slice(start, end),
+      groups: given.slice(start, end),
       suppressedGroups: shown.suppressedGroups,
-      next: end < shown.groups.length ? queryCursorOf(end) : null,
+      next: end < given.length ? queryCursorOf(end) : null,
       minGroupSize: k,
     },
   };

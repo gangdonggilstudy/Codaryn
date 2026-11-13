@@ -380,10 +380,17 @@ const notWritableHint = (count: number): string =>
   `Writes denied because the file is not in writablePaths: ${count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.`;
 
 /** G-A: what each workflow problem means, after the field position (never a value). */
+/** U-228: what a workflow problem means after its field (doctor tells plan_tool_missing with it). */
+export function workflowProblemText(problem: WorkflowProblem): string {
+  return WORKFLOW_PROBLEM_TEXT[problem];
+}
+
 const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
   unknown_workflow: "names no built-in workflow and no workflows entry of the config file",
   tool_not_allowed: "names a tool the workflow definition does not offer (tools only narrow)",
   plan_weakened: 'cannot be "none" under a workflow with plan "apply"',
+  // U-224 (p4g; one line in this file for the contract's new problem).
+  plan_tool_missing: 'leaves out the plan tool of the plan mode: "apply" needs propose_plan and "run" needs propose_changes among the tools',
   commands_not_allowed: "must be empty: the workflow allows no command",
   review_without_checklist: 'is required with completion "human_review"',
   checklist_without_review: 'is only allowed with completion "human_review"',
@@ -849,7 +856,9 @@ export async function prepareTask(
       positionDiagnostic(file, { code: "invalid_value", field: resolved.field }),
     );
     // U-37: a task type neither built in nor in the config's workflows.
-    return resolved.problem === "unknown_workflow" ? withHint(workflowError, "task_type_not_found") : workflowError;
+    if (resolved.problem === "unknown_workflow") return withHint(workflowError, "task_type_not_found");
+    // U-228 (U-224): which plan tool each plan mode needs, in the chosen language.
+    return resolved.problem === "plan_tool_missing" ? withHint(workflowError, "plan_tool_missing") : workflowError;
   }
   // DR-41 (PM after 27afb01): where a definition applies its rules are not loosened. A task file's
   // own policy is merged with them here (resolveWorkflow above counted its own command rules first,

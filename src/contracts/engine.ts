@@ -579,6 +579,13 @@ export interface CliErrorOutput {
  *   takes "run"; it stays listed, as hints are only added (cli-contract 8.3).
  * - key_in_file: key_in_goal, key_in_task, key_in_config (where a key value was found);
  *   key_field_in_task or key_field_in_config when its place is a SchemaFieldPath.
+ * - run_not_plan: plan_kind_differs (U-228): the run has a plan, of another kind than the task given
+ *   to apply carries out (a plan of files to write with a task of plan "apply" or of no plan mode, a
+ *   plan of moves with a task of plan "run" or of no plan mode). The human error then says the plan
+ *   is of another kind (`error.run_not_plan.other_kind`) and gives this hint as its fix, in place of
+ *   run_not_plan's own lines, which speak of a run without a plan.
+ * - invalid_task, invalid_config: plan_tool_missing (U-228, U-224): the task type resolves to a plan
+ *   mode without its plan tool among the tools (WORKFLOW_PROBLEMS `plan_tool_missing`).
  * Each has a listed `error.hint.<hint>` without parameters; DETAILED_CLI_ERROR_HINTS are apart.
  */
 export const CLI_ERROR_HINTS = [
@@ -601,6 +608,8 @@ export const CLI_ERROR_HINTS = [
   "key_in_config",
   "config_missing",
   "plan_run_not_available",
+  "plan_kind_differs",
+  "plan_tool_missing",
 ] as const;
 export type CliErrorHint = (typeof CLI_ERROR_HINTS)[number];
 /**

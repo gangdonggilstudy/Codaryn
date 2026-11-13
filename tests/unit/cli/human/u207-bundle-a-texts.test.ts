@@ -116,11 +116,12 @@ for (const language of MESSAGE_LANGUAGES) {
     test("with writes refused as not writable too (U-198): their lines first, then the unreadable ones, each with its advice", () => {
       const lines = summaryOf(result(), context({ deniedToolCalls: 6, deniedNotPlanned: 1, deniedNotWritable: 2, deniedUnreadable: 3 }));
       const at = lines.indexOf(t("summary.denied", { count: 6 }));
-      assert.deepEqual(lines.slice(at + 1, at + 7), [
+      // U-221 (main 57abacf): the not-writable count has no advice line in the summary any more; the
+      // progress line before it gives that advice.
+      assert.deepEqual(lines.slice(at + 1, at + 6), [
         t("summary.denied_not_planned", { count: 1 }),
         t("summary.denied_not_planned_hint"),
         t("summary.denied_not_writable", { count: 2 }),
-        t("summary.denied_not_writable_hint"),
         t("summary.denied_unreadable", { count: 3 }),
         t("summary.denied_unreadable_hint"),
       ]);

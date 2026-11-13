@@ -181,6 +181,15 @@ export const resolveWorkflow: ResolveWorkflow = (input): ResolveWorkflowOutcome 
     } else if (tools.some(otherMode)) {
       return { ok: false, problem: "tool_not_allowed", field: "workflows.tools" };
     }
+    // U-224: the mode's own plan tool must be among the tools, or the run can never store a plan.
+    const ownPlanTool = (name: AnyToolName): boolean => {
+      const descriptor = ALL_TOOL_DESCRIPTORS[name];
+      return descriptor.endsRun === "plan" && descriptor.planMode === plan;
+    };
+    if (!tools.some(ownPlanTool)) {
+      const field = base.tools.some(ownPlanTool) ? "tools" : base.plan === "none" ? "plan" : "workflows.tools";
+      return { ok: false, problem: "plan_tool_missing", field };
+    }
   }
 
   const completion = task.completion ?? base.completion;

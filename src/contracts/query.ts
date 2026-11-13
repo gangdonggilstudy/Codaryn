@@ -21,6 +21,18 @@
  * U-210 (A-6): the parsers take `unreadablePaths` and `minGroupSize`, the CLI fills the run's list
  * and k and gives them to the gate and the tool runner, and `analyze-private` is built in.
  *
+ * Codex V-19 (DR-70, PM): "held by at least k rows together" binds the cells that went into each
+ * number too, not only the rows of its group. On a table under unreadablePaths (k at least 5; a
+ * table's k 1 hides nothing):
+ * - a group's value (QueryGroup.values) is given only when at least k cells went into it: for sum and
+ *   mean the column's non-empty cells of the group (each one a number, or the query is not_number),
+ *   for count the cells it counts, which is the value itself. Otherwise the value is null and its
+ *   operation's index is in QueryGroup.fewCells. A group of k rows whose column holds one number
+ *   gives neither that number as its sum or mean nor a count of 1.
+ * - The same holds for the one group without groupBy, and would hold for any row merging hidden
+ *   groups (there is none: they are merged into suppressedGroups, a number of groups only).
+ * - describe: a column's nonEmpty or numeric below k is null, as when the table's rows are hidden.
+ *
  * The reading's rules (U-202, accepted by the PM for U-208):
  * - A row whose cell in any groupBy column is empty is left out of the groups and counted apart; that
  *   count is not given to the model. Only rows in a group are aggregated, so a cell of a row left out
@@ -135,7 +147,7 @@ export function queryCursorIndex(cursor: string): number | null {
 /**
  * Q-6: one column as `describe` gives it: its name, its non-empty cells and those read as numbers.
  * The counts are null when the table's rows are hidden (a table under unreadablePaths with fewer
- * than k data rows).
+ * than k data rows), and (V-19) each count below k is null on such a table.
  */
 export interface QueryColumnShape {
   readonly name: string;
@@ -149,6 +161,11 @@ export interface QueryGroup {
   readonly rows: number;
   /** In the order of `operations`; null where the operation has no value (a mean of no number). Not rounded (Q-9). */
   readonly values: readonly (number | null)[];
+  /**
+   * V-19: the indexes (in `operations`) of the values left null because fewer than k cells went into
+   * them, on a table under unreadablePaths (shownValues). Absent when there is none.
+   */
+  readonly fewCells?: readonly number[];
 }
 
 /**
@@ -203,14 +220,34 @@ export function shownGroups(groups: readonly QueryGroup[], minGroupSize: number)
   return { groups: shown, suppressedGroups: groups.length - shown.length };
 }
 
-/** Q-6: a table's shape as `describe` may give it: rows and counts hidden when fewer than `minGroupSize` rows. Pure. */
+/**
+ * V-19 (DR-70): a group's values as they may be given: with k above 1 (a table under
+ * unreadablePaths), each value into which fewer than `minGroupSize` cells went (`cells`, one count per
+ * value) is null and its index listed in `fewCells`. With k 1 the values as they are. Pure.
+ */
+export function shownValues(
+  values: readonly (number | null)[],
+  cells: readonly number[],
+  minGroupSize: number,
+): { readonly values: readonly (number | null)[]; readonly fewCells: readonly number[] } {
+  if (minGroupSize <= 1) return { values, fewCells: [] };
+  const fewCells = values.flatMap((_, index) => ((cells[index] ?? 0) < minGroupSize ? [index] : []));
+  return { values: values.map((value, index) => (fewCells.includes(index) ? null : value)), fewCells };
+}
+
+/**
+ * Q-6: a table's shape as `describe` may give it: rows and counts hidden when fewer than `minGroupSize`
+ * rows; V-19: with k above 1, each count below k hidden too. Pure.
+ */
 export function shownShape(
   columns: readonly QueryColumnShape[],
   rows: number,
   minGroupSize: number,
 ): { readonly columns: readonly QueryColumnShape[]; readonly rows: number | null } {
-  if (rows >= minGroupSize) return { columns, rows };
-  return { columns: columns.map((column) => ({ name: column.name, nonEmpty: null, numeric: null })), rows: null };
+  if (rows < minGroupSize) return { columns: columns.map((column) => ({ name: column.name, nonEmpty: null, numeric: null })), rows: null };
+  if (minGroupSize <= 1) return { columns, rows };
+  const count = (value: number | null): number | null => (value === null || value < minGroupSize ? null : value);
+  return { columns: columns.map((column) => ({ name: column.name, nonEmpty: count(column.nonEmpty), numeric: count(column.numeric) })), rows };
 }
 
 /**

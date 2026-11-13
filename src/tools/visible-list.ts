@@ -17,10 +17,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { MAX_SEARCH_ENTRIES } from "../contracts/index.js";
-import type { ListEntry, ListOutcome, ResolvedPath, Workspace } from "../contracts/index.js";
+import type { GuardedCallOptions, ListEntry, ListOutcome, ResolvedPath, Workspace } from "../contracts/index.js";
 import type { PathSetSnapshot } from "../policy/path-set.js";
 import { nodeFileLayer } from "../workspace/file-layer.js";
-import { FolderWatch, retried, sameChain, walkChain } from "../workspace/guard.js";
+import { FolderWatch, retried, retryDeadline, sameChain, walkChain } from "../workspace/guard.js";
 import { isStateDirName } from "../workspace/lexical.js";
 
 function compareCodeUnits(a: string, b: string): number {
@@ -87,8 +87,12 @@ async function listOnce(workspace: Workspace, dir: ResolvedPath, hidden: PathSet
   return { ok: true, entries, truncated };
 }
 
-/** U-203 (V-13): `dir` listed as Workspace.list does, without what `hidden` covers (see the module's note). */
-export async function listVisible(workspace: Workspace, dir: ResolvedPath, hidden: PathSetSnapshot): Promise<ListOutcome> {
-  const outcome = await retried(() => listOnce(workspace, dir, hidden));
+/**
+ * U-203 (V-13): `dir` listed as Workspace.list does, without what `hidden` covers (see the module's note).
+ * U-213: its tries again as Workspace.list's: the run's signal ends a wait, and no try starts at or
+ * after the caller's time limit (or 2 s from the call).
+ */
+export async function listVisible(workspace: Workspace, dir: ResolvedPath, hidden: PathSetSnapshot, options: GuardedCallOptions = {}): Promise<ListOutcome> {
+  const outcome = await retried(() => listOnce(workspace, dir, hidden), { signal: options.signal, until: options.retryUntil ?? retryDeadline() });
   return outcome === "changed" ? { ok: false, code: "io_error" } : outcome;
 }

@@ -383,7 +383,11 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 - **가릴 값과 작업 공간(U-17, DR-46)**: `settings`로 실행을 시작했다면 지금 등록될 가릴 값으로 다시 가린다(DR-17). 앱은 그 값을 CLI의 1~7단계(`prepareTask`)를 읽기 명령으로(`readOnly`) 돌려 얻는다. 그래서 간편 형식(`workspace`)은 키·모델·실행 한도를 요구하지 않는다(설정 파일이 없어도 된다). 잠금, 기록, 파일을 만들지 않고 아무것도 보내지 않는다. task 파일 형식은 지금처럼 그 파일을 검사한다.
 
 ```ts
-changes(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<ChangesOutput>>;  // runId: id 또는 "latest"
+changes(request: { settings: TaskForm; runId: string }, options?: ChangesOptions): Promise<AppCallOutcome<ChangesOutput>>;  // runId: id 또는 "latest"
+// U-234 (ne-verify의 R-107 O-1): 비교를 그만둘 때의 신호. 현재 파일을 읽을 때마다 넘긴다. U-213 뒤로 변경이 몰아치는 중의 읽기는
+//   시도 사이를 기다리는데(GUARD_PAUSES_MS, 파일마다 가장 길게 750 ms), 신호가 끊기면 그 기다림이 곧 끝나고 다음 시도를 하지 않는다.
+//   아직 바뀌고 있던 파일은 시도가 다한 때처럼 unreadable이다. 없으면 지금처럼 기다린다. GUI는 화면을 떠나거나 요청을 거둘 때 끊으면 된다.
+interface ChangesOptions { signal?: AbortSignal }
 
 interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[]; applyRun?: ChangesApplyRun; recordsChanged?: true }
 // U-16 (UXM-4): 적용 실행일 때만. 그 실행이 적용한 계획 실행과 적용한 동작 수(실행 목록의 판정). 이동·폐기는 계획의 동작이라 files는 비어 있다. 결과가 아직 없으면 없다.

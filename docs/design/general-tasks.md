@@ -4,7 +4,7 @@
 - 기준: main `b386166`(2026-11-12). 코드 근거는 이 커밋의 `파일:줄`이다(`src/`는 생략하고 적는다). **실제 API는 호출하지 않았다.**
 - 상태: PM이 채택했다(main `09bbb2e`). 14절의 결정은 [작업 지시서](../work-orders/phase-4-5-design.md) "결정 (PM)"에 있다.
   - 설계 교차 검토(R-1) 뒤 PM 결정 DR-1, DR-3, DR-5, DR-6, DR-9를 이 개정에 반영했다. 바뀐 곳은 15절에 모았다.
-  - 계약은 G-A가 `src/contracts`(`workflow.ts`, `plan.ts`와 기존 파일의 추가분)에 넣었다(9절). 엔진·도구·검증기·저장·CLI 구현은 아직 없다.
+  - 계약은 G-A가 `src/contracts`(`workflow.ts`, `plan.ts`와 기존 파일의 추가분)에 넣었다(9절). 그때 엔진·도구·검증기·저장·CLI 구현은 없었다. 지금은 있다(1절 첫 문단, U-273).
 - 입력: [roadmap](../roadmap.md) 단계 4, [architecture](../architecture.md), [decisions](../decisions.md)(M-2, M-4, M-8, M-9, M-16), [testing](../testing.md) 8절, [unit-test-plan](../unit-test-plan.md) VF-04·05, [UX 설계](ux-design.md) 6·7절, [사용성 개선 지시](../work-orders/phase-4-usability.md)(N-1, N-8, N-11, N-13).
 
 표기
@@ -15,6 +15,12 @@
 - **[미정]**: 정하지 않은 것이다.
 
 ## 1. 요약
+
+> 이 절과 2절의 [사실]은 설계 때(main `b386166`)의 동작이다. 지금(main `6ef6e3a`)의 동작은 [architecture](../architecture.md) 2·4.4절과 [사용 안내](../usage.md) 18절이 기준이다(U-273에서 맞춤, 코드 기준).
+> - 문서 작성, 자료 분석, 파일 정리는 내장 작업 종류다(`document`, `analyze`, `organize`, 개인정보 표는 `analyze-private`). 설정 파일로 작업 종류를 더할 수 있다.
+> - 파일 정리는 모델이 계획(`propose_plan`)을 내고, 사람이 다이제스트로 승인한 계획을 적용기(`apply`)가 수행한다. 고칠 파일을 계획으로 받는 실행 계획(`plan: "run"`)도 있다.
+> - 검증기 종류에 `data_checks`가 있다. 사람 확인(`review`)과 실행 중 권한 확인(DR-3)이 있다.
+> - 작업 종류 도구(`inspect_files`, `propose_plan`, `propose_changes`, `query_table`)는 그 도구를 고른 실행에만 제시된다.
 
 1. [사실] 문서 작성은 지금도 task 파일 등록만으로 된다(통합 `a02`). 자료 분석은 256 KiB 이하 텍스트 표까지만 다루고, 수치를 검증할 수단이 없다. 파일 정리는 이동·삭제 도구가 없어서 할 수 없다.
 2. [선택] 워크플로는 "이름 붙인 task 기본값 묶음과 상한"(정의)이다. CLI가 정의를 펼쳐 명시적인 task를 만들고, 엔진은 워크플로 이름을 모른다.
@@ -33,6 +39,8 @@
 ## 2. 현재 엔진에서 등록만으로 되는 것
 
 ### 2.1 확인한 사실
+
+아래 표는 설계 때(main `b386166`)의 동작이다. 지금의 동작은 1절 첫 문단을 본다.
 
 | 항목 | 현재 동작 [사실] | 근거 |
 | --- | --- | --- |

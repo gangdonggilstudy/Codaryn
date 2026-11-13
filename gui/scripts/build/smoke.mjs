@@ -369,6 +369,13 @@ const expected = [
   ["runAgainWhileIdle", (v) => v === false],
   // U-65 (3.3): after the run, the tree marks the file it made; choosing it opens its comparison at that file.
   ["treeMarks", (v) => v?.made === "made.txt" && v.note === true],
+  // U-66 (3.4): side by side (one table, the created file's lines on the right), wrapping off, show in folder recorded with the file's name; then back to the defaults.
+  [
+    "changesViews",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({ side: { view: "side", tables: 1, columns: 0, hunks: 1, first: ["none", "added"] }, wrap: "off", status: "ok", shown: ["made.txt"], back: ["column", "on"] }),
+  ],
   ["treeOpensChange", (v) => JSON.stringify(v) === JSON.stringify({ ready: "1", focus: "0", focused: "made.txt" })],
   // U-65: F5 reads the tree again; the protected path setup added is marked, with its note.
   ["treeProtected", (v) => JSON.stringify(v) === JSON.stringify({ before: 0, marked: "package.json", note: true })],

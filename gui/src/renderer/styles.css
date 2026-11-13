@@ -272,6 +272,59 @@ button:focus-visible,
   outline: 2px solid #1a5fb4;
   outline-offset: -2px;
 }
+/* U-66 (3.4): side by side (before | now), and long lines kept on one line when wrapping is off. */
+.changes-view {
+  display: flex;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+.diff-side {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  border: 1px solid #c8c8c8;
+}
+.diff-side th {
+  text-align: left;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 0.2rem 0.4rem;
+}
+.diff-side td.no {
+  width: 3.5rem;
+  color: #555;
+  text-align: right;
+  padding-right: 0.5rem;
+  user-select: none;
+  vertical-align: top;
+}
+.diff-side td.text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  vertical-align: top;
+}
+.diff-side .mark {
+  user-select: none;
+  display: inline-block;
+  width: 1.2rem;
+}
+.diff-side tr:focus {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+#changes[data-wrap="off"] .diff li,
+#changes[data-wrap="off"] .diff-side td.text {
+  white-space: pre;
+  word-break: normal;
+}
+#changes[data-wrap="off"] .changed-file {
+  overflow-x: auto;
+}
+#changes[data-wrap="off"] .diff-side {
+  table-layout: auto;
+}
 @media (forced-colors: active) {
   .diff-added,
   .diff-removed {

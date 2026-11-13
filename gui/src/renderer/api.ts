@@ -437,6 +437,8 @@ export function asChanges(value: unknown): ChangesReply {
             unavailable: str(file["unavailable"]) ? file["unavailable"] : null,
             before: str(file["before"]) ? file["before"] : null,
             after: str(file["after"]) ? file["after"] : null,
+            // U-66: the main process's id for "show in folder", or null.
+            id: str(file["id"]) && HEX.test(file["id"]) ? file["id"] : null,
           },
         ]
       : [],

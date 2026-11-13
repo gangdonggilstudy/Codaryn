@@ -965,6 +965,20 @@ export interface ChangedFileItem {
   readonly unavailable: string | null;
   readonly before: string | null;
   readonly after: string | null;
+  /**
+   * U-66 (3.4): the main process's id for "show in folder" (the tree's ids), or null: given only for a
+   * plain path that is there (not missing, not masked, outside the state directory). Not from the host.
+   */
+  readonly id?: string | null;
+}
+
+/**
+ * U-66: whether the main process gives a changed file an id for "show in folder": its path is plain
+ * (copyablePath), outside the state directory, and the file is not missing or behind a masked path.
+ */
+export function revealableChange(file: ChangedFileItem): boolean {
+  if (file.state === "missing" || file.unavailable === "masked_path" || copyablePath(file.path) === null) return false;
+  return (file.path.split("/")[0] ?? "").toLowerCase() !== ".codaryn";
 }
 
 /** U-48 (U-43, DR-38): `recordsChanged`, the run has a records-changed mark (its files then have no text). */

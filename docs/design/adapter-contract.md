@@ -232,7 +232,8 @@ export interface RunObserver {
    - 시작은 `handle.runId`로, 끝은 `done`으로 안다. `run_finished`를 끝으로 쓰지 않는다. 그 직후에는 result.json이 아직 없을 수 있다(R-1 L-3).
 4. 관찰자의 예외와 느림은 실행 결과를 바꾸지 않는다.
 5. **모든 글 필드를 실행의 게이트로 다시 가린다(DR-15).** 같은 게이트로 이미 가린 글은 그대로 남는다(멱등).
-   - 그 전에 내장 도구가 아닌 이름은 `(unknown tool)`로 바꾼다(R-1 L-1). 대상은 `tool_decision`, `tool_result`, `model_response`와 `model_request` 안의 이전 호출·결과다.
+   - 그 전에 어느 도구 목록에도 없는 이름은 `(unknown tool)`로 바꾼다(R-1 L-1). 대상은 `tool_decision`, `tool_result`, `model_response`와 `model_request` 안의 이전 호출·결과다.
+   - U-250(이행 계획 P-2, R-80 I-1): 그 목록은 실행에 줄 수 있는 모든 도구다(`ALL_TOOL_NAMES`: 내장 넷과 작업 종류 도구 `inspect_files`, `propose_plan`, `propose_changes`, `query_table`). CLI의 진행 줄이 이름을 보이는 것과 같다. 전에는 내장 넷만 남겨 작업 종류 도구가 `(unknown tool)`로 보였다. 목록에 없는 이름(대소문자나 공백이 다른 것 포함)과 가릴 값은 그대로다. 지난 실행의 이벤트 쪽(`listRunEvents`)도 같은 함수(`sanitizeRecord`)를 쓴다. 시험 `tests/unit/app/u250-event-tool-names.test.ts`.
    - 가릴 수 없는 글이 하나라도 있으면 그 이벤트는 보내지 않는다(`seq`가 비어 보인다).
    - 엔진도 목록 밖 도구 이름과 안전하지 않은 호출 id를 기록할 때 바꾼다(AC-D15, G-A 브랜치 `0824dde`). 앱 계층의 다시 가림은 그 뒤에도 남긴다(DR-13).
 6. 글에는 제어 문자가 있을 수 있다. 화면에 내기 전에 어댑터가 정리한다(`src/cli/text-safety.ts:25`와 같은 규칙).
@@ -534,7 +535,7 @@ confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
    - `confirmation_requested { id, kind: "permission", callId, tool, permission, subject, argumentCount }`는 묻기 전에 남긴다.
    - `confirmation_answered { id, decision: "allow_once" | "deny", by: "user" | "default" | "cancelled" }`
    - 둘 다 실행 이벤트로 관찰자에게 간다(DR-15). 순서는 `confirmation_requested` 이벤트 → `confirm` 부름 → `confirmation_answered` 이벤트다(시험).
-   - 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다.
+   - 질문의 `tool`도 `tool_decision`처럼 어느 도구 목록에도 없는 이름이면 `(unknown tool)`이다(U-250).
 - 질문 글은 가림본이다. 화면을 위해 복원하지 않는다. `subject`는 엔진이 이미 제어·보이지 않는 문자를 빼고 키 모양을 가렸다(U-106). 실행 사건 목록(5.13)은 그래도 다른 글처럼 다시 가리고 정리한다.
 - 두 단위는 끝났다: B-5 CLI 터미널 질문은 U-110(병합 `15e49a4`), B-6 GUI 대화상자는 U-124(병합 `aa723d2`, 메인 프로세스의 OS 대화상자, 기본과 Esc는 거부, [독립 GUI 설계](standalone-gui.md) 3.6)다. "기다리는 동안 프로세스가 산다"(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다)는 CLI 쪽 시험 `tests/unit/cli/g-u110-terminal-line.test.ts`가 본다. GUI의 연기 시험은 대화상자 대신 답한다(사람 점검은 [수동 점검](../manual-checks.md) M-3.11).
 

@@ -38,7 +38,7 @@ import path from "node:path";
 import { STATE_DIR_NAME } from "../contracts/index.js";
 import type { MaskedText, PathAccess, PrivacyGateway, ResolvePathOutcome, Workspace } from "../contracts/index.js";
 import { REPLACEMENT, cleanText, hideKeys } from "../cli/text-safety.js";
-import { compileProtectedPaths } from "../policy/protected.js";
+import { compileProtectedPaths } from "../policy/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { appError } from "./errors.js";
 import type { AppCallOutcome, AppError, WorkspaceDirListing, WorkspaceEntry, WorkspaceEntryKind } from "./types.js";

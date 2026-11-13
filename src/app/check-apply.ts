@@ -9,12 +9,11 @@
  *   applied, a records-changed mark and the digest. Here the stored plan is loaded once more (the
  *   store's loadPlan, for its paths) and must be the one the view judged (same digest, not applied).
  * - The judgement is the apply preflight's, action by action, with the apply task's settings:
- *   - the apply task's `planActions` and the policy gate before and after the paths are resolved
- *     (`createPolicyGate`, PLAN_ACTION_DESCRIPTORS), called as `applyPlan` calls them. The engine
- *     keeps that call inside `applyPlan`; until it gives it out (preflightPlan, gap survey 3-a) it
- *     is made here the same way, and the tests compare it with the apply's own `plan_checked`;
- *   - then the executor's `check` (tools' `createPlanExecutor`), as it is: the source, its hash, the
- *     destination, and DR-21's hard link probe;
+ *   - U-111: the engine's own preflight loop, `preflightPlan` (U-105), the one `applyPlan` calls:
+ *     the apply task's `planActions`, the policy gate before and after the paths are resolved
+ *     (`createPolicyGate`, PLAN_ACTION_DESCRIPTORS), then the executor's `check` (tools'
+ *     `createPlanExecutor`): the source, its hash, the destination, and DR-21's hard link probe. The
+ *     tests still compare the result with the apply's own `plan_checked`;
  *   - the inventory limit (DR-6) is the plan view's listing (the same `createInventoryChecker`).
  * - The executor's probe makes a second name of a source file for a moment (in the state directory
  *   when it is on the same volume, else next to the source). So the check holds the workspace lock
@@ -34,10 +33,11 @@
 
 import { lstat, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
-import { MIN_PLAN_DIGEST_PREFIX, PLAN_ACTION_DESCRIPTORS, STATE_DIR_NAME } from "../contracts/index.js";
-import type { Clock, ContentHash, JsonObject, PlanItemProblem, ResolvedPlanAction, ResolvedTaskSpec } from "../contracts/index.js";
+import { MIN_PLAN_DIGEST_PREFIX, STATE_DIR_NAME } from "../contracts/index.js";
+import type { Clock, ContentHash, PlanItemProblem, ResolvedPlanAction, ResolvedTaskSpec } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { createRunId } from "../cli/run-id.js";
+import { preflightPlan } from "../engine/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";
 import { createPlanExecutor } from "../tools/index.js";
@@ -183,33 +183,11 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
       const policy = createPolicyGate({ config: task.policy, workspace });
       const planActions = task.policy.planActions ?? [];
       const executor = createPlanExecutor({ workspace, workspaceRoot: workspace.root, runId: lockId, ...(operations.fileOps === undefined ? {} : { fileOps: operations.fileOps }) });
-      // The apply task's planActions and the policy gate, before and after (as applyPlan calls them).
-      const permitted = async (action: ResolvedPlanAction, index: number): Promise<boolean> => {
-        if (!planActions.includes(action.kind)) return false;
-        const descriptor = PLAN_ACTION_DESCRIPTORS[action.kind];
-        const args: JsonObject = action.kind === "move" ? { from: action.from, to: action.to } : { path: action.path };
-        const call = { id: `action-${index}`, name: descriptor.name, args };
-        try {
-          if (!policy.checkRequested(call, descriptor).allowed) return false;
-          return (await policy.checkEffective(call, descriptor)).allowed;
-        } catch {
-          return false;
-        }
-      };
-      for (const [index, action] of actions.entries()) {
-        if (!(await permitted(action, index))) {
-          problems.push({ index, problem: "denied" });
-          continue;
-        }
-        let problem: PlanItemProblem | null;
-        try {
-          problem = await executor.check(action);
-        } catch {
-          problem = "io_error";
-        }
-        if (problem === "unsafe_move") unsafeMoves.push(index);
-        else if (problem !== null) problems.push({ index, problem });
-      }
+      // U-111: the engine's own preflight loop (U-105), the one applyPlan calls; never stopped here.
+      const outcome = await preflightPlan({ actions, planActions, policy, executor });
+      if (outcome.stopped) throw new Error("the preflight stopped");
+      problems.push(...outcome.problems);
+      unsafeMoves.push(...outcome.unsafeMoves);
     } catch {
       failed = true;
     } finally {

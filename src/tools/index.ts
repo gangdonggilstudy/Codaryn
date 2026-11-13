@@ -47,7 +47,7 @@ import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
 import { createPlannedFileProbe as plannedFileProbeFor, inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
-import { listVisible } from "./visible-list.js";
+import { leaveOutUnreadable } from "./hidden-entries.js";
 import { queryTableTool } from "./query-table.js";
 
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
@@ -315,11 +315,13 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     const hidden = unreadable === null ? null : await unreadable.snapshot(workspace);
     const withheld = hidden !== null && hidden.within(resolved.path.relative);
     // U-203 (Codex V-13 M-1, M-2): with unreadable paths the listing leaves them out before it counts
-    // or enters them, and hides a link whose real path is under them (visible-list.ts), so the
-    // result, its `truncated` and its errors do not depend on what exists there. U-213: both listings
-    // take the run's signal and the search's one time limit.
+    // or enters them, and hides a link whose real path is under them, so the result, its `truncated`
+    // and its errors do not depend on what exists there. U-242: one listing, the workspace's, with
+    // `leaveOut` (hidden-entries.ts). U-213: it takes the run's signal and the search's time limit.
     const listed =
-      hidden === null ? await workspace.list(resolved.path, { signal, retryUntil }) : await listVisible(workspace, resolved.path, hidden, { signal, retryUntil });
+      hidden === null
+        ? await workspace.list(resolved.path, { signal, retryUntil })
+        : await workspace.list(resolved.path, { signal, retryUntil, leaveOut: leaveOutUnreadable(workspace, hidden) });
     if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
 
     // Matching works on masked text only: the path names and the file contents a model would

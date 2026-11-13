@@ -4,7 +4,9 @@
  * anything carries them out.
  * - DR-70: from a table under unreadablePaths only column names, the keys of groups of at least k
  *   rows, their row counts and aggregates; smaller groups merged into their number only.
- * - k: 5 by default, 2 to 1000; the config file's value is the base and other sources only raise it.
+ * - k: 5 by default, 5 to 1000 (review V-12 M-1: DR-70 before Q-4); no source lowers it, each only
+ *   raises it. ResolvedTaskSpec.minGroupSize and .unreadablePaths are what a run reads (R-102 M-1).
+ * - next is a cursor of shown-group ordinals, never a key or a row's value (V-12 M-2, R-102 L-1).
  * - Not carried out yet: query_table is not a task type tool, analyze-private not a built-in id, and
  *   the two problems not among WORKFLOW_PROBLEMS (A-5, A-6 add them with their parts).
  */
@@ -24,6 +26,7 @@ import {
   MAX_QUERY_RESULT_GROUPS,
   MAX_QUERY_TABLE_BYTES,
   MIN_GROUP_SIZE_LIMITS,
+  QUERY_CURSOR_PATTERN_SOURCE,
   POLICY_DENIAL_CODES,
   PRIVATE_DATA_WORKFLOW_PROBLEMS,
   QUERY_TABLE_DEFINITION,
@@ -40,15 +43,17 @@ import {
   effectiveMinGroupSize,
   mergeWorkflowPolicy,
   minGroupSizeFor,
+  queryCursorIndex,
+  queryCursorOf,
   shownGroups,
   shownShape,
 } from "../../../src/contracts/index.js";
-import type { PathAccess, PolicyConfig, QueryGroup, QueryTableArgs, QueryTablePayload } from "../../../src/contracts/index.js";
+import type { PathAccess, PolicyConfig, PolicyGateOptions, QueryGroup, QueryTableArgs, QueryTablePayload, ResolvedTaskSpec } from "../../../src/contracts/index.js";
 
 describe("U-197: the values (Q-2 to Q-5)", () => {
-  test("k: 5 by default, 2 to 1000", () => {
+  test("k: 5 by default, 5 to 1000 (V-12 M-1: DR-70's 5 rows comes before Q-4's 2)", () => {
     assert.equal(DEFAULT_MIN_GROUP_SIZE, 5);
-    assert.deepEqual(MIN_GROUP_SIZE_LIMITS, { min: 2, max: 1000 });
+    assert.deepEqual(MIN_GROUP_SIZE_LIMITS, { min: 5, max: 1000 });
   });
 
   test("operations: all five on a general table, no min or max under unreadable paths", () => {
@@ -64,13 +69,26 @@ describe("U-197: the values (Q-2 to Q-5)", () => {
   });
 });
 
-describe("U-197: the run's k only rises (Q-4)", () => {
-  test("the config file's value or 5 is the base; profile, definition and task raise it, never lower it", () => {
+describe("U-197: the run's k only rises (Q-4, DR-70)", () => {
+  test("5 is the floor; every source, the config file included, can only raise it", () => {
     assert.equal(effectiveMinGroupSize(undefined, []), 5);
-    assert.equal(effectiveMinGroupSize(2, []), 2, "the user's settings may lower it to 2");
-    assert.equal(effectiveMinGroupSize(2, [3, undefined]), 3);
-    assert.equal(effectiveMinGroupSize(10, [3, 7]), 10, "no other source lowers it");
+    assert.equal(effectiveMinGroupSize(2, []), 5, "V-12 M-1: the config file cannot lower it below 5");
+    assert.equal(effectiveMinGroupSize(4, [3, undefined]), 5, "nor can any other source");
+    assert.equal(effectiveMinGroupSize(10, [3, 7]), 10, "no other source lowers the config file's value");
     assert.equal(effectiveMinGroupSize(undefined, [undefined, 20]), 20);
+    assert.equal(effectiveMinGroupSize(6, [8]), 8);
+  });
+
+  test("V-12 M-1's reproduction: with the run's k, a group of 2 rows is never shown", () => {
+    const k = minGroupSizeFor(true, effectiveMinGroupSize(2, []));
+    assert.deepEqual(shownGroups([{ keys: ["TWO"], rows: 2, values: [20] }], k), { groups: [], suppressedGroups: 1 });
+    assert.deepEqual(shownShape([{ name: "c", nonEmpty: 2, numeric: 2 }], 2, k).rows, null);
+  });
+
+  test("R-102 M-1: the resolved places a run reads, on the task and for the gate", () => {
+    const task: Pick<ResolvedTaskSpec, "unreadablePaths" | "minGroupSize"> = { unreadablePaths: ["data", "people"], minGroupSize: 10 };
+    const gate: Pick<PolicyGateOptions, "unreadablePaths"> = { unreadablePaths: task.unreadablePaths ?? [] };
+    assert.deepEqual([gate.unreadablePaths, task.minGroupSize], [["data", "people"], 10]);
   });
 
   test("a table outside unreadable paths hides nothing (k is 1)", () => {
@@ -101,10 +119,10 @@ describe("U-197 DR-70: what of the groups may be given", () => {
       operations: [{ op: "sum", column: "amount" }],
       groups: [{ keys: ["North"], rows: 6, values: [60] }],
       suppressedGroups: 1,
-      next: null,
+      next: queryCursorOf(200),
       minGroupSize: 5,
     };
-    const fixed = new Set<string>(["groups", "describe", ...AGGREGATE_OPS]);
+    const fixed = new Set<string>(["groups", "describe", ...AGGREGATE_OPS, "g200"]);
     const free = new Set<string>(["region", "amount", "North"]);
     const strings: string[] = [];
     const walk = (value: unknown): void => {
@@ -114,6 +132,14 @@ describe("U-197 DR-70: what of the groups may be given", () => {
     };
     walk(payload);
     for (const text of strings) assert.ok(fixed.has(text) || free.has(text), text);
+  });
+
+  test("V-12 M-2: next is a cursor of a shown group's ordinal, never a key or a row's value", () => {
+    const pattern = new RegExp(QUERY_CURSOR_PATTERN_SOURCE);
+    assert.deepEqual([queryCursorOf(0), queryCursorOf(200)], ["g0", "g200"]);
+    for (const cursor of ["g0", "g200", "g999999999"]) assert.match(cursor, pattern);
+    for (const cursor of ["North", "ONE_ROW_V12_CANARY", "g", "g01", "g-1", "g1.5", "200", "g1x"]) assert.doesNotMatch(cursor, pattern, cursor);
+    assert.deepEqual([queryCursorIndex("g0"), queryCursorIndex("g200"), queryCursorIndex("North"), queryCursorIndex("g01")], [0, 200, null, null]);
   });
 });
 
@@ -162,9 +188,9 @@ describe("U-197: the codes", () => {
 describe("U-197: the policy fields and their merge (R-2, Q-4)", () => {
   const base: PolicyConfig = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false };
 
-  test("unreadable paths add up and k rises in mergeWorkflowPolicy; without them it is as before", () => {
-    const merged = mergeWorkflowPolicy({ ...base, unreadablePaths: ["data"], minGroupSize: 10 }, { ...base, unreadablePaths: ["data", "people"], minGroupSize: 3 });
-    assert.deepEqual([merged?.unreadablePaths, merged?.minGroupSize], [["data", "people"], 10]);
+  test("unreadable paths add up in mergeWorkflowPolicy; k is not combined there (R-102 M-1); without them it is as before", () => {
+    const merged = mergeWorkflowPolicy({ ...base, unreadablePaths: ["data"], minGroupSize: 10 }, { ...base, unreadablePaths: ["data", "people"], minGroupSize: 30 });
+    assert.deepEqual([merged?.unreadablePaths, merged?.minGroupSize], [["data", "people"], undefined]);
     const plain = mergeWorkflowPolicy(base, base);
     assert.deepEqual(plain, base, "no key appears when neither states them");
     assert.equal(Object.hasOwn(plain ?? {}, "unreadablePaths") || Object.hasOwn(plain ?? {}, "minGroupSize"), false);

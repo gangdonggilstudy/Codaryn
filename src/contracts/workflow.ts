@@ -146,9 +146,10 @@ function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | 
  *   ResolvedTaskSpec.writablePathSets, and a write must be covered by all of them; the merged
  *   policy's `writablePaths` is not what the gate reads.
  * - unreadablePaths (P1, U-197, R-2): both lists (union), the definition's first, each entry once:
- *   no source takes one away.
- * - minGroupSize (P1, U-197, Q-4): the larger of the two when either states one: a definition can
- *   only raise k.
+ *   no source takes one away. Review R-102 M-1: this union is not what the run reads (in a task
+ *   file's run it lacks the config file's own entries); ResolvedTaskSpec.unreadablePaths is.
+ * - minGroupSize (P1, R-102 M-1): not combined here, since neither side holds the config file's base;
+ *   ResolvedTaskSpec.minGroupSize (effectiveMinGroupSize over every source) is what the run reads.
  */
 export function mergeWorkflowPolicy(
   definition: PolicyConfig | undefined,
@@ -157,9 +158,8 @@ export function mergeWorkflowPolicy(
   if (definition === undefined) return configured;
   if (configured === undefined) return definition;
   const protectedPaths = [...new Set([...(definition.protectedPaths ?? []), ...(configured.protectedPaths ?? [])])];
-  // U-197 (R-2, Q-4): unreadable paths only add up, and k only rises.
+  // U-197 (R-2): unreadable paths only add up (k is not combined here, R-102 M-1).
   const unreadablePaths = [...new Set([...(definition.unreadablePaths ?? []), ...(configured.unreadablePaths ?? [])])];
-  const sizes = [definition.minGroupSize, configured.minGroupSize].filter((size): size is number => size !== undefined);
   const commands: ConfirmableCommandRule[] = [];
   const seen = new Set<string>();
   for (const own of definition.commands) {
@@ -184,7 +184,6 @@ export function mergeWorkflowPolicy(
     ...(protectedPaths.length > 0 ? { protectedPaths } : {}),
     ...(planActions.length > 0 ? { planActions } : {}),
     ...(unreadablePaths.length > 0 ? { unreadablePaths } : {}),
-    ...(sizes.length > 0 ? { minGroupSize: Math.max(...sizes) } : {}),
   };
 }
 

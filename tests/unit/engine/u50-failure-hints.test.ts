@@ -31,6 +31,8 @@ const HINTED: readonly ToolErrorCode[] = [
   "masking_failed",
   // U-197 (bundle A, Q-5): query_table.
   "too_many_groups",
+  // R-102 L-5.
+  "invalid_table",
 ];
 
 /** Runs one read call whose tool fails with `code` and `message`; returns what was recorded. */

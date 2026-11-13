@@ -871,8 +871,12 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       if (!probe.ok) return probe;
       const planRoot = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
       if (!planRoot.ok) return planRoot;
+      // Review R-103 L-1: a plan that cannot be read is refused with the store's code first, as the
+      // plan view refuses it (the same store, the same codes), not taken for a plan of mode apply.
+      const stored = await storedPlanKindOf(planRoot.value, checked.planRunId);
+      if (!stored.ok) return { ok: false, error: appError(stored.code, `run ${checked.planRunId} has no plan that can be checked (${stored.code}); nothing was checked`) };
       // U-196 (DR-69 B-3, B-4): a run plan is checked as its run will judge it (changes-plan.ts).
-      if ((await storedPlanKindOf(planRoot.value, checked.planRunId)) === "changes") return await checkRunPlan(probe, planRoot.value, checked.planRunId, checked.digest);
+      if (stored.kind === "changes") return await checkRunPlan(probe, planRoot.value, checked.planRunId, checked.digest);
       if (workflowSettingsOf(probe.task).plan !== "apply") {
         return { ok: false, error: appError("run_not_plan", 'the task given to the check does not resolve to a workflow with plan "apply"; nothing was checked') };
       }
@@ -957,7 +961,10 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
     if (!root.ok) return null;
     const runId = await runIdOf(root.value, request.runId);
-    if (!runId.ok || (await storedPlanKindOf(root.value, runId.value)) !== "changes") return null;
+    if (!runId.ok) return null;
+    const stored = await storedPlanKindOf(root.value, runId.value);
+    // Not a run plan, or none that can be read: the CLI's plan view, which gives the store's code.
+    if (!stored.ok || stored.kind !== "changes") return null;
     const view = await changesPlanViewIn({ workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys }, runId.value);
     return view.ok ? { ok: true, output: view.output.output } : view;
   }

@@ -17,7 +17,7 @@
  */
 
 import { PLANNED_FILE_DESCRIPTOR } from "../contracts/index.js";
-import type { ChangesPlanOutput, PolicyConfig, PrivacyGateway, WritablePathSet } from "../contracts/index.js";
+import type { ChangesPlanOutput, LoadPlanOutcome, PolicyConfig, PrivacyGateway, WritablePathSet } from "../contracts/index.js";
 import { changesPlanOutput } from "../cli/human/changes-plan.js";
 import { createPolicyGate } from "../policy/index.js";
 import { hasRecordsChangedMark, loadAnyPlan } from "../store/index.js";
@@ -25,13 +25,23 @@ import { createWorkspace } from "../workspace/index.js";
 import { appError } from "./errors.js";
 import type { AppCallOutcome } from "./types.js";
 
-/** The stored plan's kind for the run: "changes" (a run plan), "plan" (mode apply), or null when none can be read. */
-export async function storedPlanKindOf(workspaceRoot: string, runId: string): Promise<"changes" | "plan" | null> {
+/** The stored plan's kind, or why it cannot be read. */
+export type StoredPlanKind =
+  | { readonly ok: true; readonly kind: "changes" | "plan" }
+  | { readonly ok: false; readonly code: Extract<LoadPlanOutcome, { readonly ok: false }>["code"] | "internal_error" };
+
+/**
+ * The stored plan's kind for the run: "changes" (a run plan), "plan" (mode apply). Review R-103
+ * L-1: when the plan cannot be read, loadAnyPlan's code (run_not_found, run_not_plan,
+ * plan_run_missing, invalid_run_record; the plan view's, which reads through the same store), or
+ * internal_error when reading threw, so the caller gives the cause instead of guessing a kind.
+ */
+export async function storedPlanKindOf(workspaceRoot: string, runId: string): Promise<StoredPlanKind> {
   try {
     const loaded = await loadAnyPlan({ workspaceRoot, runId });
-    return loaded.ok ? loaded.plan.kind : null;
+    return loaded.ok ? { ok: true, kind: loaded.plan.kind } : { ok: false, code: loaded.code };
   } catch {
-    return null;
+    return { ok: false, code: "internal_error" };
   }
 }
 

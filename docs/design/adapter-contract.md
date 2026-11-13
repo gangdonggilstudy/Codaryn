@@ -328,6 +328,7 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
   - 실행 계획 보기는 nc-human의 `changesPlanOutput`(U-191)을 쓴다(`src/app/changes-plan.ts`).
     - 계획 파일마다 지금 등록한 비밀로 다시 가리고, 계획 실행 때의 보이는 조각과 다르면 `plan_secrets_differ`이며 아무것도 보이지 않는다(DR-28).
     - 요약, 다이제스트, `pending`·`applied`(`applied.json`), 기록 변경 표시를 준다.
+    - R-103 M-1: 요약은 출력 객체 자체에 가린 꼴로 든다. 앱은 지금 설정된 모든 API 키 값(`knownKeyValues`, 앱의 환경 사본에서)을 `changesPlanOutput`의 `currentKey`로 넘긴다. 그래서 등록 비밀에 더해 현재 키·키 모양·제어 문자가 가려지고 앞뒤 공백이 잘린다. 적용 계획의 요약(R-49 R49-M1)과 같고, GUI와 승인 화면이 같은 글을 받는다. 시험은 `tests/unit/app/u196-r103-summary-keys.test.ts`다.
   - 계획 모드는 묻지 않는다(보기는 비밀과 작업 공간만 정한다, DR-17). `latest`도 다른 계획처럼 푼다.
   - PM (가), AC-D16: CLI의 `plan`·`apply`가 종류로 나누는 것은 na-core의 U-195다. CLI의 `plan`이 실행 계획을 보이게 되면 앱은 그것을 받아 쓰고 이 보기는 없앤다.
   - 저장 꼴에는 얇게 기댄다(Codex V-11의 고침으로 바뀔 수 있음): `kind`, 관문용 파일 경로, 그리고 읽은 계획을 통째로 `changesPlanOutput`에 넘기는 것뿐이다.
@@ -742,6 +743,9 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
 - **남기지 않는다.** 실행 디렉터리, journal, `plan_checked` 기록, 적용 표시(`markApplied`)를 만들지 않는다. 계획은 그대로 다음 적용을 기다린다.
 - **글이 없다.** 응답은 순번, 코드, 수, 다이제스트뿐이다. 경로는 계획 보기(가림본)의 순번으로 짝짓는다.
 - **동의도 약속도 아니다.** 점검 결과는 DR-21 동의를 만들지 않는다. 동의는 지금처럼 사람의 입력으로만 만들어 `applyPlan`의 `unsafeMoveConsent`로 간다. 적용은 사전 점검을 다시 하므로, 그 사이에 파일이 바뀌면 `plan_stale`로 끝난다.
+- **읽을 수 없는 계획(R-103 L-1).** 종류를 가르기 전에 store의 `loadAnyPlan`으로 계획을 읽는다(`storedPlanKindOf`). 읽을 수 없으면 그 코드(`run_not_found`, `run_not_plan`, `plan_run_missing`, `invalid_run_record`, 읽다가 예외면 `internal_error`)를 먼저 주고 아무것도 점검하지 않는다.
+  - 계획 보기도 같은 store로 읽어 같은 코드를 준다. 그래서 적용 task의 결과는 전과 같다.
+  - 고치기 전에는 읽을 수 없는 계획을 적용 계획으로 여겼다. 그래서 `plan: "apply"`로 풀리지 않는 task는 원인 대신 task에 관한 `run_not_plan`을 받았다. 시험은 `tests/unit/app/u196-r103-l1-plan-kind.test.ts`다.
 - **실행 계획(U-196, DR-69 B-3, B-4).** `plan.json`이 `kind: "changes"`이면 다음처럼 본다(`src/app/changes-plan.ts`).
   - 점검 task가 `plan: "run"`으로 풀려야 한다. 아니면 `run_not_plan`이고 문구가 그렇게 말한다. B-4가 열기 전에는 어떤 설정도 그렇게 풀리지 않는다(U-177).
   - 그다음 보기의 거부를 적용 계획과 같게 본다: DR-28 `plan_secrets_differ`, 이미 수행됨 `plan_already_applied`, 기록 변경 표시, 다이제스트.

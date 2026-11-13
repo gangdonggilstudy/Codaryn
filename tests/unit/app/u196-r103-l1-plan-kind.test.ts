@@ -6,7 +6,7 @@
  * the task, hiding the cause. Now storedPlanKindOf gives loadAnyPlan's code and checkApply gives it
  * first, as the plan view (the CLI's loadPlan, the same codes) does.
  * - With the apply task the codes were already loadAnyPlan's (through the plan view): unchanged.
- * Reproduced first (todo until the check gives the code). Temporary folders, fake values only.
+ * Reproduced first (f7161c6, todo until the check gave the code). Temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +20,6 @@ import { maskedParts } from "../../../src/contracts/index.js";
 import { createPlanRecorder } from "../../../src/store/index.js";
 import { PLAN_TASK, appEnvironment, setupRun, taskForm } from "./support.js";
 
-const TODO = { todo: "R-103 L-1: checkApply takes a plan it cannot read for a plan of mode apply" };
 const PLAN_RUN = "20261101T120000Z-0a1b2c3d";
 const OTHER_RUN = "20261101T140000Z-22222222";
 
@@ -69,7 +68,7 @@ const DAMAGES = [
 
 describe("R-103 L-1: a plan checkApply cannot read gives the store's code first", () => {
   for (const [name, damage, runId, code] of DAMAGES) {
-    test(`${name}, a task without plan "apply": ${code}, not run_not_plan about the task`, TODO, async () => {
+    test(`${name}, a task without plan "apply": ${code}, not run_not_plan about the task`, async () => {
       const error = await refusal({}, damage, runId);
       assert.equal(error.code, code);
       assert.doesNotMatch(error.message, /resolve to a workflow/);
@@ -80,7 +79,7 @@ describe("R-103 L-1: a plan checkApply cannot read gives the store's code first"
     });
   }
 
-  test("storedPlanKindOf gives the kind, or loadAnyPlan's code", TODO, async () => {
+  test("storedPlanKindOf gives the kind, or loadAnyPlan's code", async () => {
     const kindOf = (appModule as unknown as Record<string, (root: string, runId: string) => Promise<unknown>>)["storedPlanKindOf"] as (root: string, runId: string) => Promise<unknown>;
     const base = await setupRun({}, {}, []);
     await storeRunPlan(base);

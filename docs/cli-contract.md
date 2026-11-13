@@ -84,6 +84,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 - `limits`와 그 필드는 설정 파일이 채울 수 있으면 생략해도 된다. 설정 파일의 한도는 상한이다. task는 필드마다 그 값 이하로만 정할 수 있다(11절 "한도", S-7). 예산 한도 넷(`maxModelTurns`, `maxToolCalls`, `maxTotalTokens`, `maxDurationMs`) 중 어디에도 없는 필드가 있으면 `invalid_task`다. anthropic 제공자에서는 `maxTotalTokens: null`을 쓸 수 없다.
 - 재수정 한도 `maxRepairAttempts`(0 이상 정수)와 `maxSameFailures`(1 이상 정수)는 두 파일 모두에서 생략할 수 있고, 그때는 0과 2다(`DEFAULT_MAX_REPAIR_ATTEMPTS`, `DEFAULT_MAX_SAME_FAILURES`). 0이면 단계 1과 같이 첫 검증 실패에서 끝난다(12절).
 - `policy.protectedPaths`는 선택이다(13절).
+- `policy.writablePaths`는 선택이다(13.1절, U-182).
 - 파일 형식은 `TaskSpec`, CLI가 해석해 엔진에 넘기는 형은 `ResolvedTaskSpec`(경로는 절대 경로, 한도 여섯 개가 모두 정해짐)이다. `EngineDeps.task`는 `ResolvedTaskSpec`이다.
 - task 파일과 설정 파일은 UTF-8이며 BOM이 있어도 읽는다.
 - 검증기는 `command`(`executable`, `args`, 선택 `cwd`·`timeoutMs`·`expectExitCode`)와 `file_rules`(`exists`, `absent`, `contains`, `not_contains`, `markdown_headings`, `markdown_links`) 두 종류다. `timeoutMs`는 1~2,147,483,647ms다(S-7). 결과에는 `outcome`(pass/fail/inconclusive), `evidence`, `checked`, `limits`가 있다.
@@ -377,6 +378,13 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - env 파일이 새로 설정한 8자 이상 값은 모두 가릴 값으로 등록하므로 `postgres` 같은 흔한 값도 가려질 수 있다(S-4의 부작용).
 - 작업 디렉터리가 UNC 경로이면 모든 상대 경로가 거부된다. POSIX에서는 `/dev/` 아래만 장치 경로로 본다.
 
+알려진 한계(경로 확인과 사용 사이의 폴더 바꿔치기, DR-73):
+
+- 작업 공간 계층과 계획 실행기는 `resolve`한 실경로 문자열로 다시 연다(폴더 손잡이 기준 호출이 없음). 확인과 사용 사이의 폴더 바꿔치기는 닫지 못한다. 위의 "파일 위치 확인과 파일 읽기 사이" 한계가 쓰기, 목록, 계획 적용에도 같다.
+- 행위자는 허용된 명령의 배경 프로세스와 같은 PC의 다른 프로그램이다.
+- 닿을 수 있는 곳: 작업 공간 밖, 그리고 쓰기는 작업 공간 안의 보호 경로와 `writablePaths` 밖(게이트가 판정한 실경로와 도구가 다시 푼 실경로가 다를 수 있다). 계획 이동은 원본 쪽 폴더가 바뀌면 밖의 파일 이름을 지울 수 있다(`unlink`).
+- 근거는 코드 조사(na-core, main `21107dc`)이고 경합은 재현하지 않았다. 앱 계층의 작업 공간 글 읽기·쓰기에 남은 같은 틈은 Codex가 재현했다(V-1b, [privacy.md](privacy.md) 13절).
+
 ## 11. 설정 (1b)
 
 ### 설정 파일 (`CodarynConfig`)
@@ -576,6 +584,35 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 항목 자체가 링크(정션, 심볼릭 링크)이면 그 실경로도 보호한다. 판정할 때마다 항목을 실경로로 풀므로 실행 중에 생긴 링크도 반영된다. 항목의 실경로가 작업 공간 밖이면(끊긴 링크 포함) 그 항목은 쓸 수 없는 것으로 보고 모든 쓰기를 거부한다(T-13). 이 확인은 실행 중 정책 단계에서만 하므로, 그런 항목은 실행 전에 알리지 않고 쓰기마다 `protected_path`가 된다.
 - task 파일이나 설정 파일(간편 형식의 `policy`)만 정할 수 있다. 모델, task의 다른 필드, 작업 공간의 파일로는 풀 수 없다. 생략하거나 빈 목록이면 보호 경로가 없다.
 - 판정은 정책(`src/policy`, F2)이 한다. CLI는 검증한 값을 `task.policy`로 넘기고, 조립이 그 값으로 `createPolicyGate`를 만든다.
+
+### 13.1 쓰기 허용 경로 `writablePaths` (U-182, DR-69 B-4, B-8)
+
+- `policy.writablePaths`는 파일 도구가 쓸 수 있는 작업 공간 기준 경로 목록이다. 그 밖에 쓰면 권한 `path`, 코드 `path_not_writable`로 거부한다. 읽기와 검색은 막지 않는다.
+- **형식과 맞춤은 `protectedPaths`와 같다(13절).**
+  - 같은 `checkProtectedPaths`로 검사하고 같은 메시지를 쓴다(`policy.writablePaths[i] …`). 진단은 그 필드 자리를 말한다(`SCHEMA_FIELD_NAMES`에 `writablePaths`).
+  - 경로 조각 단위의 접두로 맞춘다. 항목은 자기와 그 아래를 덮는다.
+  - 링크를 푼 뒤의 경로로만 판정한다(U-175). Windows에서는 대소문자를 구분하지 않는다.
+  - 허용 목록이므로 쓸 수 없는 항목은 아무것도 덮지 않는다(fail closed).
+- **생략과 빈 목록:** 생략하면 제한이 없다. 빈 목록 `[]`이면 파일 도구는 아무것도 쓰지 못한다.
+- **둘 수 있는 곳:** task 파일, 설정 파일, 프로필, 설정 파일의 작업 종류 정의. 넷 모두 `policy` 안이다.
+- **좁히기만 한다.** 목록을 둔 원천마다 목록 하나가 된다(`ResolvedTaskSpec.writablePathSets`, `WRITABLE_PATH_SOURCES` 순서: config, profile, definition, task). 쓰기는 모든 목록이 덮어야 한다.
+  - 목록은 하나로 합치지 않는다. `mergeWorkflowPolicy`도 합치지 않는다. 링크를 풀면 글자로 만든 교집합이 원래 목록보다 넓어질 수 있기 때문이다.
+  - 설정 파일 자신의 목록과 프로필의 목록은 task 파일로 실행할 때도 걸린다. task 파일이면 그 자신의 정책만 쓰는 다른 필드(18.1.1)와 다르다. task 파일은 설정을 좁힐 수 있지만 넓힐 수 없다.
+  - 프로필의 `policy`가 설정의 `policy`를 대신해도, 설정 파일 자신의 목록은 따로 남는다.
+  - 간편 형식에는 task 목록이 없다. 그 정책은 설정이나 프로필의 것이다.
+  - 아무 원천도 목록을 두지 않으면 `writablePathSets`가 없고, 실행은 이전과 같다.
+- **거는 곳:** 실행의 게이트(`assembleRun`)와 적용의 게이트(`runApply`, DR-5대로 적용 task의 목록).
+  - 그래서 파일 도구의 쓰기뿐 아니라 계획 실행이 제안한 계획 동작과 적용의 동작도 판정한다.
+  - 적용 전 점검이 막은 동작은 `plan_checked`의 `denied`이고, 적용은 아무것도 옮기지 않고 `failed`/`plan_stale`로 끝난다.
+- 보호 경로와 다른 거부는 그 위에서 여전히 막는다. 보호 경로가 먼저 보고된다.
+- **명령은 묶지 않는다(B-8).** 허용한 명령은 이 목록과 상관없이 쓸 수 있는 곳에 쓴다.
+  - doctor의 `commands` 점검은 목록과 명령 규칙이 함께 있으면 `warn`이다. 문구는 `doctor.commands.writable_with_commands`이고 `count`는 명령 규칙 수다.
+  - 그 점검이 다른 경고나 문제를 말하면 그 글을 두고 이 문구를 `notes`에 붙인다. 명령 검증기는 세지 않는다.
+- **사람과 모델에게 알리는 것**
+  - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
+  - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
+- **앱 계층:** 같은 `prepareTask`로 목록을 만든다. 그러나 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)은 아직 게이트에 목록을 넘기지 않는다(앱 담당 몫).
+- **계획 run:** `plan: "run"`은 B-4 전까지 거부된다(18.1, U-177). 승인된 계획의 파일 목록(`plan` 원천)은 B-3이 더한다.
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 
@@ -1004,6 +1041,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
     - 주인이 끝난 reclaim 파일과, 온전하지만 이해할 수 없는 reclaim 파일은 다음 실행이 지우므로 `lock.json`의 판정을 따른다(store 규칙).
     - `lock.remove_hint` 문구도 reclaim 파일을 가리킨다(N-B 문구).
 - **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 문구는 `doctor.commands.extra_args_with_plan`이다.
+- **doctor `commands` 점검(U-182, B-8)**: 쓰기 허용 목록(`writablePaths`, 13.1)과 명령 규칙이 함께 있으면 `warn`이다(`doctor.commands.writable_with_commands`). 앞의 경고나 다른 문제가 있으면 그 글을 두고 이 문구를 `notes`에, 메시지 뒤에 붙인다.
 
 ### 17.7 오류 코드 추가
 
@@ -1056,6 +1094,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 작업 종류 정의가 적용되면(간편 형식의 `--workflow`나 프로필의 `workflowRef`, task 파일의 `workflowRef`) 주어진 정책을 정의의 정책과 합친다(`mergeWorkflowPolicy`). 정의의 규칙은 그 작업 종류의 안전 규칙이라, 어떤 정책도 그것을 풀지 못한다.
   - 주어진 정책: 간편 형식은 프로필의 정책, 없으면 설정의 정책. task 파일은 그 자신의 정책.
   - 보호 경로는 합집합이다. 명령은 양쪽이 모두 허용한 명령 줄만 남는다. 계획 동작은 주어진 정책이 말하면 양쪽이 모두 가진 것만 남고, 말하지 않으면 정의의 것 그대로다. `restorePathTokens`는 둘 다 허용할 때만 참이다.
+  - 쓰기 허용 경로(`writablePaths`)는 여기서 합치지 않는다. 설정, 프로필, 정의, task 파일의 목록이 각각 따로 남고 쓰기는 모두가 덮어야 한다(13.1, U-182). 설정과 프로필의 목록은 task 파일 실행에도 걸린다.
   - 정의가 명령을 허용하지 않을 때(`organize`): task 파일 자신의 명령 규칙은 먼저 `invalid_task`로 거부한다(GT-D10, 합치기 전에 센다). 프로필·설정의 규칙은 빠진다.
   - 정의가 없는 task 파일은 자기 정책을 그대로 쓴다.
 - 검증기도 같다(DR-43 (a), R-31 L-2). 주어진 검증기는 정의의 검증기를 대체하지 않고 더해진다(`mergeWorkflowVerifiers`).

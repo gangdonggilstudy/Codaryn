@@ -2155,10 +2155,10 @@ Get-ChildItem -Recurse $pr\workspace -Exclude .codaryn | Select-Object FullName 
   - `notes.txt`는 생기지 않는다.
 - 5: 묻지 않고 `plan_already_applied`, 종료 2다.
 - 모든 경우: 명령이 끝나면 프롬프트가 바로 돌아온다. 콘솔에는 결과 JSON 줄이 나오지 않는다.
-- 덧붙여 계획 실행의 끝 요약을 적는다(U-217 보고 F-1, 담당 판단 전).
-  - 지금 판은 `A plan is ready: actions 2.`라고 나온다.
-  - 설명의 꼬리표는 `The agent's description (… not what you approve)`이다.
-  - `plan` 보기는 같은 설명을 "승인에 함께 묶임"이라고 한다. 고쳐지면 이 줄을 바꾼다.
+- 덧붙여 계획 실행의 끝 요약을 적는다(U-217 보고 F-1, U-221에서 계획 보기와 같은 말로 고침).
+  - 끝 요약의 계획 줄은 `A plan is ready: 2 file(s) to write. Nothing was changed; it waits for approval.`이다.
+  - 설명의 꼬리표는 `plan` 보기와 같은 `The plan's summary, written by the plan run (… approved with the plan):`이다.
+  - 다르면 그 두 줄을 적는다.
 
 **다르면 볼 곳**
 - 바꾸기 계획의 승인과 수행: `src/cli/plan-commands.ts`(`applyChangesPlan`)

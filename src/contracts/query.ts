@@ -16,9 +16,36 @@
  * that a small group shows by mistake; it does not stop someone who subtracts one answer from
  * another (that needs added noise, outside P1).
  *
- * Not carried out yet: no tool runs `query_table` (A-5 adds it to WORKFLOW_TOOL_NAMES with the
- * runner), the gate does not judge unreadable paths (A-3), the parsers refuse `unreadablePaths` and
- * `minGroupSize` (A-6), and `analyze-private` is not a built-in definition (A-6).
+ * U-208 (A-5): a task type tool (WORKFLOW_TOOL_NAMES); the tool runner reads the table in pieces
+ * (src/tabular, U-202) and applies k, the operations of unreadable tables and the pages here. Not
+ * carried out yet: the parsers refuse `unreadablePaths` and `minGroupSize` and nothing fills the
+ * run's unreadable list and k (A-6), and `analyze-private` is not a built-in definition (A-6).
+ *
+ * Codex V-19 (DR-70, PM): "held by at least k rows together" binds the cells that went into each
+ * number too, not only the rows of its group. On a table under unreadablePaths (k at least 5; a
+ * table's k 1 hides nothing):
+ * - a group's value (QueryGroup.values) is given only when at least k cells went into it: for sum and
+ *   mean the column's non-empty cells of the group (each one a number, or the query is not_number),
+ *   for count the cells it counts, which is the value itself. Otherwise the value is null and its
+ *   operation's index is in QueryGroup.fewCells. A group of k rows whose column holds one number
+ *   gives neither that number as its sum or mean nor a count of 1.
+ * - The same holds for the one group without groupBy, and would hold for any row merging hidden
+ *   groups (there is none: they are merged into suppressedGroups, a number of groups only).
+ * - describe: a column's nonEmpty or numeric below k is null, as when the table's rows are hidden.
+ *
+ * The reading's rules (U-202, accepted by the PM for U-208):
+ * - A row whose cell in any groupBy column is empty is left out of the groups and counted apart; that
+ *   count is not given to the model. Only rows in a group are aggregated, so a cell of a row left out
+ *   is never checked as a number.
+ * - An operation with no value (sum, min, max or mean over no number, or a sum or mean beyond a
+ *   double's range) is null. count is always a number.
+ * - Without groupBy the whole table is one group with no keys, even with no data row (then it holds
+ *   0 rows and, under unreadablePaths, is hidden as any group of fewer than k rows).
+ * - `duplicate_column` only for a column the query names (groupBy or an operation's column) that the
+ *   header holds twice, or a groupBy name given twice; other doubled header names do not matter.
+ * - Which problem wins: the table first (`not_text`, then `not_table`), then the columns (groupBy in
+ *   order, then the operations' columns in order), then the first data row whose cell is not a
+ *   number for a numeric operation (the lowest operation on a tie), then too many groups.
  */
 
 import { AGGREGATE_OPS } from "./verify.js";
@@ -120,7 +147,7 @@ export function queryCursorIndex(cursor: string): number | null {
 /**
  * Q-6: one column as `describe` gives it: its name, its non-empty cells and those read as numbers.
  * The counts are null when the table's rows are hidden (a table under unreadablePaths with fewer
- * than k data rows).
+ * than k data rows), and (V-19) each count below k is null on such a table.
  */
 export interface QueryColumnShape {
   readonly name: string;
@@ -134,6 +161,11 @@ export interface QueryGroup {
   readonly rows: number;
   /** In the order of `operations`; null where the operation has no value (a mean of no number). Not rounded (Q-9). */
   readonly values: readonly (number | null)[];
+  /**
+   * V-19: the indexes (in `operations`) of the values left null because fewer than k cells went into
+   * them, on a table under unreadablePaths (shownValues). Absent when there is none.
+   */
+  readonly fewCells?: readonly number[];
 }
 
 /**
@@ -167,6 +199,7 @@ export type QueryTablePayload =
 /**
  * Why `query_table` refuses a table (tool error `invalid_table`; the message names the code and a
  * row or line number, never a cell's text and never a parser's own message, which can hold one):
+ * - not_text: the file is not UTF-8 text (U-208, U-202's reading tells it before a parse problem)
  * - not_table: the file does not parse as its format (quotes, field counts, a JSON line)
  * - unknown_column: a groupBy or operation column the header does not have
  * - duplicate_column: the header names a column twice, or groupBy names one twice
@@ -175,7 +208,7 @@ export type QueryTablePayload =
  * - after_not_found: `after` is not a cursor (QUERY_CURSOR_PATTERN_SOURCE), or names no shown group of
  *   this query
  */
-export const QUERY_TABLE_PROBLEMS = ["not_table", "unknown_column", "duplicate_column", "not_number", "op_not_allowed", "after_not_found"] as const;
+export const QUERY_TABLE_PROBLEMS = ["not_text", "not_table", "unknown_column", "duplicate_column", "not_number", "op_not_allowed", "after_not_found"] as const;
 export type QueryTableProblem = (typeof QUERY_TABLE_PROBLEMS)[number];
 
 /**
@@ -187,20 +220,40 @@ export function shownGroups(groups: readonly QueryGroup[], minGroupSize: number)
   return { groups: shown, suppressedGroups: groups.length - shown.length };
 }
 
-/** Q-6: a table's shape as `describe` may give it: rows and counts hidden when fewer than `minGroupSize` rows. Pure. */
+/**
+ * V-19 (DR-70): a group's values as they may be given: with k above 1 (a table under
+ * unreadablePaths), each value into which fewer than `minGroupSize` cells went (`cells`, one count per
+ * value) is null and its index listed in `fewCells`. With k 1 the values as they are. Pure.
+ */
+export function shownValues(
+  values: readonly (number | null)[],
+  cells: readonly number[],
+  minGroupSize: number,
+): { readonly values: readonly (number | null)[]; readonly fewCells: readonly number[] } {
+  if (minGroupSize <= 1) return { values, fewCells: [] };
+  const fewCells = values.flatMap((_, index) => ((cells[index] ?? 0) < minGroupSize ? [index] : []));
+  return { values: values.map((value, index) => (fewCells.includes(index) ? null : value)), fewCells };
+}
+
+/**
+ * Q-6: a table's shape as `describe` may give it: rows and counts hidden when fewer than `minGroupSize`
+ * rows; V-19: with k above 1, each count below k hidden too. Pure.
+ */
 export function shownShape(
   columns: readonly QueryColumnShape[],
   rows: number,
   minGroupSize: number,
 ): { readonly columns: readonly QueryColumnShape[]; readonly rows: number | null } {
-  if (rows >= minGroupSize) return { columns, rows };
-  return { columns: columns.map((column) => ({ name: column.name, nonEmpty: null, numeric: null })), rows: null };
+  if (rows < minGroupSize) return { columns: columns.map((column) => ({ name: column.name, nonEmpty: null, numeric: null })), rows: null };
+  if (minGroupSize <= 1) return { columns, rows };
+  const count = (value: number | null): number | null => (value === null || value < minGroupSize ? null : value);
+  return { columns: columns.map((column) => ({ name: column.name, nonEmpty: count(column.nonEmpty), numeric: count(column.numeric) })), rows };
 }
 
 /**
  * R-3: the tool's descriptor. Its path is read with the access `aggregate`, which only this tool
  * uses: the gate allows it under unreadablePaths where it refuses `read` (A-3), by the access and
- * never by the tool's name. Not a task type tool yet (A-5 adds it to WORKFLOW_TOOL_NAMES).
+ * never by the tool's name. U-208: a task type tool (WORKFLOW_TOOLS.query_table).
  */
 export const QUERY_TABLE_TOOL_NAME = "query_table";
 export const QUERY_TABLE_DESCRIPTOR: ToolDescriptor & { readonly name: typeof QUERY_TABLE_TOOL_NAME } = {

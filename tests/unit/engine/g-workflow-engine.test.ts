@@ -78,6 +78,7 @@ function storedPlan(call: EffectiveWorkflowToolCall): RawWorkflowToolOutcome {
       payload: { entries: [{ path: `photos/${FAKE_SECRET}.jpg`, kind: "file", size: 3, modifiedAt: null }], next: null, hashesIncomplete: false },
     };
   }
+  if (call.name === "query_table") return { ok: false, code: "invalid_args", message: asRawText("not expected here") };
   if (call.name === "propose_changes") {
     // U-180: the run plan's tool: a create holds no hash, a modify gets one.
     return {
@@ -124,7 +125,8 @@ describe("GT-E1 offeredTools", () => {
   });
 
   test("a plan run offers read tools and the plan tool only (GT-E5: by descriptor, not by name)", () => {
-    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "apply"), ["read_file", "search_files", "inspect_files", "propose_plan"]);
+    // U-208: query_table is a read tool by its descriptor, so a plan run offers it too.
+    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "apply"), ["read_file", "search_files", "inspect_files", "propose_plan", "query_table"]);
   });
 
   test("names that are not tools are dropped", () => {

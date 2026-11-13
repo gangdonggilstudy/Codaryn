@@ -19,13 +19,13 @@
 
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { acquireLock, createRunRecorders, releaseLock, writeResult } from "../store/index.js";
+import { acquireLock, createRunRecorders, hasRecordsChangedMark, releaseLock, stateUncheckedSince, writeResult } from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
-import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
+import { createCommandRunner, createPlannedFileProbe, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type { EngineDeps, PrivacyGateway, Workspace } from "../contracts/index.js";
-import type { Assemble } from "../cli/assemble.js";
+import type { ApprovedPlanParts, Assemble } from "../cli/assemble.js";
 
 function lockedMessage(holder: LockInfo | null): string {
   const who = holder === null ? "an unreadable lock file" : `run ${holder.runId} (pid ${holder.pid})`;
@@ -39,6 +39,12 @@ function lockedMessage(holder: LockInfo | null): string {
  * its retries, or answered false), `onLockLeft` is called and the run's end goes on: its result
  * (written to result.json first) stays, not an internal error. The lock is then held while this
  * process lives, and a later run of another process finds it stale once it has ended.
+ * U-229 (after U-220): finish then also resolves with `{ lockLeft: true }`, as the CLI's assembly
+ * does, and with nothing when it released the lock.
+ * U-218 (DR-69 B-4): with AssemblyInput.planRunId (a run that carries out an approved run plan), the
+ * outcome has `approvedPlan` as the CLI's assembly gives it (U-195): the gate for the given writable
+ * lists, the recorders' claim of the plan, the planned file probe and the store's two questions about
+ * the plan run. The CLI refuses such a run without them.
  */
 export function createAppAssemble(
   parentEnv: Readonly<Record<string, string | undefined>>,
@@ -74,7 +80,10 @@ export function createAppAssemble(
       // DR-38 as in the CLI (b8c9c1d): the journal, change recorder and plan recorder come with the
       // state guard that knows what they write, so the engine's checks of the state directory count
       // only what the run did not write. G-A, G-F: propose_plan stores plan.json for this run.
-      const { journal, changeRecorder, planRecorder, stateGuard } = createRunRecorders({ workspaceRoot, runId, clock });
+      // U-218 (as the CLI, U-195): with the plan run, the recorders can claim its plan (markApplied).
+      const planRunId = input.planRunId;
+      const recorders = createRunRecorders({ workspaceRoot, runId, clock, ...(planRunId === undefined ? {} : { planRunId }) });
+      const { journal, changeRecorder, planRecorder, stateGuard } = recorders;
       const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
       const verifiers = createVerifierRunner({ workspace, commandRunner });
       const protectedPaths = task.policy.protectedPaths ?? [];
@@ -98,16 +107,29 @@ export function createAppAssemble(
         stateGuard,
         ...(integrity === undefined ? {} : { integrity }),
       };
+      let approvedPlan: ApprovedPlanParts | undefined;
+      if (planRunId !== undefined) {
+        const markApplied = recorders.markApplied;
+        if (markApplied === undefined) throw new Error("the recorders cannot claim the plan");
+        approvedPlan = {
+          policyFor: (writablePathSets) => createPolicyGate({ config: task.policy, workspace, writablePathSets }),
+          markApplied: () => markApplied(),
+          fileNow: createPlannedFileProbe({ workspace }),
+          planRecordsUnchecked: () => stateUncheckedSince({ workspaceRoot, planRunId, applyRunId: runId }),
+          planRecordsChanged: () => hasRecordsChangedMark(workspaceRoot, planRunId),
+        };
+      }
       onAssembled({ privacy, workspaceRoot });
       return {
         ok: true,
         deps,
+        ...(approvedPlan === undefined ? {} : { approvedPlan }),
         async finish(result) {
+          let released = false;
           try {
             if (result !== null) await writeResult(workspaceRoot, result);
           } finally {
             // U-193: a lock left is told, never a reason to lose the run's result.
-            let released = false;
             try {
               released = (await releaseLock({ workspaceRoot, runId })) === true;
             } catch {
@@ -115,10 +137,14 @@ export function createAppAssemble(
             }
             if (!released) onLockLeft();
           }
+          // U-229 (U-220's contract): the CLI reads a lock left from finish (its end summary).
+          return released ? undefined : { lockLeft: true as const };
         },
       };
     } catch (error) {
-      await releaseLock({ workspaceRoot, runId });
+      // U-229 (R-106 I-5, as the CLI's assembly since U-220): the assembly's own error is the one thrown,
+      // not a release that failed after it.
+      await releaseLock({ workspaceRoot, runId }).catch(() => false);
       throw error;
     }
   };

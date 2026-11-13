@@ -374,6 +374,13 @@ export type StartOutcome =
 
 export type AppCallOutcome<T> = { readonly ok: true; readonly output: T } | { readonly ok: false; readonly error: AppError };
 
+/**
+ * U-229 (R-106 L-1, after U-220): a revert's outcome. `lockLeft: true` when the revert finished but
+ * its workspace lock could not be released (the CLI's RevertCliOutcome.lockLeft); the output is the
+ * revert's own, as when the lock was released. Absent: released.
+ */
+export type RevertCallOutcome = { readonly ok: true; readonly output: RevertOutput; readonly lockLeft?: true } | { readonly ok: false; readonly error: AppError };
+
 export interface ReportRequest {
   readonly workspace: string;
   /** A run id or "latest" (N-7). */
@@ -540,6 +547,15 @@ export interface ChangesRequest {
   readonly settings: TaskForm;
   /** A run id or "latest". */
   readonly runId: string;
+}
+
+/**
+ * U-234 (R-107 O-1): how a changes view may be given up. `signal`, once aborted, ends the waits of a
+ * read in a burst of changes (U-213: up to GUARD_PAUSES_MS, 750 ms, per file) and starts no try more;
+ * a file still changing is then `unreadable`, as when its tries ran out. Absent: the reads wait.
+ */
+export interface ChangesOptions {
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -949,16 +965,34 @@ export type ApplyEvent =
   | { readonly kind: "notice"; readonly text: MaskedText };
 
 export interface ApplyObserver {
-  /** Called synchronously for each event. Exceptions are ignored. */
+  /** Called synchronously for each event of a plan of moves. Exceptions are ignored. */
   onEvent?(event: ApplyEvent): void;
+  /**
+   * U-218 (DR-69 B-4): a run plan (plan "run") is carried out by a model run; its events, as
+   * RunObserver.onEvent gets a run's (records masked again, notices). Exceptions are ignored.
+   */
+  onRunEvent?(event: RunEvent): void;
+  /** U-218: that run's permission questions, as RunObserver.confirm (U-108: absent or failing is `dismissed`). */
+  confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 }
+
+/**
+ * DR-2: an apply's end. U-218: a run plan's apply is a model run, so its outcome is that run's
+ * EngineResult (kind "run", with planRunId and planDigest; the run's verifiers and changes) and, as a
+ * run's (U-193), `lockLeft` when its lock could not be released at its end.
+ */
+export type ApplyOutcome =
+  | { readonly ok: true; readonly output: ApplyResult }
+  | { readonly ok: true; readonly output: EngineResult; readonly lockLeft?: true }
+  | { readonly ok: false; readonly error: AppError };
 
 /** DR-2: applying has the same event and cancel channel as a run. */
 export interface ApplyHandle {
+  /** The run that applies: the apply run of a plan of moves, or (U-218) the run that carries out a run plan. */
   readonly runId: string;
   cancel(): void;
   /** Never rejects; resolves after the apply's result.json is written and the lock released. */
-  readonly done: Promise<AppCallOutcome<ApplyResult>>;
+  readonly done: Promise<ApplyOutcome>;
 }
 
 /** DR-17, R-4 L-4: `codaryn review` takes the task form; the note is masked with its secrets before it is stored. */
@@ -980,8 +1014,8 @@ export interface CodarynApp {
   report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>>;
   /** `codaryn report` without `--json`: the same report as Markdown, for saving (GU-3). See ReportMarkdown. */
   reportMarkdown(request: ReportRequest): Promise<AppCallOutcome<ReportMarkdown>>;
-  /** `codaryn revert [--dry-run]` (run id or "latest"). See RevertRequest. */
-  revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>>;
+  /** `codaryn revert [--dry-run]` (run id or "latest"). See RevertRequest; U-229: lockLeft, RevertCallOutcome. */
+  revert(request: RevertRequest): Promise<RevertCallOutcome>;
   /** N-7: `codaryn runs --json`. Reads only. */
   listRuns(request: ListRunsRequest): Promise<AppCallOutcome<RunsOutput>>;
   /** N-7, N-23(b): the run a reference names and its start time. Reads only. */
@@ -1009,7 +1043,7 @@ export interface CodarynApp {
   /** `codaryn models --json --use <id>`: writes the config file's `model` atomically, nothing else. */
   selectModel(request: SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>>;
   /** DR-7: the run's changes, masked again with the secrets registered now. Reads only. */
-  changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
+  changes(request: ChangesRequest, options?: ChangesOptions): Promise<AppCallOutcome<ChangesOutput>>;
   /** U-89 (GUI 3.3): one directory of the workspace, masked, links never followed. Reads only. */
   listWorkspaceDir(request: ListWorkspaceDirRequest): Promise<AppCallOutcome<WorkspaceDirListing>>;
   /** U-172 (DR-72): a workspace text file for a person, as shown, and whether it can be edited here. Reads only, no lock (adapter-contract 5.15). */

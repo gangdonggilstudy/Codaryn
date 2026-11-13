@@ -56,14 +56,14 @@ import { isUsableApiKey } from "../model/anthropic/index.js";
 import { buildChildEnv, planWindowsLaunch } from "../tools/index.js";
 import type { ExecutableFileSystem } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
-import { workflowDefinitions } from "../workflows/index.js";
+import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { parseDoctorArgs } from "./args.js";
 import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { argumentsError, cliError } from "./run.js";
+import { argumentsError, cliError, workflowProblemText } from "./run.js";
 import {
   MAX_KEY_SCAN_DEPTH,
   checkLocalPathSyntax,
@@ -662,6 +662,8 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   // U-182: the config file as parsed, before --profile (its own writable list, as a run sees it).
   let fileConfig: CodarynConfig | null = null;
   let configPath: string | null = null;
+  // U-228: where the valid config file was found, for a later failure of its check.
+  let configDisplay: ConfigLocationDisplay | null = null;
   const chosen = chooseConfigFile({ argument: args.configPath, env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   const refusedNote = io.defaultConfigRefused === true ? "; the default location is a network or device path and is not used" : "";
   if (!chosen.ok) {
@@ -691,6 +693,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         config = outcome.config;
         fileConfig = outcome.config;
         configPath = loaded.path;
+        configDisplay = candidate.display;
         // N-A 32.3 (0d38bfa): valid_at names the default location; a file given by --config or
         // CODARYN_CONFIG is valid_given (valid_at called every source "the default location").
         const validText: DoctorText =
@@ -741,6 +744,34 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     }
   }
   const taskUnusable = args.taskPath !== null && task === null;
+  // U-228 (U-224): a task type resolved to a plan mode without its plan tool, which a run refuses at
+  // resolution (plan_tool_missing), as run.ts resolves it: the task's fields, else the profile's task
+  // type. The check of the file to fix fails: the config file's for its task type (workflows) or a
+  // profile, else the task file's. Other resolution problems are left to the run, as before.
+  const resolutionProfileRef = args.profile === null ? null : (config?.profiles?.[args.profile]?.workflowRef ?? null);
+  if (!taskUnusable && (task !== null || resolutionProfileRef !== null) && results.get("config_file")?.status !== "fail") {
+    const resolved = resolveWorkflow({
+      definitions: workflowDefinitions(config?.workflows),
+      task: {
+        ...(task?.workflowRef === undefined ? {} : { workflowRef: task.workflowRef }),
+        ...(task?.tools === undefined ? {} : { tools: task.tools }),
+        ...(task?.plan === undefined ? {} : { plan: task.plan }),
+        ...(task?.completion === undefined ? {} : { completion: task.completion }),
+        ...(task?.humanReview === undefined ? {} : { humanReview: task.humanReview }),
+      },
+      profileWorkflowRef: resolutionProfileRef,
+      commandRules: task?.policy.commands.length ?? 0,
+    });
+    if (!resolved.ok && resolved.problem === "plan_tool_missing") {
+      const message = `${resolved.field} ${workflowProblemText("plan_tool_missing")}`;
+      const inConfig = task === null || resolved.field.startsWith("workflows") || resolved.field.startsWith("profiles");
+      if (inConfig && configDisplay !== null) {
+        set("config_file", "fail", message, { id: "doctor.config_file.plan_tool_missing", params: { location: configDisplay } });
+      } else {
+        set("task_file", "fail", message, { id: "doctor.task_file.plan_tool_missing" });
+      }
+    }
+  }
   // SP-D3, SP-D10: the task's provider, else the quick form's (the profile's, else the file's, else
   // anthropic; the profile was laid over above).
   const provider = task?.model.provider ?? quickProvider(config);

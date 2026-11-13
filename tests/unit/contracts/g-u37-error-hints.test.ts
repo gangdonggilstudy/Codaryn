@@ -47,8 +47,10 @@ const PLAIN = [
   "key_in_config",
   // U-115 (UXM-9, PM: in na-core's branch for p4g-general to confirm): no config file at all.
   "config_missing",
-  // U-177 (review R-99 M-2, in na-core's branch for p4g-general to confirm): plan "run" before B-4.
-  "plan_run_not_available",
+  // U-228 (nd-docs' findings, in na-core's branch for p4g-general to confirm): a plan of another kind
+  // than the task carries out, and a plan mode without its plan tool (U-224).
+  "plan_kind_differs",
+  "plan_tool_missing",
 ];
 const DETAILED: { readonly [hint: string]: { readonly [param: string]: string } } = {
   unknown_option: { position: "count" },

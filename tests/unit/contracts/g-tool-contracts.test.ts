@@ -59,8 +59,9 @@ describe("G-A tool names", () => {
   });
 
   test("workflow tools are separate from the built-in ones; ALL_TOOL_NAMES lists the built-ins first", () => {
-    // U-180 (DR-69 B-3): propose_changes, the plan tool of plan mode run, joins them last.
-    assert.deepEqual([...WORKFLOW_TOOL_NAMES], ["inspect_files", "propose_plan", "propose_changes"]);
+    // U-180 (DR-69 B-3): propose_changes, the plan tool of plan mode run, joins them; U-208 (A-5):
+    // query_table, the aggregate tool, last.
+    assert.deepEqual([...WORKFLOW_TOOL_NAMES], ["inspect_files", "propose_plan", "propose_changes", "query_table"]);
     for (const name of WORKFLOW_TOOL_NAMES) assert.equal((TOOL_NAMES as readonly string[]).includes(name), false, name);
     assert.deepEqual([...ALL_TOOL_NAMES], [...TOOL_NAMES, ...WORKFLOW_TOOL_NAMES]);
     assert.equal(new Set(ALL_TOOL_NAMES).size, ALL_TOOL_NAMES.length);

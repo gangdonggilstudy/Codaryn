@@ -90,8 +90,12 @@ export type AssemblyOutcome =
       /**
        * Called exactly once after the run. Stores result.json when a result exists,
        * then releases the workspace lock (also when the run threw and `result` is null).
+       * U-220 (U-176, U-201): a release that throws after its retries, or answers false, leaves the
+       * lock; finish then resolves with `{ lockLeft: true }` instead of throwing, the result being
+       * stored all the same, and the run's end summary says so. A finish that resolves with nothing
+       * (an older or a test assembly) released the lock.
        */
-      finish(result: EngineResult | null): Promise<void>;
+      finish(result: EngineResult | null): Promise<void | { readonly lockLeft: true }>;
       /** U-195: present exactly when AssemblyInput.planRunId was given. */
       readonly approvedPlan?: ApprovedPlanParts;
     }
@@ -141,6 +145,12 @@ export type RevertCommandOutcome =
        * only while it is there and not reverted.
        */
       readonly planApply?: PlanApply;
+      /**
+       * U-220 (U-176, U-201): the revert finished but its workspace lock could not be released (the
+       * release threw after its retries, or answered false). The outcome is the revert's own; the
+       * summary says `lock.release_failed`. Absent: released.
+       */
+      readonly lockLeft?: true;
     }
   | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
 
@@ -352,6 +362,8 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
 
     const lock = await acquireLock({ workspaceRoot, runId: lockId, clock });
     if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
+    /** The revert itself, under the lock. */
+    const underLock = async (): Promise<RevertCommandOutcome> => {
     try {
       const outcome = await revertRun({
         workspaceRoot,
@@ -381,9 +393,13 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       return { ok: true, outcome, runId, revertedBefore, ...marked };
     } catch (error) {
       return failed(error);
-    } finally {
-      await releaseLock({ workspaceRoot, runId: lockId });
     }
+    };
+    const finished = await underLock();
+    // U-220 (U-176, U-201): a release that throws after its retries, or answers false, leaves the
+    // lock; the revert's outcome stays and says so (lockLeft), never internal_error.
+    const released = await releaseLock({ workspaceRoot, runId: lockId }).then((value) => value === true, () => false);
+    return finished.ok && !released ? { ...finished, lockLeft: true } : finished;
   };
 }
 
@@ -486,15 +502,19 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
       deps,
       ...(approvedPlan === undefined ? {} : { approvedPlan }),
       async finish(result) {
+        let released = false;
         try {
           if (result !== null) await writeResult(workspaceRoot, result);
         } finally {
-          await releaseLock({ workspaceRoot, runId });
+          // U-220: a release that fails is told (lockLeft), never a reason to lose the run's end.
+          released = (await releaseLock({ workspaceRoot, runId }).then((value) => value === true, () => false));
         }
+        return released ? undefined : { lockLeft: true as const };
       },
     };
   } catch (error) {
-    await releaseLock({ workspaceRoot, runId });
+    // U-220: the assembly's own error is the one told, not a release that failed after it.
+    await releaseLock({ workspaceRoot, runId }).catch(() => false);
     throw error;
   }
 }

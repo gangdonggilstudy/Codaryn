@@ -52,7 +52,7 @@ test("U-71 (DR-4): the apply's command verifier gets the variables file's LANG f
     unsafeMoveConsent: null,
   });
   assert.ok(applied.ok, JSON.stringify(applied));
-  const done: AppCallOutcome<ApplyResult> = await applied.handle.done;
+  const done = (await applied.handle.done) as AppCallOutcome<ApplyResult>;
   assert.ok(done.ok, JSON.stringify(done));
 
   const lang = done.output.verifiers.find((verifier) => verifier.id === "lang");

@@ -572,6 +572,24 @@ export const FIXED_MESSAGES = {
   "plan.inventory_limit": {},
   "plan.applied_by": { runId: "runId" },
   "plan.next_apply": { runId: "runId" },
+  // U-191 (DR-69 B-1, B-3; drafts for nb-i18n): the plan view of a `run` plan (ChangesPlanOutput),
+  // beside the lines above, which it shares (records_changed, cannot_apply, digest_label,
+  // plan.status.<status>, applied_by).
+  // - plan.changes.heading: as plan.heading, `{count}` the planned files.
+  // - plan.change.create, plan.change.modify: each planned file's change, before its masked path.
+  // - plan.changes.summary_label: before the summary, which the later run is told and which is part
+  //   of what is approved (R-99 L-1); the summary follows as the model's words (quoteModelText).
+  // - plan.changes.next_apply ({runId}: the plan run) while pending and not marked: as
+  //   plan.next_apply, the digest's first characters after it.
+  // - plan.changes.digest_guarantee: last (the digest names the files, the contents of the files to
+  //   modify and the summary; the run stops before its first model request if one changed; its file
+  //   tools write only these files, B-8).
+  "plan.changes.heading": { runId: "runId", count: "count", status: "text" },
+  "plan.change.create": {},
+  "plan.change.modify": {},
+  "plan.changes.summary_label": {},
+  "plan.changes.next_apply": { runId: "runId" },
+  "plan.changes.digest_guarantee": {},
   "apply.question": {},
   "apply.unsafe_move_question": { count: "count" },
   "review.recorded": { runId: "runId", verdict: "text" },

@@ -145,6 +145,9 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.model_not_found": "The model was not found (HTTP 404). codaryn models lists the models the key can use.",
   "progress.not_writable_hint":
     "Writes denied because the file is not in writablePaths: {count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
+  // U-195 (Codex V-14 L-1), draft for nb-i18n.
+  "progress.not_in_plan_hint":
+    "Writes refused because the file is not among those this plan approved: {count}. To change other files, make a new plan with codaryn run and approve it.",
   "progress.unknown_tool": "(unknown tool)",
   "progress.apply_started": "apply started — actions: {actions}, {approval}",
   "progress.plan_checked": "preflight — problems: {count}",

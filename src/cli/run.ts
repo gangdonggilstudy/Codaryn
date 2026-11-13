@@ -346,6 +346,9 @@ function approvedDeps(deps: EngineDeps, approved: ApprovedRunPlan, parts: Approv
 /** U-182: the English of progress.not_writable_hint, when no catalog is given. */
 const notWritableHint = (count: number): string =>
   `Writes denied because the file is not in writablePaths: ${count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.`;
+/** U-195 (Codex V-14 L-1): the English of progress.not_in_plan_hint, when no catalog is given. */
+const notInPlanHint = (count: number): string =>
+  `Writes refused because the file is not among those this plan approved: ${count}. To change other files, make a new plan with codaryn run and approve it.`;
 
 /** G-A: what each workflow problem means, after the field position (never a value). */
 const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
@@ -487,6 +490,8 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     ...(notes.confirmationDenied === undefined ? {} : { confirmationDenied: { ...notes.confirmationDenied, couldAsk: notes.couldAsk === true } }),
     // U-148 (U-140, UXM-18): what the task type left out, as run_started records it; not when empty.
     ...(notes.policyNarrowings === undefined || notes.policyNarrowings.length === 0 ? {} : { policyNarrowings: notes.policyNarrowings }),
+    // U-195 (Codex V-14 L-1): U-198's line for the writes refused as not writable; not when none.
+    ...(notes.deniedNotWritable === undefined ? {} : { deniedNotWritable: notes.deniedNotWritable }),
     policySource: args.input.kind === "task" ? "task" : "config",
   };
 }
@@ -1055,10 +1060,21 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
       const hint = human === undefined ? undefined : human.messages.format("progress.model_not_found");
       const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write, hint) : ended;
       // U-182 (DR-69 B-4): writes denied as path_not_writable, and how to allow a file. A progress
-      // line only; the result is unchanged.
+      // line only; the result is unchanged. U-195 (Codex V-14 L-1): in a run that carries out a plan
+      // those writes are outside the plan's files (before the model, the engine ended the run as
+      // plan_stale if a writable list left out a planned file), which no writablePaths entry widens:
+      // the plan's hint instead, a new plan approved.
       const notWritable = notes.deniedNotWritable ?? 0;
       if (write !== undefined && notWritable > 0) {
-        writeMasked(write, privacy, human === undefined ? notWritableHint(notWritable) : human.messages.format("progress.not_writable_hint", { count: notWritable }));
+        const hintText =
+          approved === undefined
+            ? human === undefined
+              ? notWritableHint(notWritable)
+              : human.messages.format("progress.not_writable_hint", { count: notWritable })
+            : human === undefined
+              ? notInPlanHint(notWritable)
+              : human.messages.format("progress.not_in_plan_hint", { count: notWritable });
+        writeMasked(write, privacy, hintText);
       }
       result = defaultDisplay === null ? hinted : withNotice(hinted, privacy, defaultConfigNotice(defaultDisplay));
     } finally {

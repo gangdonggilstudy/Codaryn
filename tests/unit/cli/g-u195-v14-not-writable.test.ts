@@ -6,9 +6,10 @@
  * the write, which no writablePaths entry can widen.
  * Now, on the real CLI (a process, other denials mixed in):
  * - the end summary has the line with the count of writes refused as not writable;
- * - in a run that carries out a plan, a write to a file the plan did not approve gets the plan's hint
- *   (make a new plan and approve it), and a write to an approved file that a writablePaths list of
- *   the apply's task leaves out gets the writablePaths hint, each with its own count;
+ * - in a run that carries out a plan, a refused write gets the plan's hint (make a new plan and approve
+ *   it), not the writablePaths hint, also for a file the apply task's writablePaths names: a planned
+ *   file a writable list leaves out ends the run as plan_stale before the model (U-187), so every
+ *   refused write of a carried run is outside the plan;
  * - a run without a plan keeps the writablePaths hint.
  * Scripted model, temporary folders; no network.
  */
@@ -91,18 +92,29 @@ describe("V-14 L-1 on the real CLI: refused writes in the end summary and the ri
     assert.equal(readFileSync(path.join(sb.workspace, "docs", "new.md"), "utf8"), "new page\n");
   });
 
-  test("a file outside the plan and a planned file outside the apply task's writablePaths: one hint each (Korean)", { timeout: 120_000 }, async (t) => {
+  test("a file the apply task's writablePaths names but the plan does not: the plan's hint (Korean)", { timeout: 120_000 }, async (t) => {
     const sb = createSandbox(t);
     const planned = await makePlan(sb);
-    const steps = [toolStep("write_file", createFileArgs("other.txt", "x\n")), guideWrite, toolStep("write_file", createFileArgs("./docs/new.md", "new page\n")), textStep("done")];
-    // DR-5: the apply's own task; its list covers other.txt and the guide, not docs/new.md.
-    const ran = await carry(sb, planned, steps, "ko", { writablePaths: ["docs/guide.md", "other.txt"] });
+    const steps = [toolStep("write_file", createFileArgs("other.txt", "x\n")), guideWrite, toolStep("write_file", createFileArgs("docs/new.md", "new page\n")), textStep("done")];
+    // DR-5: the apply's own task; its list covers both planned files and other.txt.
+    const ran = await carry(sb, planned, steps, "ko", { writablePaths: ["docs", "other.txt"] });
     const ko = createMessageCatalog("ko");
-    assert.ok(ran.stderr.includes(line(ko, "summary.denied_not_writable", 2)), ran.stderr);
+    assert.ok(ran.stderr.includes(line(ko, "summary.denied_not_writable", 1)), ran.stderr);
     assert.ok(ran.stderr.includes(line(ko, "progress.not_in_plan_hint", 1)), ran.stderr);
-    assert.ok(ran.stderr.includes(line(ko, "progress.not_writable_hint", 1)), ran.stderr);
-    assert.equal(existsSync(path.join(sb.workspace, "other.txt")) || existsSync(path.join(sb.workspace, "docs", "new.md")), false);
-    assert.equal(readFileSync(path.join(sb.workspace, "docs", "guide.md"), "utf8"), "new guide\n");
+    assert.equal(ran.stderr.includes(line(ko, "progress.not_writable_hint", 1)), false, "widening writablePaths would not help");
+    assert.equal(existsSync(path.join(sb.workspace, "other.txt")), false);
+    assert.equal(readFileSync(path.join(sb.workspace, "docs", "new.md"), "utf8"), "new page\n");
+  });
+
+  test("a planned file the apply task's writablePaths leaves out: plan_stale before the model, no hint", { timeout: 120_000 }, async (t) => {
+    const sb = createSandbox(t);
+    const planned = await makePlan(sb);
+    const ran = await carry(sb, planned, [guideWrite, textStep("not requested")], "en", { writablePaths: ["docs/guide.md"] });
+    const result = json(ran);
+    assert.equal(`${String(result["status"])}/${String(result["reason"])}`, "failed/plan_stale", ran.stdout);
+    assert.equal((result["usage"] as { modelTurns: number }).modelTurns, 0);
+    const en = createMessageCatalog("en");
+    assert.equal(ran.stderr.includes(line(en, "progress.not_in_plan_hint", 1)) || ran.stderr.includes("add it to writablePaths"), false);
   });
 
   test("a run without a plan: the summary's count and the writablePaths hint, beside a command denial", { timeout: 60_000 }, async (t) => {

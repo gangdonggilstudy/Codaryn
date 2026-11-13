@@ -646,6 +646,12 @@ export const FIXED_MESSAGES = {
   // U-182 (DR-69 B-4): after a run whose `{count}` writes were denied as path_not_writable, how to
   // allow a file (every writable list must cover it). A progress line, not in the result.
   "progress.not_writable_hint": { count: "count" },
+  // U-195 (Codex V-14 L-1; draft for nb-i18n): in place of progress.not_writable_hint after a run that
+  // carried out a `run` plan, whose `{count}` writes were refused because the file is not among the
+  // plan's approved files (the engine refused the run before the model if a writable list left out a
+  // planned file): no writablePaths entry widens those, so the way is a new plan approved. A progress
+  // line, not in the result.
+  "progress.not_in_plan_hint": { count: "count" },
   "progress.unknown_tool": {},
   // G-A: an apply run's records (ApplyJournalEvent). `{approval}` is `approval.<channel>`,
   // `{problem}` is `plan.problem.<problem>`; an action is shown by its number (index + 1).

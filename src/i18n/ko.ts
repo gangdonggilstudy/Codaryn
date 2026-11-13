@@ -144,6 +144,9 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.model_not_found": "모델을 찾지 못했습니다(HTTP 404). codaryn models로 키가 쓸 수 있는 모델을 보세요.",
   "progress.not_writable_hint":
     "writablePaths에 없는 파일이라 거부된 쓰기: {count}건. 그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.",
+  // U-195 (Codex V-14 L-1; nb-i18n이 다듬을 초안).
+  "progress.not_in_plan_hint":
+    "이 계획이 승인한 파일이 아니라서 거부된 쓰기: {count}건. 다른 파일을 바꾸려면 codaryn run으로 새 계획을 만들어 승인하세요.",
   "progress.unknown_tool": "(모르는 도구)",
   "progress.apply_started": "적용 시작 — 동작 {actions}개, {approval}",
   "progress.plan_checked": "적용 전 점검 — 문제 {count}개",

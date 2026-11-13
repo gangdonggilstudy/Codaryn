@@ -15,8 +15,10 @@
  *     task, script and cancel files are outside it (S-1); `integrity.paths` exist outside it (U-1)
  *  7. secret values: secretEnv (S-3 messages), the key in every run (S-2), env file values (S-4)
  *  8. model, then the assembled engine
- * Steps 1 to 7 are prepareTask's, in src/app/prepare.ts since the CLI migration's C-5 (U-287); steps
- * 8 on are here until C-6a.
+ * Steps 1 to 7 are prepareTask's, in src/app/prepare.ts since the CLI migration's C-5 (U-287). Since
+ * C-6a (U-296) steps 8 on are the app layer's run life (runLife, src/app/run-life.ts); this file draws
+ * what a person sees (runThroughApp). A run that carries out an approved plan (codaryn apply) keeps
+ * the life of runPrepared below until C-6b.
  */
 
 import path from "node:path";
@@ -36,6 +38,8 @@ import type {
   InputDiagnostic,
   InputDiagnosticFile,
   Journal,
+  JournalEvent,
+  MaskedText,
   MessageLanguage,
   ModelProvider,
   PrivacyGateway,
@@ -57,9 +61,12 @@ import { parseArgs } from "./args.js";
 import type { ApprovedPlanParts, Assemble } from "../app/assembly.js";
 import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { createRunId } from "../app/input/run-id.js";
-import { PROGRESS_PREFIX, withProgress } from "./progress.js";
+import { PROGRESS_PREFIX, englishProgressLines, withProgress, writeProgressLines } from "./progress.js";
 import { resolveApiSettings } from "../app/input/settings.js";
 import { countingJournal } from "../app/tally.js";
+import { journalWithEvents } from "../app/events.js";
+import { MODEL_NOT_FOUND_HINT, defaultConfigNotice, runLife } from "../app/run-life.js";
+import type { RunObserver } from "../app/types.js";
 import { argumentsError, cliError as error, jsonSyntaxError, parseJson, prepareTask, readText, scrub, settingsError } from "../app/prepare.js";
 import type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunArgs, RunNotes } from "../app/prepare.js";
 
@@ -70,6 +77,9 @@ export { argumentsError, cliError, jsonSyntaxError, positionDiagnostic, prepareT
 export type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunNotes, RunOutcomeInfo } from "../app/prepare.js";
 // U-293 (C-6a): the end summary's counting is the app layer's (src/app/tally.ts); its test keeps this name.
 export { notePrivateData } from "../app/tally.js";
+// U-296 (C-6a): the Y-4 hint and the default location's notice are the app layer's run life's (one text
+// each); tests and this file's approved-plan run take them by these names.
+export { MODEL_NOT_FOUND_HINT, defaultConfigNotice } from "../app/run-life.js";
 
 export interface CliEnvironment extends PrepareEnvironment {
   readonly argv: readonly string[];
@@ -112,13 +122,6 @@ function headDiagnostic(file: InputDiagnosticFile, message: string): InputDiagno
   const field = toSchemaFieldPath(message.split(" ", 1)[0] ?? "");
   return field === null ? undefined : { code: "invalid_value", file, field, line: null, column: null };
 }
-
-/**
- * Y-4: added to the result's notices (and, with progress on, to stderr) when the run ended with a
- * model error whose request was answered with HTTP 404. The error kind stays the provider's.
- */
-export const MODEL_NOT_FOUND_HINT =
-  "the API answered HTTP 404, which usually means the model id is unknown: run `codaryn models` to list the models this key can use";
 
 /**
  * Y-4 with SP-3: `model` with every outcome watched; `onNotFound` is called when a request was
@@ -191,11 +194,6 @@ function withNotice(result: EngineResult, privacy: PrivacyGateway, text: string)
   return masked.ok ? { ...result, notices: [...result.notices, masked.text] } : result;
 }
 
-/** N-1: shown in the progress lines and the result's notices when the default location was used. */
-export function defaultConfigNotice(display: string): string {
-  return `settings were read from the default config file location ${display}`;
-}
-
 export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const parsed = parseArgs(io.argv);
   if (!parsed.ok) return argumentsError(parsed);
@@ -263,13 +261,138 @@ export interface ApprovedRunPlan {
 }
 
 /**
+ * U-296 (the CLI migration's C-6a, its fourth commit): an ordinary run's steps 8 on are the app
+ * layer's run life (runLife: the model, the HTTP 404 watch, the cancel source, the assembly and the
+ * lock, the end summary's counts, the engine, the notices, the end), on this run's own environment as
+ * it is (process.env with the variables file loaded into it, the CLI's assembly: DR-4 as before), so
+ * what a test gives reaches the life unchanged. The CLI draws what a person sees, as before:
+ * - once assembled: the typed workspace for the end summary (DR-51), the renderer in the config's
+ *   language, the permission question at a terminal (B-5), and each record as stored
+ *   (RunObserver.onStoredRecord, through the app's journalWithEvents) drawn as its progress lines and
+ *   masked with the run's gateway as RunHandle.mask masks; right after the start, the default
+ *   location's line (N-1);
+ * - after the run, the lock released: the Y-4 line, the writablePaths line and the end summary.
+ * The refusals are the life's own (cliError), so the JSON line keeps its keys' order.
+ */
+async function runThroughApp(io: CliEnvironment, args: RunArgs, notes: RunNotes, prepared: PreparedTask): Promise<CliRunOutcome> {
+  const { defaultDisplay } = prepared;
+  // U-8: progress lines follow the journal; they start only once the run has started.
+  const write = args.quiet ? undefined : io.writeProgress;
+  // Set once assembled (the closure below), so declared wide: control flow cannot see that.
+  let privacy = null as PrivacyGateway | null;
+  // N-4, N-5: the human renderer in the chosen language (the config's language is known now).
+  let human = undefined as { readonly output: HumanOutput; readonly messages: MessageCatalog } | undefined;
+  const assemble: Assemble = async (input) => {
+    const assembled = await io.assemble(input);
+    if (!assembled.ok) return assembled;
+    const gateway = assembled.deps.privacy;
+    privacy = gateway;
+    // DR-51 (U-38): the typed --workspace for the end summary's hints, after the run's own masking.
+    // Best effort, as the summary is: a gateway that cannot mask it leaves the hint at <workspace>.
+    if (args.input.kind === "quick" && !args.input.oneLine) {
+      try {
+        const typed = args.input.workspace;
+        const masked = gateway.mask(typed);
+        const shown = toShownWorkspace(typed, masked.ok ? masked.text : null);
+        if (shown !== null) notes.workspaceShown = shown;
+      } catch {
+        // No path is shown.
+      }
+    }
+    try {
+      human = write === undefined ? undefined : io.human?.(notes.configLanguage);
+    } catch {
+      human = undefined;
+    }
+    const shown = human;
+    // As RunHandle.mask masks (app.ts): with the run's gateway; null when the text cannot be masked.
+    const mask = (text: string): MaskedText | null => {
+      try {
+        const masked = gateway.mask(text);
+        return masked.ok ? masked.text : null;
+      } catch {
+        return null;
+      }
+    };
+    const render = shown === undefined ? englishProgressLines() : (event: JournalEvent) => shown.output.progressLine(event);
+    let announced = defaultDisplay === null;
+    const observer: RunObserver =
+      write === undefined
+        ? {}
+        : {
+            onStoredRecord(record) {
+              writeProgressLines(record, mask, write, render);
+              // N-1: say once, right after the run started, that the default config location was used.
+              if (!announced && record.type === "run_started") {
+                announced = true;
+                writeMasked(
+                  write,
+                  gateway,
+                  shown !== undefined && defaultDisplay !== null
+                    ? shown.messages.format("progress.config_default", { location: defaultDisplay })
+                    : defaultConfigNotice(defaultDisplay ?? ""),
+                );
+              }
+            },
+          };
+    // U-110 (B-5): at a terminal and without --quiet, the engine's permission question is asked on
+    // stderr in the chosen language (English when no renderer is given).
+    let questions: MessageCatalog | undefined;
+    if (!args.quiet && io.ask !== undefined) {
+      try {
+        questions = shown?.messages ?? io.human?.(notes.configLanguage).messages;
+      } catch {
+        questions = undefined;
+      }
+    }
+    const confirm = args.quiet || io.ask === undefined ? undefined : terminalConfirm(io.ask, questions ?? createMessageCatalog("en"));
+    notes.couldAsk = confirm !== undefined;
+    const journal = journalWithEvents(assembled.deps.journal, observer, gateway);
+    return { ...assembled, deps: { ...assembled.deps, journal, ...(confirm === undefined ? {} : { confirm }) } };
+  };
+  const end = await runLife({ ...io, assemble }, args, notes, prepared);
+  if (end.kind === "refused") return { output: end.output, exitCode: end.output.exitCode };
+  const result = end.result;
+  try {
+    if (write !== undefined && privacy !== null) {
+      const gateway: PrivacyGateway = privacy;
+      const shown = human;
+      // Y-4: the line in the chosen language when the life added the hint; the notice stays English.
+      if (end.modelNotFound) writeMasked(write, gateway, shown === undefined ? MODEL_NOT_FOUND_HINT : shown.messages.format("progress.model_not_found"));
+      // U-182 (DR-69 B-4): writes denied as path_not_writable, and how to allow a file. A progress
+      // line only; the result is unchanged.
+      const notWritable = notes.deniedNotWritable ?? 0;
+      if (notWritable > 0) {
+        writeMasked(write, gateway, shown === undefined ? notWritableHint(notWritable) : shown.messages.format("progress.not_writable_hint", { count: notWritable }));
+      }
+      // N-5: the end summary on stderr, after the lock is released.
+      if (shown !== undefined) {
+        let summary = "";
+        try {
+          summary = shown.output.runSummary(result, summaryContext(args, notes));
+        } catch {
+          summary = "";
+        }
+        writeHuman(write, gateway, summary);
+      }
+    }
+  } catch {
+    // As before, when a line after the engine could not be drawn (the life has released the lock).
+    return error("internal_error", "the run stopped because of an internal error");
+  }
+  return { output: result, exitCode: result.exitCode };
+}
+
+/**
  * Steps 8 on (the model, the assembly, the engine, the end summary) for a prepared task. `run` gives
- * no `approved`. U-195: `codaryn apply` gives the approved `run` plan it checked: the assembly then
- * claims that plan run (AssemblyInput.planRunId) and the engine's runApprovedPlan carries it out
- * (EngineResult with planRunId and planDigest); the rest (progress lines, end summary, result.json)
- * is a run's.
+ * no `approved`: since C-6a (U-296) that is the app layer's life (runThroughApp). U-195: `codaryn
+ * apply` gives the approved `run` plan it checked: the assembly then claims that plan run
+ * (AssemblyInput.planRunId) and the engine's runApprovedPlan carries it out (EngineResult with
+ * planRunId and planDigest); the rest (progress lines, end summary, result.json) is a run's. That run
+ * keeps the life below until the CLI migration's C-6b.
  */
 export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunNotes, prepared: PreparedTask, approved?: ApprovedRunPlan): Promise<CliRunOutcome> {
+  if (approved === undefined) return runThroughApp(io, args, notes, prepared);
   const { task, config, integrityPaths, defaultDisplay } = prepared;
   const secrets = [...prepared.secrets];
   const addSecret = (value: string): void => {

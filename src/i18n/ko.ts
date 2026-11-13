@@ -637,6 +637,8 @@ export const KO_MESSAGES: MessageTexts = {
   "denial.plan_action_not_allowed": "허용하지 않은 계획 동작",
   // U-175 (DR-69 B-2), 초안: 작업이 쓸 수 있는 파일 밖의 쓰기.
   "denial.path_not_writable": "쓰기를 허용한 파일 밖",
+  // U-197 (묶음 A), nb-i18n 이 다듬을 초안.
+  "denial.unreadable_path": "읽기 제외 경로",
   "denial.unknown_tool": "모르는 도구",
   "denial.invalid_args": "잘못된 인자",
   "denial.policy_denied": "권한 규칙이 거부함",
@@ -654,6 +656,9 @@ export const KO_MESSAGES: MessageTexts = {
   "denial.cancelled": "취소됨",
   "denial.io_error": "입출력 오류",
   "denial.invalid_plan": "잘못된 계획",
+  // U-197 (묶음 A), nb-i18n 이 다듬을 초안.
+  "denial.too_many_groups": "묶음이 너무 많음",
+  "denial.invalid_table": "쓸 수 없는 표",
 
   "permission.path": "경로",
   "permission.command": "명령",

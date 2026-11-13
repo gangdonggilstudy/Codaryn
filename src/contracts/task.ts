@@ -180,6 +180,31 @@ export interface PolicyConfig {
    */
   readonly planActions?: readonly PlanActionKind[];
   /**
+   * P1 bundle A (U-197; DR-69, DR-70; proposal R-1 to R-5, R-8): workspace-relative paths whose
+   * files the model may not read, list or change; only `query_table` aggregates their tables (the
+   * access `aggregate`), and gives what DR-70 allows (query.ts). Format and matching are
+   * protectedPaths' (checkProtectedPaths; judged on the text, then on the real path, a link entry
+   * covering its target; compilePathSet with `onUnusable: "covers"`: a deny list fails closed).
+   * - Only adds: the config file, the applied profile, a task type definition and the task file may
+   *   each add entries (the union) and none takes one away. The config file's entries apply also to
+   *   a run of a task file, whose own policy otherwise replaces the config's (R-2).
+   * - read_file is refused (`unreadable_path`); search_files and inspect_files are refused at such
+   *   a path and leave the entries under it out of their results, names included (R-4); writes are
+   *   refused too (it is a protected path as well); the integrity checks watch it.
+   * - With any entry, no command rule and no `command` verifier may be set
+   *   (PRIVATE_DATA_WORKFLOW_PROBLEMS `unreadable_with_commands`, R-5).
+   * - An entry that does not exist or holds nothing is judged the same way: no error tells it.
+   * - Not read yet: the parsers refuse the field (A-6) and the gate does not judge it (A-3).
+   */
+  readonly unreadablePaths?: readonly string[];
+  /**
+   * P1 bundle A (U-197; Q-4): the group size k for tables under unreadablePaths: groups of fewer
+   * rows are not shown (query.ts, DR-70). MIN_GROUP_SIZE_LIMITS (2 to 1000). The config file's value,
+   * or DEFAULT_MIN_GROUP_SIZE, is the base; a profile, a definition and a task file can only raise it
+   * (effectiveMinGroupSize). Not read yet: the parsers refuse it (A-6).
+   */
+  readonly minGroupSize?: number;
+  /**
    * P1 (DR-69, B-4): workspace-relative paths that file tools may write; they may write nothing
    * else. The format, the matching and the platform rules are protectedPaths' (checkProtectedPaths;
    * whole `/` separated segments, an entry covers itself and everything below it; judged on the

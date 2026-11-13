@@ -37,6 +37,12 @@ export const POLICY_DENIAL_CODES = [
    * links are resolved only (checkEffective); a protected path is reported first.
    */
   "path_not_writable",
+  /**
+   * U-197 (bundle A, R-3, R-8): a read, a listing or a write under PolicyConfig.unreadablePaths
+   * (only the access `aggregate` is allowed there). Permission `path`. Judged on the text and on
+   * the real path, as the protected paths (A-3).
+   */
+  "unreadable_path",
 ] as const;
 export type PolicyDenialCode = (typeof POLICY_DENIAL_CODES)[number];
 
@@ -59,6 +65,7 @@ export const REFUSAL_HINTS: { readonly [C in PolicyDenialCode | "unresolved_toke
   plan_action_not_allowed: "This task does not allow this kind of plan action.",
   confirmation_required: "The person did not allow this call during the run; do not repeat it.",
   path_not_writable: "This task may write only certain files and this is not one of them; do not write to it.",
+  unreadable_path: "Files here may not be read, listed or changed in this task; use query_table for their tables.",
   unresolved_token: "A protected placeholder cannot be used in this field.",
   invalid_token: "Keep protected placeholders exactly as they were given, or leave them out.",
 };

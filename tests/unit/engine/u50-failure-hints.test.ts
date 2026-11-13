@@ -29,6 +29,8 @@ const HINTED: readonly ToolErrorCode[] = [
   "protected_span_violation",
   "invalid_token",
   "masking_failed",
+  // U-197 (bundle A, Q-5): query_table.
+  "too_many_groups",
 ];
 
 /** Runs one read call whose tool fails with `code` and `message`; returns what was recorded. */

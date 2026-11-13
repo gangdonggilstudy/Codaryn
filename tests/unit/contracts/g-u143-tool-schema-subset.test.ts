@@ -11,6 +11,8 @@ import { describe, test } from "node:test";
 import {
   PROPOSE_CHANGES_DEFINITION,
   PROPOSE_CHANGES_TOOL_NAME,
+  QUERY_TABLE_DEFINITION,
+  QUERY_TABLE_TOOL_NAME,
   TOOL_DEFINITIONS,
   TOOL_NAME_PATTERN_SOURCE,
   TOOL_SCHEMA_KEYWORDS,
@@ -24,6 +26,8 @@ const DEFINITIONS: readonly (readonly [string, JsonObject])[] = Object.entries({
   ...TOOL_DEFINITIONS,
   ...WORKFLOW_TOOL_DEFINITIONS,
   [PROPOSE_CHANGES_TOOL_NAME]: PROPOSE_CHANGES_DEFINITION,
+  // U-197: query_table too, fixed before a task can list it (A-5).
+  [QUERY_TABLE_TOOL_NAME]: QUERY_TABLE_DEFINITION,
 }).map(([name, definition]) => [name, definition.inputSchema]);
 
 const isObject = (value: JsonValue | undefined): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value);

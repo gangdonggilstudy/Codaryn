@@ -638,6 +638,8 @@ export const EN_MESSAGES: MessageTexts = {
   "denial.plan_action_not_allowed": "plan action not allowed",
   // U-175 (DR-69 B-2), draft: a write outside the files the task may write.
   "denial.path_not_writable": "not among the files this task may write",
+  // U-197 (bundle A), draft for nb-i18n.
+  "denial.unreadable_path": "a path this task may not read",
   "denial.unknown_tool": "unknown tool",
   "denial.invalid_args": "invalid arguments",
   "denial.policy_denied": "denied by the permissions",
@@ -655,6 +657,9 @@ export const EN_MESSAGES: MessageTexts = {
   "denial.cancelled": "cancelled",
   "denial.io_error": "input/output error",
   "denial.invalid_plan": "invalid plan",
+  // U-197 (bundle A), drafts for nb-i18n.
+  "denial.too_many_groups": "too many groups",
+  "denial.invalid_table": "the table cannot be used",
 
   "permission.path": "path",
   "permission.command": "command",

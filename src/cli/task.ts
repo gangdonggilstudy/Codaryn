@@ -394,20 +394,12 @@ export function parseToolList(value: unknown, field: string): AnyToolName[] {
 }
 
 /**
- * U-177 (review R-99 M-2): the plan modes the CLI takes. "run" is in PLAN_MODES (U-170) but nothing
- * carries it out before B-3 and B-4: a run plan run could only end as failed/model_error after model
- * requests. So it is refused here, before anything is sent, and a wrong value's message does not
- * offer it. B-4 takes it back.
+ * A task file's or a config definition's `plan` (invalid_task or invalid_config by the caller).
+ * U-195 (DR-69 B-4): every PLAN_MODES value, "run" again: codaryn apply carries out a run plan now.
+ * U-177's refusal (the hint plan_run_not_available) is no longer given; the hint stays listed.
  */
-const TAKEN_PLAN_MODES: readonly PlanMode[] = PLAN_MODES.filter((mode) => mode !== "run");
-
-/** A task file's or a config definition's `plan` (invalid_task or invalid_config by the caller). */
 export function parsePlanMode(value: unknown, field: string): PlanMode {
-  if (value === "run") {
-    const message = `${field} "run" is not available yet: nothing carries out a run plan in this version; use ${TAKEN_PLAN_MODES.join(" or ")}`;
-    throw new InputError(message, undefined, positionFromMessage(message), "plan_run_not_available");
-  }
-  if (!(TAKEN_PLAN_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${TAKEN_PLAN_MODES.join(", ")}`);
+  if (!(PLAN_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${PLAN_MODES.join(", ")}`);
   return value as PlanMode;
 }
 

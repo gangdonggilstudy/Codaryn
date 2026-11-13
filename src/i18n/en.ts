@@ -469,6 +469,8 @@ export const EN_MESSAGES: MessageTexts = {
     "command rules that take further arguments while plan actions are on (policy.planActions): {count}; Codaryn does not check those arguments, so such a command can change files outside an approved plan",
   "doctor.commands.writable_with_commands":
     "command rules while writablePaths limits the file tools: {count}; writablePaths does not bind commands, so an allowed command can write files outside it",
+  "doctor.commands.plan_run_with_commands":
+    "command rules with plan \"run\": {count}; the approved files bind the file tools only, so an allowed command can write files outside the plan",
   "doctor.workflow_policy.commands_dropped": "a run of this task type leaves out command rules of the configured policy: {count}",
   "doctor.workflow_policy.commands_narrowed": "a run of this task type narrows command rules of the configured policy: {count}",
   "doctor.workflow_policy.plan_actions_dropped": "a run of this task type leaves out plan actions of the configured policy: {count}",

@@ -9,19 +9,19 @@
  *   values). The real name of a masked entry never leaves the app layer (`name: null`).
  * - Pages of 500; a directory past the limit is `too_large`, never listed in part.
  * - Reads only: no lock, no records.
- * Reproduced first (todo until the app layer gives it). Temporary folders, fake values only.
+ * Reproduced first (a23f872, todo until the app layer gave it). Temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { createCodarynApp } from "../../../src/app/index.js";
-import type { AppCallOutcome, CodarynApp, TaskForm } from "../../../src/app/index.js";
+import { createCodarynApp, listWorkspaceDirIn } from "../../../src/app/index.js";
+import type { AppCallOutcome, CodarynApp, TaskForm, WorkspaceDirListing } from "../../../src/app/index.js";
+import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import { FAKE_SECRET, SECRET_ENV, appEnvironment, exists, setupRun, taskForm } from "./support.js";
 
-const TODO = { todo: "U-89: the app layer has no listWorkspaceDir yet" };
-
+/** Either shape of the listing, read field by field (status first). */
 type Listing = {
   readonly kind: "workspace_dir";
   readonly status: string;
@@ -31,20 +31,16 @@ type Listing = {
   readonly offset?: number;
   readonly nextOffset?: number | null;
 };
-type ListFn = (request: { readonly settings: TaskForm; readonly dir: string; readonly offset: number; readonly limit?: number }) => Promise<AppCallOutcome<Listing>>;
 
 /** A key-shaped name, built here so no source holds one (G-10). */
 const KEY_SHAPED = ["sk", "ant", "api03", "FAKE".repeat(20)].join("-");
 
-function list(app: CodarynApp): ListFn {
-  const fn = (app as unknown as Record<string, unknown>)["listWorkspaceDir"];
-  assert.equal(typeof fn, "function", "the app layer gives listWorkspaceDir");
-  return (fn as ListFn).bind(app);
-}
+/** The app's listWorkspaceDir, called as an adapter calls it. */
+const list = (app: CodarynApp) => (request: Parameters<CodarynApp["listWorkspaceDir"]>[0]) => app.listWorkspaceDir(request);
 
-function ok(outcome: AppCallOutcome<Listing>): Listing {
+function ok(outcome: AppCallOutcome<WorkspaceDirListing>): Listing {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
-  return (outcome as { output: Listing }).output;
+  return (outcome as { output: WorkspaceDirListing }).output as Listing;
 }
 
 /** A workspace with every kind of entry; the task protects `docs` and registers FAKE_SECRET. */
@@ -65,7 +61,7 @@ async function workspace(): Promise<{ base: string; work: string; app: CodarynAp
 }
 
 describe("U-89: listWorkspaceDir lists one directory, masked, without following links", () => {
-  test("the root: kinds, order (directories first), protected, state, links not followed", TODO, async () => {
+  test("the root: kinds, order (directories first), protected, state, links not followed", async () => {
     const w = await workspace();
     const listing = ok(await list(w.app)({ settings: w.form, dir: "", offset: 0 }));
     assert.equal(listing.status, "listed");
@@ -84,7 +80,7 @@ describe("U-89: listWorkspaceDir lists one directory, masked, without following 
     assert.equal(listing.nextOffset, null);
   });
 
-  test("names: a registered value, a key shape and a control character are masked; the real name stays in", TODO, async () => {
+  test("names: a registered value, a key shape and a control character are masked; the real name stays in", async () => {
     const w = await workspace();
     const listing = ok(await list(w.app)({ settings: w.form, dir: "", offset: 0 }));
     const text = JSON.stringify(listing);
@@ -96,10 +92,12 @@ describe("U-89: listWorkspaceDir lists one directory, masked, without following 
     assert.ok(masked.every((entry) => entry.name === null), "a masked entry has no name");
   });
 
-  test("a sub-directory; refused, not found and not a directory; nothing through a link", TODO, async () => {
+  test("a sub-directory; refused, not found and not a directory; nothing through a link", async () => {
     const w = await workspace();
     const sub = ok(await list(w.app)({ settings: w.form, dir: "sub", offset: 0 }));
     assert.deepEqual(sub.entries?.map((entry) => [entry.shown, entry.kind]), [["inner.txt", "file"]]);
+    const docs = ok(await list(w.app)({ settings: w.form, dir: "docs", offset: 0 }));
+    assert.deepEqual(docs.entries?.map((entry) => [entry.shown, entry.protected]), [["guide.md", true]], "under a protected path");
     for (const dir of [".codaryn", "out-link", "in-link", "in-link/x"]) {
       assert.equal(ok(await list(w.app)({ settings: w.form, dir, offset: 0 })).status, "refused", dir);
     }
@@ -107,7 +105,7 @@ describe("U-89: listWorkspaceDir lists one directory, masked, without following 
     assert.equal(ok(await list(w.app)({ settings: w.form, dir: "a.txt", offset: 0 })).status, "not_dir");
   });
 
-  test("arguments that do not fit are invalid_arguments before anything is read", TODO, async () => {
+  test("arguments that do not fit are invalid_arguments before anything is read", async () => {
     const w = await workspace();
     for (const request of [
       { dir: "../x", offset: 0 },
@@ -125,7 +123,7 @@ describe("U-89: listWorkspaceDir lists one directory, masked, without following 
     }
   });
 
-  test("pages of 500 in a fixed order; an offset past the end is an empty page", TODO, async () => {
+  test("pages of 500 in a fixed order; an offset past the end is an empty page", async () => {
     const base = await setupRun({}, {}, []);
     const work = path.join(base, "work");
     await mkdir(path.join(work, "many"));
@@ -139,14 +137,22 @@ describe("U-89: listWorkspaceDir lists one directory, masked, without following 
     assert.deepEqual(ok(await list(app)({ settings: taskForm(base), dir: "many", offset: 5000 })).entries, []);
   });
 
-  test("reads only: no state directory, lock or run is made", TODO, async () => {
+  test("past the limit: too_large, never listed in part", async () => {
+    const base = await setupRun({ "many/a.txt": "", "many/b.txt": "", "many/c.txt": "" }, {}, []);
+    const source = { workspaceRoot: path.join(base, "work"), privacy: createPrivacyGateway({ secrets: [] }), keys: [], protectedPaths: undefined };
+    assert.deepEqual(ok(await listWorkspaceDirIn(source, "many", 0, 1, { maxEntries: 2 })), { kind: "workspace_dir", status: "too_large" });
+    const atLimit = ok(await listWorkspaceDirIn(source, "many", 0, 1, { maxEntries: 3 }));
+    assert.deepEqual([atLimit.status, atLimit.total, atLimit.entries?.length, atLimit.nextOffset], ["listed", 3, 1, 1]);
+  });
+
+  test("reads only: no state directory, lock or run is made", async () => {
     const base = await setupRun({ "a.txt": "a\n" }, {}, []);
     const app = createCodarynApp(await appEnvironment(base));
     ok(await list(app)({ settings: taskForm(base), dir: "", offset: 0 }));
     assert.equal(await exists(path.join(base, "work", ".codaryn")), false);
   });
 
-  test("settings that do not resolve give their error and nothing is listed", TODO, async () => {
+  test("settings that do not resolve give their error and nothing is listed", async () => {
     const base = await setupRun({ "a.txt": "a\n" }, {}, []);
     const app = createCodarynApp(await appEnvironment(base, { env: {} }));
     const outcome = await list(app)({ settings: taskForm(base), dir: "", offset: 0 });

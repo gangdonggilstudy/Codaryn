@@ -565,6 +565,52 @@ export interface ChangesOutput {
   readonly recordsChanged?: true;
 }
 
+/** U-89 (GUI 3.3): one directory of the workspace these settings resolve to (adapter-contract 5.12). */
+export interface ListWorkspaceDirRequest {
+  /** The workspace, the values registered now for masking and the protected paths (DR-17, U-17). */
+  readonly settings: TaskForm;
+  /** "" for the root, else plain relative segments joined by "/" (workspace-dir.ts isWorkspaceDir). */
+  readonly dir: string;
+  /** From 0: the previous page's `nextOffset`. */
+  readonly offset: number;
+  /** 1 to WORKSPACE_PAGE_SIZE (500); 500 when left out. */
+  readonly limit?: number;
+}
+
+/** U-89: what an entry is. A `link` (link or junction) and the root's `state` are never listed in turn. */
+export type WorkspaceEntryKind = "dir" | "file" | "link" | "state" | "other";
+
+export interface WorkspaceEntry {
+  /** The real name, for the adapter's own child paths only. Null for a masked entry: its real name never leaves the app layer. */
+  readonly name: string | null;
+  /** The name as shown (masked); "" when it cannot be shown at all. */
+  readonly shown: MaskedText;
+  readonly kind: WorkspaceEntryKind;
+  /** The shown name is not the real one: the entry cannot be opened or chosen. */
+  readonly masked: boolean;
+  /** The effective policy's protected paths cover it. */
+  readonly protected: boolean;
+}
+
+/**
+ * U-89: a page of the directory, or why it is not listed. These are outcomes of reading, not call
+ * errors: `refused` (outside the root, the state directory, a name the workspace rules reject, or a
+ * link or junction on the way), `not_found`, `not_dir`, `too_large` (more than
+ * MAX_WORKSPACE_DIR_ENTRIES entries; never listed in part) and `unreadable`.
+ */
+export type WorkspaceDirListing =
+  | {
+      readonly kind: "workspace_dir";
+      readonly status: "listed";
+      readonly masking: "current_secrets";
+      /** Directories (and `state`) first, then the rest, each in a fixed order. */
+      readonly entries: readonly WorkspaceEntry[];
+      readonly total: number;
+      readonly offset: number;
+      readonly nextOffset: number | null;
+    }
+  | { readonly kind: "workspace_dir"; readonly status: "not_found" | "not_dir" | "too_large" | "refused" | "unreadable" };
+
 /** DR-17: `codaryn plan`'s task form (G-A): the plan is masked again with the secrets of these settings. */
 export interface PlanRequest {
   readonly settings: TaskForm;
@@ -665,6 +711,8 @@ export interface CodarynApp {
   selectModel(request: SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>>;
   /** DR-7: the run's changes, masked again with the secrets registered now. Reads only. */
   changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
+  /** U-89 (GUI 3.3): one directory of the workspace, masked, links never followed. Reads only. */
+  listWorkspaceDir(request: ListWorkspaceDirRequest): Promise<AppCallOutcome<WorkspaceDirListing>>;
   /**
    * DR-1, DR-17: the plan screen after a `needs-input`/`plan_pending` result, the apply with the
    * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.

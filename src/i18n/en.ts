@@ -33,6 +33,13 @@ export const EN_MESSAGES: MessageTexts = {
   // U-228, drafts for nb-i18n.
   "error.hint.plan_kind_differs":
     "Give apply the task the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",
+  // U-210 (R-110 M-1), drafts for nb-i18n.
+  "error.hint.unreadable_paths_required":
+    "The analyze-private task type needs at least one entry in policy.unreadablePaths. Put the folder of the tables with personal data there, in the task file, the config file or a profile.",
+  "error.hint.unreadable_with_commands":
+    "While unreadablePaths is set, no command rule and no command check may be set: a command can read any file, the ones kept from the agent too. Take them out of policy.commands and verifiers, or run without unreadablePaths.",
+  "error.hint.min_group_size_range":
+    "policy.minGroupSize, the smallest group a query on an unreadable table shows, must be a whole number from 5 to 1000. Set one in that range; a source can only raise it.",
   "error.hint.plan_tool_missing":
     "A task type with plan \"run\" needs propose_changes among its tools, and one with plan \"apply\" needs propose_plan. Add the tool to the task type's tools (and to the task's own tools if it lists them), or leave the plan mode out.",
   "error.hint.key_in_goal": "The key value is in the goal; take it out of the goal.",
@@ -73,7 +80,7 @@ export const EN_MESSAGES: MessageTexts = {
     "Those files are kept from the agent on purpose (unreadablePaths); it can still aggregate their tables with query_table. To let it read them, take the entry out of unreadablePaths where it was set.",
   // U-210 (R-108 L-2), draft for nb-i18n: whole groups or values from fewer than k cells.
   "summary.groups_hidden":
-    "Groups of fewer than {k} rows, or values from fewer cells than that, were left out of {results} table result(s); the agent got only how many groups were left out.",
+    "Groups of fewer than {k} rows, or values from fewer cells than that, were left out of {results} table result(s); the agent got neither those groups nor those values, only how many groups were left out.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.confirm_denied.user": "Denied by the person: {count} call(s) whose rule asks first.",
@@ -507,6 +514,10 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.commands.plan_run_with_commands":
     "command rules with plan \"run\": {count}; the approved files bind the file tools only, so an allowed command can write files outside the plan",
   // U-210 (bundle A, R-5), draft for nb-i18n.
+  // U-210 (R-110 M-1), drafts for nb-i18n.
+  "doctor.private_data.unreadable_paths_required":
+    "the analyze-private task type needs at least one entry in policy.unreadablePaths (the folder of the tables with personal data), in the task file, the config file or a profile",
+  "doctor.private_data.min_group_size_range": "policy.minGroupSize, the smallest group a query on an unreadable table shows, is a whole number from 5 to 1000",
   "doctor.commands.unreadable_with_commands":
     "command rules and command checks while unreadablePaths is set: {count}; a run refuses them, since a command can read any file, the ones kept from the agent too",
   "doctor.workflow_policy.commands_dropped": "a run of this task type leaves out command rules of the configured policy: {count}",

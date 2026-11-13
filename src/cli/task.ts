@@ -388,7 +388,9 @@ export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePo
 function parseMinGroupSize(value: unknown): number {
   const { min, max } = MIN_GROUP_SIZE_LIMITS;
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max) {
-    fail(`policy.minGroupSize must be a whole number from ${min} to ${max}`);
+    // U-210 (R-110 M-1): the hint says why in the chosen language; the message is as before.
+    const message = `policy.minGroupSize must be a whole number from ${min} to ${max}`;
+    throw new InputError(message, undefined, positionFromMessage(message), "min_group_size_range");
   }
   return value;
 }

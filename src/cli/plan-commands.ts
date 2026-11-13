@@ -104,7 +104,7 @@ import type { KnownKeys } from "./security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 import { runGuards } from "./unreadable.js";
-import { FINAL_MESSAGE_MAX_LINES, changesApplyQuestion, changesApprovalText, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
+import { FINAL_MESSAGE_MAX_LINES, builtinReviewItemText, changesApplyQuestion, changesApprovalText, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
 import type { LoadedChangesPlan } from "./human/index.js";
 
 /** U-21: rows of the plan's summary in the plan view, as many as the run summary gives the last message. */
@@ -1134,7 +1134,8 @@ export function renderReview(
         }),
       () => `Review of run ${output.runId}: ${output.verdict}${output.replaced ? " (an earlier review was replaced)" : ""}.`,
     ),
-    ...output.checklist.map((item, index) => `  ${index + 1}. ${cleanText(hideKeys(item, currentKey))}`),
+    // U-210 (R-110 L-3): a built-in task type's item in the chosen language (analyze-private's), as the end summary shows it.
+    ...output.checklist.map((item, index) => `  ${index + 1}. ${(messages === undefined ? null : builtinReviewItemText(item, messages)) ?? cleanText(hideKeys(item, currentKey))}`),
     catalogLine(messages, (catalog) => catalog.format("review.unchanged"), () => "The run's result and records are unchanged; `codaryn report` shows the verdict."),
     ...(revert === undefined
       ? []

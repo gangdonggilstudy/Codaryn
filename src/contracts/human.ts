@@ -1158,6 +1158,11 @@ export const FIXED_MESSAGES = {
   // run has unreadable paths (every source's policy.unreadablePaths). A run refuses them (a command
   // can read any file), so the `commands` check fails with this text (no new check id).
   "doctor.commands.unreadable_with_commands": { count: "count" },
+  // U-210 (review R-110 M-1; drafts for nb-i18n): a note of the task file's or the config file's failed
+  // check that says why a run refuses it: analyze-private without an unreadable path, or k outside 5
+  // to 1000.
+  "doctor.private_data.unreadable_paths_required": {},
+  "doctor.private_data.min_group_size_range": {},
   // DR-41: notes of the `commands` check (DoctorCheck.notes): what the task type's own rules left out
   // of the configured policy (workflowPolicyNarrowings). Counts only.
   "doctor.workflow_policy.commands_dropped": { count: "count" },

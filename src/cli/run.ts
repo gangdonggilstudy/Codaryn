@@ -859,7 +859,13 @@ export async function prepareTask(
     // U-37: a task type neither built in nor in the config's workflows.
     if (resolved.problem === "unknown_workflow") return withHint(workflowError, "task_type_not_found");
     // U-228 (U-224): which plan tool each plan mode needs, in the chosen language.
-    return resolved.problem === "plan_tool_missing" ? withHint(workflowError, "plan_tool_missing") : workflowError;
+    if (resolved.problem === "plan_tool_missing") return withHint(workflowError, "plan_tool_missing");
+    // U-210 (R-110 M-1): bundle A's reasons, in the chosen language. A task type that allows no command
+    // refuses the task's own rule as commands_not_allowed; with unreadable paths in the run it is also
+    // the reason unreadable_with_commands gives (organize without them: no hint, as before).
+    if (resolved.problem === "unreadable_paths_required") return withHint(workflowError, "unreadable_paths_required");
+    if (resolved.problem === "commands_not_allowed" && unreadablePaths.length > 0) return withHint(workflowError, "unreadable_with_commands");
+    return workflowError;
   }
   // DR-41 (PM after 27afb01): where a definition applies its rules are not loosened. A task file's
   // own policy is merged with them here (resolveWorkflow above counted its own command rules first,
@@ -887,7 +893,8 @@ export async function prepareTask(
       : { policy: config?.policy, verifiers: config?.verifiers, file: "config" },
     { policy: mergedPolicy, verifiers: mergedVerifiers },
   );
-  if (commandsRefused !== null) return commandsRefused;
+  // R-110 M-1: the reason in the chosen language.
+  if (commandsRefused !== null) return withHint(commandsRefused, "unreadable_with_commands");
   const task = withConfigSecrets(
     {
       ...withWorkflow({ ...parsed, policy: mergedPolicy, verifiers: mergedVerifiers }, resolved.workflowRef, resolved.settings),

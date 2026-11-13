@@ -57,7 +57,8 @@ export function createAppAssemble(
 
     try {
       const privacy = createPrivacyGateway({ secrets });
-      const policy = createPolicyGate({ config: task.policy, workspace });
+      // U-186 (DR-69 B-4, after U-182): the task's writable path lists, as the CLI's run gate gets them.
+      const policy = createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) });
       // T-1 as in the CLI, and DR-4: the parent environment is the run's copy.
       const commandRunner = createCommandRunner({
         allowEnvValue: envValueFreeOfSecrets(privacy),

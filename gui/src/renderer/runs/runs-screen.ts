@@ -28,8 +28,8 @@ export interface RunsDeps {
   readonly openPlan: (runId: string, profile: string | null, workflow: string | null, formKnown?: boolean, recordsChanged?: boolean) => void;
   /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
   readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
-  /** GU-3 (3.7): the run's report, with the run's form when this app started it. */
-  readonly openReport: (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null) => void;
+  /** GU-3 (3.7): the run's report, with the run's form when this app started it; U-79: and the tab to open first. */
+  readonly openReport: (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null, tab?: string | null) => void;
 }
 
 function errorBox(t: Texts, code: string): HTMLElement {
@@ -65,7 +65,7 @@ function revertList(t: Texts, view: RevertView): HTMLElement[] {
   return out;
 }
 
-function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openPlan: (runId: string) => void, openChanges: (runId: string) => void, openReport: (runId: string) => void): HTMLElement {
+function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openPlan: (runId: string) => void, openChanges: (runId: string) => void, openReport: (runId: string) => void, openReview: (runId: string) => void): HTMLElement {
   const item = el("li", undefined, { "data-run": run.runId, "data-state": run.state });
   if (run.state === "damaged") {
     item.append(el("span", run.runId, { class: "run-id", lang: "en" }), el("span", t.format("runs.damaged"), { class: "damaged" }));
@@ -93,6 +93,8 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   item.append(button(t.format("run.viewReport"), () => openReport(run.runId), { "data-report": run.runId }), open);
   if (run.kind === "run" && run.changes !== null && run.changes > 0) item.append(button(t.format("run.viewChanges"), () => openChanges(run.runId), { "data-changes": run.runId }));
   if (run.reason === "plan_pending") item.append(button(t.format("run.viewPlan"), () => openPlan(run.runId), { "data-plan": run.runId }));
+  // U-79 (3.7, 3.8): a run waiting for its review is reviewed from the list too (after a restart, its result screen is gone).
+  if (run.reason === "awaiting_review") item.append(button(t.format("runs.review"), () => openReview(run.runId), { "data-review": run.runId }));
   return item;
 }
 
@@ -191,13 +193,14 @@ export function runsScreen(deps: RunsDeps): RunsScreen {
         // R21b-L-1: a row opens with the run's own form when this app started it; else its plan is only shown.
         const forms = new Map(reply.runs.flatMap((run) => (run.state === "checked" ? [[run.runId, run.form ?? null] as const] : [])));
         const marked = new Set(reply.runs.flatMap((run) => (run.state === "checked" && run.recordsChanged === true ? [run.runId] : [])));
-        const openWithForm = (id: string, what: "plan" | "changes" | "report"): void => {
+        const openWithForm = (id: string, what: "plan" | "changes" | "report" | "review"): void => {
           const form = forms.get(id) ?? null;
           if (what === "plan") deps.openPlan(id, form?.profile ?? null, form?.workflow ?? null, form !== null, marked.has(id));
           else if (what === "changes") deps.openChanges(id, form?.profile ?? null, form?.workflow ?? null);
+          else if (what === "review") deps.openReport(id, form, "review");
           else deps.openReport(id, form);
         };
-        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => openWithForm(id, "plan"), (id) => openWithForm(id, "changes"), (id) => openWithForm(id, "report")))));
+        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => openWithForm(id, "plan"), (id) => openWithForm(id, "changes"), (id) => openWithForm(id, "report"), (id) => openWithForm(id, "review")))));
         if (reply.omitted > 0) list.append(el("li", t.format("runs.omitted", { count: String(reply.omitted) }), { class: "omitted" }));
         list.setAttribute("data-runs-ready", String(reply.runs.length));
         // U-61: a preview asked from a result, once the list (which the main process checks it against) is in.

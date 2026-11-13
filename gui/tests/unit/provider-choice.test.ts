@@ -78,8 +78,8 @@ test("provider choice: the host shows each provider of the table with its key va
   assert.equal(value.view["provider"], "openai");
   assert.equal(value.view["defaultProvider"], "anthropic");
   assert.deepEqual(value.view["apiProviders"], [
-    { name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", keySet: false, modelEnv: "CODARYN_MODEL", modelEnvSet: false, model: "claude-x", baseUrlEnv: "CODARYN_API_BASE_URL", baseUrlEnvSet: false, listable: true },
-    { name: "openai", keyEnv: "OPENAI_API_KEY", keySet: true, modelEnv: "CODARYN_OPENAI_MODEL", modelEnvSet: false, model: "gpt-x", baseUrlEnv: "CODARYN_OPENAI_API_BASE_URL", baseUrlEnvSet: true, listable: false },
+    { name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", keySet: false, modelEnv: "CODARYN_MODEL", modelEnvSet: false, model: "claude-x", outputCap: null, baseUrlEnv: "CODARYN_API_BASE_URL", baseUrlEnvSet: false, listable: true },
+    { name: "openai", keyEnv: "OPENAI_API_KEY", keySet: true, modelEnv: "CODARYN_OPENAI_MODEL", modelEnvSet: false, model: "gpt-x", outputCap: null, baseUrlEnv: "CODARYN_OPENAI_API_BASE_URL", baseUrlEnvSet: true, listable: false },
   ]);
   assert.ok(asked.includes("OPENAI_API_KEY"), "asked whether it is set, by name");
   assert.ok(asked.includes("CODARYN_OPENAI_API_BASE_URL"), "R27-I3: the address variable too, by name");

@@ -179,6 +179,17 @@ describe("U-37: input and setting errors of a run name their reason with a hint"
     assert.equal(Object.hasOwn(output, "hint"), false, JSON.stringify(output));
   });
 
+  // U-73 (R-69b L1, PM): a script file is none of the files the hint names either.
+  test("a script file inside the workspace: no hint; the message as before", async () => {
+    const box = await sandbox();
+    await writeFile(path.join(box.base, "ws", "script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "done" }] }), "utf8");
+    await writeFile(path.join(box.base, "task.json"), JSON.stringify({ ...TASK, model: { provider: "scripted", scriptPath: "./ws/script.json" } }), "utf8");
+    const output = await box.run(["run", "--task", "task.json"]);
+    assert.equal(output.code, "invalid_script", JSON.stringify(output));
+    assert.equal(output.message, "the script file is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it");
+    assert.equal(Object.hasOwn(output, "hint"), false, JSON.stringify(output));
+  });
+
   test("cleanup's --discarded-run form error keeps no hint (run_id_form names --run)", () => {
     const parsed = failure(parseCleanupArgs(["cleanup", "--workspace", "w", "--discarded-run", "!"]));
     assert.deepEqual([parsed.ok, parsed.hint], [false, undefined]);

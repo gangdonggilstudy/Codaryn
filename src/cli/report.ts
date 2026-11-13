@@ -376,6 +376,7 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
   const review = rec["review"];
   if (plan !== undefined && reason !== "plan_pending") bad("result.json has a plan for another reason");
   if (review !== undefined && reason !== "awaiting_review") bad("result.json has a review for another reason");
+  const usage = usageOf(rec["usage"]);
   return {
     schemaVersion: 1,
     kind: "run",
@@ -387,7 +388,7 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     provider: oneOf(rec["provider"], PROVIDERS),
     verifiers: verifiers.map(verifierOf),
     changes: changes.map((item) => changeOf(obj(item))),
-    usage: usageOf(rec["usage"]),
+    usage,
     journalPath: str(rec["journalPath"]),
     notices: recordedList(rec["notices"]),
     ...(protectedChanged === undefined ? {} : { protectedChanged: recordedList(protectedChanged) }),
@@ -400,7 +401,7 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     // DR-52 (U-25): whether masking worked, the two counts as recorded.
     ...maskingOf(rec["masking"]),
     // U-55 (AXM-9): the model error that ended the run, in its known form.
-    ...modelErrorOf(rec["modelError"]),
+    ...modelErrorOf(rec["modelError"], reason, usage.modelTurns),
   };
 }
 
@@ -409,12 +410,21 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
  * run no model error ended, or a result written before U-55). Rebuilt from those three fields;
  * another form is a damaged field. A missing retryable stays missing (unknown, never false).
  */
-function modelErrorOf(value: unknown): { modelError?: { kind: (typeof MODEL_ERROR_KINDS)[number]; turn: number; retryable?: boolean } } {
+function modelErrorOf(
+  value: unknown,
+  reason: RunReason,
+  modelTurns: number,
+): { modelError?: { kind: (typeof MODEL_ERROR_KINDS)[number]; turn: number; retryable?: boolean } } {
   if (value === undefined) return {};
+  // U-88 (R-71 L2): only with reason model_error (the contract), as finalMessageOf checks its own.
+  if (reason !== "model_error") bad("result.json has a model error on a run that did not end with one");
   const rec = obj(value);
   const retryable = rec["retryable"];
   if (retryable !== undefined && typeof retryable !== "boolean") bad("result.json has a field of the wrong type");
-  return { modelError: { kind: oneOf(rec["kind"], MODEL_ERROR_KINDS), turn: int(rec["turn"], 1), ...(retryable === undefined ? {} : { retryable }) } };
+  const turn = int(rec["turn"], 1);
+  // U-88: a turn the run made (usage.modelTurns counts the failed request too).
+  if (turn > modelTurns) bad("result.json names a model turn the run did not make");
+  return { modelError: { kind: oneOf(rec["kind"], MODEL_ERROR_KINDS), turn, ...(retryable === undefined ? {} : { retryable }) } };
 }
 
 /**

@@ -13,7 +13,7 @@ import { changesValue, planValue, reviewValue } from "./plans.js";
 import { reportValue } from "./report.js";
 import { createRunRegistry, taskForm } from "./runs.js";
 import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
-import { modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
+import { configLanguageOf, modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
 import type { ApiProviderEntry } from "./settings.js";
 import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js";
 import { isCleanupTimestamp, parseCleanupSelection } from "../shared/cleanup.js";
@@ -81,7 +81,8 @@ export interface HostApp {
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
 export interface HostMessages {
-  texts(osLocale: string | null, ids: readonly string[]): { readonly language: string; readonly texts: Readonly<Record<string, string>> };
+  /** U-78 (N-4): `configLanguage` is the config file's `language` (null: none); CODARYN_LANG wins over it, it wins over the OS. */
+  texts(osLocale: string | null, ids: readonly string[], configLanguage?: "ko" | "en" | null): { readonly language: string; readonly texts: Readonly<Record<string, string>> };
 }
 
 /** GU-2: one directory of a workspace (tree.ts). */
@@ -267,7 +268,14 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         return deps.app.doctor(doctorArgs(args));
       case "messages": {
         const { osLocale, ids } = messagesArgs(args);
-        return deps.messages.texts(osLocale, ids);
+        // U-78 (N-4): the config file's language, read as the settings screen reads it, as the CLI does.
+        let configLanguage: "ko" | "en" | null = null;
+        try {
+          configLanguage = configLanguageOf(await deps.app.readSettings({ configPath: null }));
+        } catch {
+          configLanguage = null;
+        }
+        return deps.messages.texts(osLocale, ids, configLanguage);
       }
       case "tree":
         return deps.tree(treeArgs(args));
@@ -342,6 +350,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const edit = parseSettingsEdit(args["edit"]);
         if (edit === null) throw new ArgsError();
         if (edit.op === "provider" && edit.value !== null && !(deps.apiProviders ?? []).some((entry) => entry.name === edit.value)) throw new ArgsError();
+        if (edit.op === "outputCap" && !(deps.apiProviders ?? []).some((entry) => entry.name === edit.provider)) throw new ArgsError();
         const read = await deps.app.readSettings({ configPath: null });
         const output = isObj(read) && read["ok"] === true && isObj(read["output"]) ? read["output"] : null;
         if (output === null) return { ok: false, code: "settings_unreadable" };

@@ -74,6 +74,8 @@ export function reportValue(outcome: unknown, shown: Shown, shownText: Shown): O
     recordsChanged: output["recordsChanged"] === true,
     // U-21 (DR-47): the agent's last message, from the run's result (absent before DR-47).
     finalMessage: finalMessageValue(isObj(output["result"]) ? output["result"]["finalMessage"] : undefined, shownText),
+    // U-79 (3.7, GT-D6): the workflow's checklist of a run waiting for its review (masked by the engine), else null.
+    review: isObj(output["result"]) && isObj(output["result"]["review"]) ? { checklist: texts(output["result"]["review"]["checklist"], shown) } : null,
     // U-40 (DR-52): the run's masking counts as its result recorded them; null when none or not counts.
     masking: maskingOf(isObj(output["result"]) ? output["result"]["masking"] : undefined),
     status: output["status"] === "incomplete" ? "incomplete" : "complete",

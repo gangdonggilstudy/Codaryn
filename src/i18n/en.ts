@@ -80,7 +80,7 @@ export const EN_MESSAGES: MessageTexts = {
     "These paths are kept from the agent on purpose (unreadablePaths); a task type with the query_table tool can still aggregate their tables. To let it read them, take the entry out of unreadablePaths where it was set.",
   // U-210 (R-108 L-2), draft for nb-i18n: whole groups or values from fewer than k cells.
   "summary.groups_hidden":
-    "Groups of fewer than {k} rows, or values from fewer cells than that, were left out of {results} table result(s); the agent got neither those groups nor those values, only how many groups were left out.",
+    "Groups of fewer than {k} rows, or values from fewer cells than that, were left out of {results} table result(s); the agent got neither those groups nor those values, only how many groups were left out and which values were empty.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.confirm_denied.user": "Denied by the person: {count} call(s) whose rule asks first.",

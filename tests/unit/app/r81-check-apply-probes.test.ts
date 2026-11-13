@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { link, readFile, readdir, rm } from "node:fs/promises";
+import { link, lstat, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
@@ -65,6 +65,25 @@ describe("R-81 L1: a probe an earlier check or apply left is removed by the next
       const second = ok(await app.checkApply({ settings: taskForm(base), planRunId: plan.runId, digest }));
       assert.deepEqual([second.probesRemoved, second.probesLeft], [1, 0], "the name told before is not skipped as already there");
       assert.deepEqual(await probes(work), []);
+    } finally {
+      for (const probe of await probes(work)) await rm(probe);
+    }
+  });
+  test("a check never takes away a person's content: a file of that name that is the only name of its content stays, told in probesLeft", { todo: "PM after e3444d2: a probe-named file with one link is removed" }, async () => {
+    const { base, app, plan, digest } = await plannedRun();
+    const work = path.join(base, "work");
+    // A probe is always a second name of another file (nlink 2 or more). These two are not:
+    // one in the plan's source folder (the workspace root, where a.txt is), one in the state directory.
+    const inSource = path.join(work, LEFT_NAME);
+    const inState = path.join(work, ".codaryn", LEFT_NAME.replace("x1y2z3w4", "q9r8s7t6"));
+    await writeFile(inSource, "the person's own text", "utf8");
+    await writeFile(inState, "the only copy", "utf8");
+    try {
+      assert.deepEqual([(await lstat(inSource)).nlink, (await lstat(inState)).nlink], [1, 1]);
+      const checked = ok(await app.checkApply({ settings: taskForm(base), planRunId: plan.runId, digest }));
+      assert.deepEqual([checked.probesRemoved, checked.probesLeft], [0, 2]);
+      assert.equal(await readFile(inSource, "utf8"), "the person's own text", "the file in the source folder is as it was");
+      assert.equal(await readFile(inState, "utf8"), "the only copy", "the file in the state directory is as it was");
     } finally {
       for (const probe of await probes(work)) await rm(probe);
     }

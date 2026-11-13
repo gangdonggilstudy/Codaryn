@@ -33,6 +33,13 @@ export const KO_MESSAGES: MessageTexts = {
   // U-228 (nb-i18n이 다듬을 초안).
   "error.hint.plan_kind_differs":
     "계획을 만든 실행이 쓴 task를 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
+  // U-210 (R-110 M-1; nb-i18n이 다듬을 초안).
+  "error.hint.unreadable_paths_required":
+    "analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. 개인정보가 든 표의 폴더를 task 파일, 설정 파일, 프로필 가운데 한 곳에 두세요.",
+  "error.hint.unreadable_with_commands":
+    "unreadablePaths가 있으면 명령 규칙도 명령 검증기도 둘 수 없습니다. 명령은 어떤 파일이든 읽을 수 있어, 에이전트에게서 감춘 파일도 읽습니다. policy.commands와 verifiers에서 빼거나 unreadablePaths 없이 실행하세요.",
+  "error.hint.min_group_size_range":
+    "policy.minGroupSize(읽기 제외 표의 집계가 보여 주는 가장 작은 묶음)는 5부터 1000까지의 정수여야 합니다. 그 범위의 값을 두세요. 어느 곳도 낮출 수는 없고 높이기만 합니다.",
   "error.hint.plan_tool_missing":
     "계획 방식이 \"run\"인 작업 종류는 도구에 propose_changes가, \"apply\"인 작업 종류는 propose_plan이 있어야 합니다. 작업 종류의 도구(task가 도구를 적었다면 그 목록에도)에 그 도구를 더하거나 계획 방식을 빼세요.",
   "error.hint.key_in_goal": "목표 문장에 키 값이 있습니다. 목표에서 빼세요.",
@@ -73,7 +80,7 @@ export const KO_MESSAGES: MessageTexts = {
     "그 파일들은 일부러 에이전트가 읽지 못하게 한 것입니다(unreadablePaths). 에이전트는 query_table로 그 표를 집계할 수는 있습니다. 읽게 하려면 그 항목을 정한 곳의 unreadablePaths에서 빼세요.",
   // U-210 (R-108 L-2; nb-i18n이 다듬을 초안): 묶음 전체, 또는 k칸 미만으로 셈한 값.
   "summary.groups_hidden":
-    "표 결과 {results}건에서 {k}행 미만의 묶음이나 그보다 적은 칸으로 셈한 값을 뺐습니다. 에이전트는 뺀 묶음의 개수만 받았습니다.",
+    "표 결과 {results}건에서 {k}행 미만의 묶음이나 그보다 적은 칸으로 셈한 값을 뺐습니다. 에이전트는 그 묶음도 그 값도 받지 않았고, 뺀 묶음의 개수만 받았습니다.",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.confirm_denied.user": "확인을 받게 된 명령의 호출 {count}건을 사람이 거부했습니다.",
@@ -507,6 +514,10 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.commands.plan_run_with_commands":
     "계획 방식이 \"run\"인데 명령 규칙이 {count}개 있습니다. 승인한 파일은 파일 도구만 묶어, 허용한 명령은 계획 밖의 파일에도 쓸 수 있습니다",
   // U-210 (묶음 A, R-5; nb-i18n이 다듬을 초안).
+  // U-210 (R-110 M-1; nb-i18n이 다듬을 초안).
+  "doctor.private_data.unreadable_paths_required":
+    "analyze-private 작업 종류에는 policy.unreadablePaths 항목(개인정보가 든 표의 폴더)이 하나 이상 있어야 합니다. task 파일, 설정 파일, 프로필 가운데 한 곳에 두세요",
+  "doctor.private_data.min_group_size_range": "policy.minGroupSize(읽기 제외 표의 집계가 보여 주는 가장 작은 묶음)는 5부터 1000까지의 정수입니다",
   "doctor.commands.unreadable_with_commands":
     "unreadablePaths가 있는데 명령 규칙과 명령 검증기가 {count}개 있습니다. 명령은 어떤 파일이든 읽을 수 있어 에이전트에게서 감춘 파일도 읽을 수 있으므로, 실행이 거부합니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",

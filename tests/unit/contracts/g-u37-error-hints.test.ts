@@ -53,6 +53,10 @@ const PLAIN = [
   // than the task carries out, and a plan mode without its plan tool (U-224).
   "plan_kind_differs",
   "plan_tool_missing",
+  // U-210 (nc-human's R-110 M-1, in na-core's branch for p4g-general to confirm): bundle A's reasons.
+  "unreadable_paths_required",
+  "unreadable_with_commands",
+  "min_group_size_range",
 ];
 const DETAILED: { readonly [hint: string]: { readonly [param: string]: string } } = {
   unknown_option: { position: "count" },

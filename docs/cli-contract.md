@@ -321,6 +321,9 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `plan_run_not_available` | `invalid_task`, `invalid_config` | — | U-177이 B-4 전까지 `plan: "run"`을 받지 않을 때 쓰던 힌트. U-195부터 주지 않는다(값은 더하기만이라 남는다, 18.1) |
 | `plan_kind_differs` | `run_not_plan` | — | U-228: 그 실행에는 계획이 있지만 `apply`에 준 task가 수행하는 종류가 아님(바꿀 파일 계획에 계획 방식 `apply`나 계획 방식 없는 task, 이동 계획에 계획 방식 `run`이나 계획 방식 없는 task). 사람용 오류는 `run_not_plan`의 줄 대신 `error.run_not_plan.other_kind`를 쓰고, 이 힌트를 고치는 법으로 준다 |
 | `plan_tool_missing` | `invalid_task`, `invalid_config` | — | U-228(U-224): 작업 종류가 계획 방식의 계획 도구 없이 해석됨(`run`에는 `propose_changes`, `apply`에는 `propose_plan`). 문제 코드 `plan_tool_missing` |
+| `unreadable_paths_required` | `invalid_task`, `invalid_config` | — | U-210(R-110 M-1): `analyze-private`인데 실행의 읽기 제외가 비었음(13.2, 18.1) |
+| `unreadable_with_commands` | `invalid_task`, `invalid_config` | — | U-210(R-110 M-1): 실행에 읽기 제외가 있는데 명령 규칙이나 `command` 검증기가 있음(R-5). 명령을 허용하지 않는 작업 종류가 task 자신의 규칙을 `commands_not_allowed`로 거부할 때도 실행에 읽기 제외가 있으면 붙는다 |
+| `min_group_size_range` | `invalid_task`, `invalid_config` | — | U-210(R-110 M-1): `policy.minGroupSize`가 5~1000의 정수가 아님(task 파일, 설정 파일, 프로필) |
 | `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
 | `key_field_in_task` | `key_in_file` | `field`: 필드 자리 | task 파일의 그 필드에 키 필드나 키 값이 있음 |
 | `key_field_in_config` | `key_in_file` | `field`: 필드 자리 | 설정 파일의 그 필드에 키 필드나 키 값이 있음 |
@@ -649,9 +652,15 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
   - 해석 단계에서, 기록과 모델 요청 전에 거부한다. 보는 순서는 작업 종류 정의 자신의 것(`workflows.policy.commands`, `workflows.verifiers[i]`, `invalid_config`), 그다음 준 것(task 파일이면 `invalid_task`, 간편 형식이면 설정·프로필의 것으로 `invalid_config`), 끝으로 합친 것이다.
   - 메시지는 `<자리> must be empty while unreadablePaths is set: …`(명령 규칙) 또는 `<자리> cannot be a command verifier while unreadablePaths is set: …`(검증기)다.
+- **사람에게 까닭을 말함(nc-human 검토 R-110 M-1):** 묶음 A의 설정 때문에 거부된 실행은 JSON의 `code`와 메시지가 그대로이고, 힌트가 붙어 사람용 오류가 까닭을 고른 언어로 말한다(`error.hint.<hint>`, 8.3의 표).
+  - `unreadable_paths_required`: analyze-private인데 실행의 읽기 제외가 비었음.
+  - `unreadable_with_commands`: 읽기 제외와 명령 규칙이나 `command` 검증기가 함께 있음. 명령을 허용하지 않는 작업 종류(analyze-private)가 task 자신의 규칙을 `commands_not_allowed`로 거부할 때도, 실행에 읽기 제외가 있으면 붙는다. 읽기 제외가 없는 organize의 `commands_not_allowed`는 전과 같다.
+  - `min_group_size_range`: `policy.minGroupSize`가 5~1000의 정수가 아님(task 파일, 설정 파일, 프로필의 파서가 붙인다).
+  - doctor: 실패한 점검(task 파일, 설정 파일)에 까닭의 notes가 붙는다. `doctor.private_data.unreadable_paths_required`, `doctor.private_data.min_group_size_range`다. 명령 규칙과 읽기 제외는 전처럼 `commands` 점검이 말한다.
   - doctor의 `commands` 점검은 실행의 목록(위와 같이 합친 것)과 명령 규칙이나 명령 검증기가 함께 있으면 `fail`이다. 문구는 `doctor.commands.unreadable_with_commands`이고 `count`는 명령 규칙과 명령 검증기의 수다. 명령은 찾아보지 않는다.
 - **사람에게 알리는 것(U-207의 줄)**
   - 실행이 센다(`notePrivateData`). 끝 요약은 `unreadable_path`로 거부된 호출 수(`summary.denied_unreadable`)와 사람이 할 수 있는 일(`summary.denied_unreadable_hint`)을 말한다(`RunSummaryContext.deniedUnreadable`).
+  - `codaryn review`도 확인 목록의 내장 항목(analyze-private의 `PRIVATE_REVIEW_ITEM`)을 고른 언어로 보인다(`builtinReviewItemText`, R-110 L-3). analyze에서 온 두 항목은 기록된 영어 그대로다.
   - `query_table` 결과가 k 미만 묶음을 뺐으면 `summary.groups_hidden`이다(`hiddenGroups`: 결과 수와 가장 큰 k). 둘 다 0이면 필드도 줄도 없다.
     - R-108 L-2: 묶음은 보이되 값이 기여 칸 k 미만이라 빠진 결과(Codex V-19, `QueryGroup.fewCells`)도 센다. `queryTableFacts`는 그런 묶음의 수만 읽는다(`hiddenValues`, 없으면 필드가 없다). 줄은 "k행 미만의 묶음이나 k칸 미만으로 셈한 값"을 뺐다고 말한다.
   - 진행 줄은 무엇을 물었는지만 말한다(`progress.query_table`, `_whole`, `_describe`와 연산 코드, U-207). 경로, 열 이름, 묶음 키, 행 수, 집계 값은 없다.
@@ -660,6 +669,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)이 게이트·도구 실행기·무결성 확인에 목록을 넘기는 일은 p5a의 몫이고 아직 하지 않았다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)도 p5a의 몫이다.
 - **작업 종류(U-210 둘째 몫, P-1~P-3):** `analyze-private`가 내장이고 `analyze`도 `query_table`을 준다(18.1).
 - **`data_checks`의 근거(R-6, U-223):** 원본이 읽기 제외 아래면 근거에 다시 계산한 수, 칸 수, 뺀 행 수를 쓰지 않고 "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다. 판정은 같다. 그래서 재수정이 작은 묶음의 값을 모델에게 실어 가지 못한다. 실제 CLI의 실행과 이동 계획 적용에서 시험한다(`g-u210-verifier-unreadable`).
+- **revert(Codex V-23의 참고, 그대로 둠):** `codaryn revert`는 실행이 남긴 스냅샷으로 그 실행이 바꾼 파일을 되돌린다. 지금 설정의 읽기 제외는 보지 않는다. 모델이 끼지 않는 사람의 동작이고, 실행 중에는 읽기 제외 아래의 쓰기가 거부되므로 그 실행의 스냅샷에는 그 아래 파일이 없다. 실행 뒤에 목록에 더한 경로의 파일은 되돌릴 수 있다.
 - **아직 없는 것:** 앱 계층의 연결과 설정 넓히기(R-7, p5a), GUI의 읽기 제외 편집과 `analyze-private` 안내(P-4, p5u-gui).
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)

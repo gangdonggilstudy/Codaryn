@@ -711,6 +711,8 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
           field === null
             ? { id: "doctor.config_file.invalid_unlocated", params: { location: candidate.display } }
             : { id: "doctor.config_file.invalid", params: { location: candidate.display, field } },
+          // U-210 (R-110 M-1): k outside its range says why.
+          outcome.hint === "min_group_size_range" ? [{ id: "doctor.private_data.min_group_size_range" }] : undefined,
         );
       }
     }
@@ -733,6 +735,8 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         "fail",
         `policy.unreadablePaths ${UNREADABLE_PATHS_REQUIRED_TEXT}`,
         field === null ? { id: "doctor.config_file.invalid_unlocated", params: { location: configDisplay } } : { id: "doctor.config_file.invalid", params: { location: configDisplay, field } },
+        // R-110 M-1: why.
+        [{ id: "doctor.private_data.unreadable_paths_required" }],
       );
     }
   }
@@ -756,13 +760,18 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         const ref = outcome.task.workflowRef ?? (args.profile === null ? null : (config?.profiles?.[args.profile]?.workflowRef ?? null));
         if (privateAnalysisWithoutData(ref, { config: fileConfig, profile: args.profile, definition: undefined, taskFilePolicy: outcome.task.policy })) {
           const field = toSchemaFieldPath("policy.unreadablePaths");
-          set("task_file", "fail", `policy.unreadablePaths ${UNREADABLE_PATHS_REQUIRED_TEXT}`, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } });
+          // R-110 M-1: the note says why.
+          set("task_file", "fail", `policy.unreadablePaths ${UNREADABLE_PATHS_REQUIRED_TEXT}`, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } }, [
+            { id: "doctor.private_data.unreadable_paths_required" },
+          ]);
         } else {
           set("task_file", "ok", "the task file is valid", { id: "doctor.task_file.valid" });
         }
       } else {
         const field = fieldOf(outcome.position);
-        set("task_file", "fail", outcome.message, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } });
+        // U-210 (R-110 M-1): k outside its range says why.
+        const why = outcome.hint === "min_group_size_range" ? [{ id: "doctor.private_data.min_group_size_range" } as const] : undefined;
+        set("task_file", "fail", outcome.message, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } }, why);
       }
     }
   }

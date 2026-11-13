@@ -90,7 +90,8 @@ function checklistProblem(review: HumanReviewConfig): boolean {
  * GT-D1, GT-D2: the workflow settings of a task. Order: the definition's values (from the task's
  * `workflowRef`, else the profile's), then the task's own fields, under these ceilings:
  * - `tools` only narrows (`tool_not_allowed`); with `allowCommands: false` `run_command` is dropped;
- * - a definition's `plan: "apply"` cannot become "none" (`plan_weakened`);
+ * - a definition's `plan: "apply"` or (U-175, DR-69 B-1) `plan: "run"` cannot become "none"
+ *   (`plan_weakened`): both ask a person before anything is written;
  * - `allowCommands: false` admits no command rule in the effective policy (`commands_not_allowed`);
  * - `completion: "human_review"` needs a checklist and "verifiers" admits none given by the task
  *   (`review_without_checklist`, `checklist_without_review`); a definition's checklist is dropped
@@ -134,7 +135,7 @@ export const resolveWorkflow: ResolveWorkflow = (input): ResolveWorkflowOutcome 
     tools = tools.filter((tool) => tool !== "run_command");
   }
 
-  if (base.plan === "apply" && task.plan === "none") return { ok: false, problem: "plan_weakened", field: "plan" };
+  if (base.plan !== "none" && task.plan === "none") return { ok: false, problem: "plan_weakened", field: "plan" };
   const plan = task.plan ?? base.plan;
 
   const completion = task.completion ?? base.completion;

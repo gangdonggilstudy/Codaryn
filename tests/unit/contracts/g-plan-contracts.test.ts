@@ -468,8 +468,8 @@ describe("DR-28: a plan is shown or applied only when the secrets now mask its p
 });
 
 describe("G-A plan contract", () => {
-  test("plan modes are P0 only; P1's run mode is not part of the contract", () => {
-    assert.deepEqual([...PLAN_MODES], ["none", "apply"]);
+  test("plan modes: P0's none and apply, then P1's run (U-170, DR-69)", () => {
+    assert.deepEqual([...PLAN_MODES], ["none", "apply", "run"]);
     assert.deepEqual([...PLAN_ACTION_KINDS], ["move", "discard"]);
   });
 

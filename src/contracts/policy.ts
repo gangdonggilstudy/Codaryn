@@ -3,7 +3,7 @@
  * Order per call: checkRequested -> restore permitted fields -> checkEffective -> execute.
  */
 
-import type { ConfirmablePolicyConfig } from "./task.js";
+import type { ConfirmablePolicyConfig, WritablePathSet } from "./task.js";
 import type { JsonObject, MaskedText } from "./text.js";
 import type { EffectiveToolCall, EffectiveWorkflowToolCall, ToolCall, ToolDescriptor, ToolName } from "./tool.js";
 import type { Workspace } from "./workspace.js";
@@ -31,6 +31,12 @@ export const POLICY_DENIAL_CODES = [
    * `command`. Why is in the journal's `confirmation_answered.by`.
    */
   "confirmation_required",
+  /**
+   * U-175 (DR-69 B-2): a write that one of the run's writable lists does not cover
+   * (PolicyGateOptions.writablePathSets, PolicyConfig.writablePaths). Permission `path`. Judged after
+   * links are resolved only (checkEffective); a protected path is reported first.
+   */
+  "path_not_writable",
 ] as const;
 export type PolicyDenialCode = (typeof POLICY_DENIAL_CODES)[number];
 
@@ -52,6 +58,7 @@ export const REFUSAL_HINTS: { readonly [C in PolicyDenialCode | "unresolved_toke
   protected_path: "This path is protected in this task; do not write to it.",
   plan_action_not_allowed: "This task does not allow this kind of plan action.",
   confirmation_required: "The person did not allow this call during the run; do not repeat it.",
+  path_not_writable: "This task may write only certain files and this is not one of them; do not write to it.",
   unresolved_token: "A protected placeholder cannot be used in this field.",
   invalid_token: "Keep protected placeholders exactly as they were given, or leave them out.",
 };
@@ -155,6 +162,16 @@ export interface PolicyGateOptions {
   /** U-74: command rules may carry `confirm` (ConfirmableCommandRule). */
   readonly config: ConfirmablePolicyConfig;
   readonly workspace: Workspace;
+  /**
+   * P1 (DR-69, B-2, B-4): ResolvedTaskSpec.writablePathSets. U-175: the gate denies a write that one
+   * of the lists does not cover (`path`/`path_not_writable`), on the resolved path only
+   * (checkEffective): the path's text first, then each entry's real path, so a link entry covers its
+   * target. A policy's list covers what is below its entries; the plan's files only themselves. An
+   * unusable list or entry covers nothing, and (review V-3 M-1) an entry allows only after its own
+   * real path was found: one the workspace cannot resolve allows nothing, even when its text matches. Absent or empty: no such limit. Every write access is
+   * judged, a plan action's paths too.
+   */
+  readonly writablePathSets?: readonly WritablePathSet[];
 }
 
 /** Signature of `createPolicyGate`, exported by `src/policy/index.ts`. */

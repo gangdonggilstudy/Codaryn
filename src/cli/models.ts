@@ -417,7 +417,11 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       }
       if (found.kind === "too_deep") return cliError("invalid_config", `the config file is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`);
       const outcome = parseConfig(value);
-      if (!outcome.ok) return cliError("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
+      if (!outcome.ok) {
+        const failed = cliError("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
+        // U-177: a parser's hint (a definition's plan "run"), as run gives it.
+        return outcome.hint === undefined ? failed : withHint(failed, outcome.hint);
+      }
       config = outcome.config;
     }
   }

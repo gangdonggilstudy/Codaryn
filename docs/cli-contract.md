@@ -127,6 +127,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 | `run_command` | `executable`, `args`, 선택 `cwd`, `timeoutMs` | `exitCode`, `stdout`, `stderr`, `timedOut`, `truncated` |
 
 - `change`는 `{kind:"replace_all", content}` 또는 `{kind:"replace_text", oldText, newText}`다.
+- DR-72(U-173): `write_file`이 남길 파일이 디스크 바이트(UTF-8, BOM 포함)로 `MAX_WRITE_BYTES`(16 MiB)를 넘으면 `too_large`다. 원본을 남기지 않고 아무것도 쓰지 않는다. 읽기 상한 `MAX_READ_BYTES`(256 KiB)와 따로 둔다. 검증기는 그보다 큰 문서·표를 읽기 때문이다(`MAX_MARKDOWN_RULE_FILE_BYTES`, `MAX_DATA_TABLE_BYTES`). 그래서 256 KiB보다 크게 쓴 파일은 지금처럼 `read_file`·`write_file`이 다시 읽지 못한다. 도구 정의(`TOOL_DEFINITIONS`)는 바뀌지 않는다.
 - 요구 권한, 복원 가능 필드, 문서 필드는 `BUILTIN_TOOLS`에 고정되어 있다. 모델과 task가 낮출 수 없다. 오류 코드는 `TOOL_ERROR_CODES`, 상한은 `MAX_READ_BYTES` 등 `tool.ts`의 상수를 쓴다. 자식 프로세스 환경은 `CHILD_ENV_ALLOWLIST`만 전달한다.
 - 거부된 호출은 실행을 끝내지 않는다. `ok:false`인 `ToolResult`로 모델에 돌아간다.
 - 제공자가 모델에 보내는 도구 설명과 입력 JSON Schema는 `TOOL_DEFINITIONS`다. mask를 거치지 않는 고정 문장이므로 토큰 표식을 쓰지 않는다. 스키마는 엔진의 인자 형식 검증과 같은 필드를 가진다(`tests/unit/contracts`가 확인).
@@ -165,6 +166,8 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
   - DR-47(U-21, AXM-1): 선택 `finalMessage`(`{text, truncated}`): 에이전트의 마지막 답. 실행의 마지막 모델 응답이 도구 호출 없는 마지막 답(`stop: "final"`)일 때만 있고, 맨 끝 필드다. 등록된 가릴 값은 가려지고 키 모양은 `[key]`, 줄 바꿈은 LF, 탭 말고 제어·보이지 않는 문자는 빠진다. `MAX_FINAL_MESSAGE_CHARS`(2000자)를 넘으면 잘리고 `truncated`가 true다. 계획 실행(`plan_pending`)과 답 없이 끝난 실행, DR-47 전에 쓴 결과에는 없다. 모델의 말이지 검증된 사실이 아니며, 사람용 끝 요약은 `summary.final_message` 머리말 뒤에 인용 줄로 보인다. 필드를 더하기만 한다(DR-48).
+  - U-59(AXM-15): 계획 실행이면 선택 `plan`(`{digest, actions}`)과 `planSummary`가 있다. `planSummary`는 계획을 저장한 `propose_plan` 호출의 `summary`이고, 실행의 가림을 거쳐 `finalMessage`와 같이 다듬은 글이다. 모델의 말이며 검증되지 않았고, `plan.json`과 다이제스트에 들지 않아 사람이 승인하는 대상이 아니다. 비었거나 U-59 전의 결과에는 없다(`src/contracts/engine.ts`).
+    - U-152: 사람용 끝 요약은 계획 실행의 `planSummary`를 계획 보기와 같은 머리말 `plan.summary_label` 뒤에 인용 줄로 보인다(최대 20줄, `FINAL_MESSAGE_MAX_LINES`). 다른 실행이 마지막 답을 보이는 자리다. JSON은 그대로다. 실제 출력은 사용 안내 18.2절에 있다.
   - `verifiers`는 마지막 검증 회차의 결과다. 재수정 뒤 검증 전에 한도로 끝나면 직전 회차의 결과가 남는다. 회차마다의 결과는 기록의 `verifier_result`에 모두 있다.
   - `usage.repairAttempts`는 시작한 재수정 수다. 단계 2 엔진은 항상 채운다(단계 1 기록에는 없다).
   - 선택 필드
@@ -312,6 +315,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `key_in_task` | `key_in_file` | — | task 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `key_in_config` | `key_in_file` | — | 설정 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `config_missing` | `invalid_config` | — | 간편 형식·한 줄 실행에서 설정 파일이 아예 없음(`codaryn init`으로 만든다, 15절 "처음 시작 안내") |
+| `plan_run_not_available` | `invalid_task`, `invalid_config` | — | `plan: "run"`(U-170의 `PLAN_MODES`)을 B-4 전까지 받지 않음. task 파일의 것은 `invalid_task`, 설정 파일 작업 종류 정의의 것은 `invalid_config`(18.1, U-177) |
 | `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
 | `key_field_in_task` | `key_in_file` | `field`: 필드 자리 | task 파일의 그 필드에 키 필드나 키 값이 있음 |
 | `key_field_in_config` | `key_in_file` | `field`: 필드 자리 | 설정 파일의 그 필드에 키 필드나 키 값이 있음 |
@@ -915,6 +919,9 @@ codaryn doctor [...기존] [--profile <이름>]
   - 키가 있고 묻는 중이면 모델 목록을 요청한다(실제 API 요청). 실패하면 자리표시자를 남긴다.
   - 종료: `created` 0, `declined` 3(터미널에서 거절).
 - **`runs`(N-7)**: `RunsOutput`. `--workspace`가 없으면 현재 디렉터리다. `--limit`은 1~`RUNS_MAX_LIMIT`(1000), 기본 `RUNS_DEFAULT_LIMIT`(20). 상태 디렉터리를 만들지 않고 잠금도 잡지 않는다. 기록이 없으면 빈 목록(종료 0)이다.
+  - U-155·U-158(AXM-8): `checked` 항목의 선택 `phase`(`RUN_PHASES`: `running`, `finished`, `no_result`)는 실행이 어디 있는지 말한다. `result.json`이 없고 작업 공간 잠금이 그 실행을 가리키며 잠금을 쥔 프로세스가 살아 있으면 `running`, `result.json`이 있으면 `finished`, 둘 다 아니면 `no_result`다(`runPhaseOf`, `src/contracts/commands.ts`). 없으면 알 수 없음으로 읽고 끝난 것으로 읽지 않는다.
+  - U-162: 사람용 표는 `phase`가 있으면 `runs.incomplete` 대신 결과 칸에 `runs.running`(`running`, `진행 중`)이나 `runs.no_result`(`stopped without a result`, `결과 없이 중단됨`)를 쓴다. 변경 칸은 `-`다. 실제 출력은 사용 안내 10절 "실행 목록"에 있다.
+  - U-157(UXM-18): 기록 변경 표시가 있는 실행은 결과 칸 끝에 짧은 `runs.records_changed`(`records changed`, `기록 변경됨`)를 붙이고, 그런 실행이 표에 하나라도 있으면 표 아래에 설명 `runs.records_changed_note`를 한 번 쓴다. 실제 출력은 사용 안내 16절 "실행 기록 변조"에 있다.
 - **실행 기록 확인(N-16, 검토 M2)**: `listRuns`는 `report`와 같은 수준으로 기록을 확인한다. 세부는 `RunListEntry` 주석이 기준이다.
   - 확인: 실행 디렉터리가 링크가 아님, journal 첫 기록이 `seq` 1의 `run_started`이고 `runId`가 디렉터리 이름과 같음, `taskId`가 task id 형식, 시각이 `RUN_TIMESTAMP_PATTERN_SOURCE`(UTC `Z`) 형식, result.json의 `kind`·`runId`·상태와 이유의 조합·`exitCode`, revert.json의 `kind`·`runId`·시각·상태.
   - 통과한 실행은 `state: "checked"`다. 하나라도 실패하면 `state: "damaged"`이고 실행 id만 가진다. 손상된 실행은 목록 뒤쪽에 "손상"으로만 표시하고 `latest`로 고르지 않는다.
@@ -1028,6 +1035,10 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 해석 규칙(`resolveWorkflow`)
   - 도구는 작업 종류가 허용한 것 안에서만 좁힐 수 있다.
   - `plan: "apply"`는 약하게 바꿀 수 없다.
+  - U-177(검토 R-99 M-2): 계약의 `PLAN_MODES`에는 `run`이 있지만(U-170, DR-69) 그것을 실행하는 것이 아직 없다(묶음 B의 B-3, B-4). 그래서 CLI의 파서(`parsePlanMode`)는 B-4 전까지 `plan: "run"`을 모델 요청 전에 거부한다.
+    - task 파일의 것은 `invalid_task`, 설정 파일 작업 종류 정의의 것은 `invalid_config`이고, 힌트는 `plan_run_not_available`(사람용 줄 `error.hint.plan_run_not_available`)이다. 실행도 기록도 만들지 않는다.
+    - 그 밖의 틀린 값은 지금처럼 `plan must be one of none, apply`다(받지 않는 `run`을 권하지 않는다).
+    - 앱 계층도 같은 파서를 쓴다. 다만 설정 화면(`src/app/settings.ts`)의 오류에는 힌트를 붙이지 않는다(`message`가 같은 것을 말한다).
   - `allowCommands: false`인 작업 종류에서는 `policy.commands`를 쓸 수 없다.
     - 이 금지는 모델이 부를 수 있는 명령(정책의 명령 규칙)에 대한 것이다(GT-D10). 사람이 task나 설정에 둔 `command` 검증기는 막지 않는다(설계 4.3). 그 검증기는 적용 뒤, 인벤토리 점검 다음에 실행되므로, 거기서 바꾼 파일은 인벤토리가 보지 않는다(검토 R-11 L-3, PM 판단 P-3 대기).
   - 사람 검토 작업 종류에는 확인 목록이 있어야 한다.
@@ -1104,6 +1115,8 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
   - 지금 task의 정책·검증기·가릴 값으로 적용한다(DR-5).
   - 폐기한 파일은 `.codaryn/discarded/<적용 runId>/`에 동작 번호 이름으로 남는다(DR-9).
   - stdout에는 `ApplyResult` 한 줄이 나오고, 같은 내용이 적용 실행의 `result.json`이 된다.
+  - U-155·U-158(GT-D14): `ApplyResult`의 선택 `foldersLeftEmpty`는 동작이 파일을 모두 비운 폴더의 수다. 폴더는 지우지 않고 그 자리에 남는다(폴더 지우기는 동작이 아니다). 0이면, 동작 뒤 목록 전에 멈췄으면, 목록이 `MAX_INVENTORY_FILES`에 닿았으면 없다. 수만 담고 경로는 담지 않는다(`src/contracts/plan.ts`).
+    - U-162: 사람용 끝 요약에 `summary.folders_left_empty` 한 줄이 붙는다(`Folders the actions left without files (kept in place): <수>`). 실제 출력은 사용 안내 18.2절에 있다.
   - 되돌리기: `codaryn revert --run <적용 runId>`
 - 위험한 이동에 대한 동의(DR-21)
   - 하드 링크가 없는 드라이브에서는 대상에 생긴 파일을 덮지 않는다는 보장 없이만 옮길 수 있다. 기본은 옮기지 않는다. 적용 전 점검이 그 이동을 `plan_checked.unsafeMoves`에 적고, 적용은 `needs-input`/`consent_required`로 끝난다(아무것도 옮기지 않음).

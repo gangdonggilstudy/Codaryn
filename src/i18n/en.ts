@@ -28,6 +28,7 @@ export const EN_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "The config file has no profile of the name given with --profile; check the profile names in the config file.",
   "error.hint.task_type_not_found": "The task type given (with --workflow or in the task file) is neither built in nor defined in the config file; check its name.",
   "error.hint.config_missing": "There is no config file yet (none at the default location). Create one with codaryn init.",
+  "error.hint.plan_run_not_available": "Plan mode \"run\" cannot be used in this version yet; set plan to \"none\" or \"apply\". Nothing was sent to a model.",
   "error.hint.key_in_goal": "The key value is in the goal; take it out of the goal.",
   "error.hint.key_in_task": "The key field or value is in the task file given with --task; take it out of that file.",
   "error.hint.key_in_config": "The key field or value is in the config file; take it out of that file.",
@@ -631,6 +632,8 @@ export const EN_MESSAGES: MessageTexts = {
   "denial.confirmation_required": "not allowed by the person during the run",
   "denial.protected_path": "protected path",
   "denial.plan_action_not_allowed": "plan action not allowed",
+  // U-175 (DR-69 B-2), draft: a write outside the files the task may write.
+  "denial.path_not_writable": "not among the files this task may write",
   "denial.unknown_tool": "unknown tool",
   "denial.invalid_args": "invalid arguments",
   "denial.policy_denied": "denied by the permissions",

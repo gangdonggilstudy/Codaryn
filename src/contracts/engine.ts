@@ -70,6 +70,9 @@ export interface RunReasonByStatus {
    * action that no longer fits or that the policy denies, the workspace is beyond the inventory
    * limit (DR-6), or the plan was already applied; nothing was moved. apply_incomplete: an action
    * failed while applying; the earlier ones stay done and `codaryn revert` undoes them.
+   * P1 (DR-69, B-6): plan_stale also ends a run that carries out an approved `run` plan when a
+   * planned file no longer fits (plannedFileStale) or the plan was already carried out (B-7), before
+   * its first model request; nothing was written.
    */
   /**
    * state_changed (DR-38): the run's records or the rest of the state directory changed during the
@@ -433,9 +436,18 @@ export interface EngineResult {
   /**
    * G-A: present with reason `plan_pending` only. The stored plan's digest, the one value both
    * `codaryn apply --digest` and the app layer's `applyPlan(runId, digest)` take (DR-1), and its
-   * number of actions.
+   * number of actions. U-175 (R-99 M-3, DR-69 B-1): `kind: "changes"` for a `run` plan
+   * (StoredChangesPlan), whose `actions` is its number of files, so a reader can say "files" and
+   * not "actions". Absent for a plan of mode apply: its JSON is as before.
    */
-  readonly plan?: { readonly digest: ContentHash; readonly actions: number };
+  readonly plan?: { readonly digest: ContentHash; readonly actions: number; readonly kind?: "changes" };
+  /**
+   * P1 (DR-69, B-3): present together in a run that carries out an approved `run` plan: the plan
+   * run's id and the approved digest, as `run_started` records them. Absent in every other run, so
+   * no result written before has them.
+   */
+  readonly planRunId?: string;
+  readonly planDigest?: ContentHash;
   /**
    * U-59 (AXM-15): with `plan`, the agent's description of that plan: the `summary` of the
    * propose_plan call that stored it (ProposePlanArgs.summary), masked by the run's gateway and made
@@ -560,6 +572,11 @@ export interface CliErrorOutput {
  * - invalid_config: config_missing (U-115, UXM-9): the quick form or the one-line run found no config
  *   file at all (no --config, no CODARYN_CONFIG, and none at the default location), so its settings
  *   were missing; the person has not made one yet (codaryn init).
+ * - invalid_task (a task file's `plan`), invalid_config (a config definition's `plan`):
+ *   plan_run_not_available (U-177, review R-99 M-2): plan mode "run" is in PLAN_MODES (U-170) but
+ *   nothing carries it out until B-3 and B-4, so the CLI's parsers refuse it before any model
+ *   request (a run plan run could only end as failed/model_error). Not given any more once B-4
+ *   takes "run"; it stays listed, as hints are only added (cli-contract 8.3).
  * - key_in_file: key_in_goal, key_in_task, key_in_config (where a key value was found);
  *   key_field_in_task or key_field_in_config when its place is a SchemaFieldPath.
  * Each has a listed `error.hint.<hint>` without parameters; DETAILED_CLI_ERROR_HINTS are apart.
@@ -583,6 +600,7 @@ export const CLI_ERROR_HINTS = [
   "key_in_task",
   "key_in_config",
   "config_missing",
+  "plan_run_not_available",
 ] as const;
 export type CliErrorHint = (typeof CLI_ERROR_HINTS)[number];
 /**

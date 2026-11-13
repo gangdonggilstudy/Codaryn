@@ -8,11 +8,23 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { TOOL_DEFINITIONS, TOOL_NAME_PATTERN_SOURCE, TOOL_SCHEMA_KEYWORDS, WORKFLOW_TOOL_DEFINITIONS } from "../../../src/contracts/index.js";
+import {
+  PROPOSE_CHANGES_DEFINITION,
+  PROPOSE_CHANGES_TOOL_NAME,
+  TOOL_DEFINITIONS,
+  TOOL_NAME_PATTERN_SOURCE,
+  TOOL_SCHEMA_KEYWORDS,
+  WORKFLOW_TOOL_DEFINITIONS,
+} from "../../../src/contracts/index.js";
 import type { JsonObject, JsonValue } from "../../../src/contracts/index.js";
 
 const JSON_TYPES = ["object", "array", "string", "integer", "number", "boolean", "null"];
-const DEFINITIONS: readonly (readonly [string, JsonObject])[] = Object.entries({ ...TOOL_DEFINITIONS, ...WORKFLOW_TOOL_DEFINITIONS }).map(([name, definition]) => [name, definition.inputSchema]);
+// U-170: propose_changes too, fixed before a task can list it (B-3).
+const DEFINITIONS: readonly (readonly [string, JsonObject])[] = Object.entries({
+  ...TOOL_DEFINITIONS,
+  ...WORKFLOW_TOOL_DEFINITIONS,
+  [PROPOSE_CHANGES_TOOL_NAME]: PROPOSE_CHANGES_DEFINITION,
+}).map(([name, definition]) => [name, definition.inputSchema]);
 
 const isObject = (value: JsonValue | undefined): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value);
 

@@ -635,6 +635,7 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
   - **제자리의 줄**(기대하는 번호)은 주든 안 주든 번호를 센다(가). 그래서 그 뒤의 레코드가 이어진다. 다음을 모두 만족하면 주고, 아니면 `skipped`로 센다(손상은 아니다).
     - `at`이 실제 시각이다(store의 `isRunTimestamp`).
     - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름).
+      - U-74의 실행 중 질문과 답(`confirmation_requested`, `confirmation_answered`)도 모델 실행의 종류다. 질문의 `subject`는 엔진이 이미 안전하게 만든 글이지만(U-106) 다른 글과 같이 가리고 정리한다. 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다(실행 이벤트도 같다).
     - 모든 단계의 필드 이름이 낙타 꼴의 평범한 낱말이고 가리기가 바꾸지 않는다. 깊이는 64까지다. 그래서 비밀을 필드 이름에 담은 줄, 그리고 필드 이름과 같은 값을 지금 등록했을 때(`text`, `turn` 등) 그 필드가 든 레코드가 빠진다. 그 뒤는 이어진다.
     - 가릴 수 있다.
   - **기대보다 큰 번호**를 만나면 거기서 다시 맞춘다(나). 그 사이 번호는 빠짐이고 journal은 손상이다. **기대보다 작은 번호**(순서가 뒤바뀐 줄)는 빼고 손상으로 본다.

@@ -94,7 +94,8 @@ test("U-271 (3.7): a run without denials shows none of it; both languages have t
     assert.equal(byId("report-panel")?.getAttribute("data-tab"), "summary");
     assert.equal(byId("report-denied"), undefined);
     for (const id of ["report.denied", "report.deniedShow", "report.deniedHow", "report.deniedSettings"] as const) assert.ok(KO[id] && EN[id], id);
-    assert.ok(KO["report.deniedHow"].includes(KO["settings.rules"]) && EN["report.deniedHow"].includes(EN["settings.rules"]), "names the permission rules");
+    // U-294 (R-113 L-2): the permission rules are named where a command was denied (by kind, u294-report-denied-kinds).
+    assert.ok(KO["report.deniedKind.command"].includes(KO["settings.rules"]) && EN["report.deniedKind.command"].includes(EN["settings.rules"]), "names the permission rules");
   } finally {
     restore();
   }

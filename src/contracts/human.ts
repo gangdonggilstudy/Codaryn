@@ -513,7 +513,9 @@ export const FIXED_MESSAGES = {
   // U-207 (DR-70, Q-4; draft for nb-i18n): RunSummaryContext.hiddenGroups, the table results of this
   // run that left out groups of fewer than k rows (QueryTablePayload.suppressedGroups above 0), and k.
   // U-210 (R-108 L-2): or values from fewer than k cells (a shown group's fewCells, Codex V-19).
-  // Counts only: never a key, a value or a column.
+  // Counts only: never a key, a value or a column. U-246 (R-110 L-2): its last sentence says what the
+  // agent got for both: neither those groups nor those values, only how many groups were left out and
+  // which values were empty (a value left out is null, its operation's index in fewCells).
   "summary.groups_hidden": { results: "count", k: "count" },
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.

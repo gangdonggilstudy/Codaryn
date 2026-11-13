@@ -187,6 +187,10 @@ export interface RunNotes {
   workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
   failedToolCalls: number;
+  /** U-110 (R-85 M1): `confirmation_answered` records with `deny`, by who decided; absent while there is none. */
+  confirmationDenied?: { user: number; default: number; cancelled: number };
+  /** U-110: whether this run gave the engine a way to ask (the terminal question). */
+  couldAsk?: boolean;
 }
 
 export interface CliRunOutcome {
@@ -428,6 +432,8 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     deniedToolCalls: notes.deniedToolCalls,
     deniedCommandCalls: notes.deniedCommandCalls,
     failedToolCalls: notes.failedToolCalls,
+    // U-110 (R-85 M1): the denials after a permission question, so the hint is not to add a rule.
+    ...(notes.confirmationDenied === undefined ? {} : { confirmationDenied: { ...notes.confirmationDenied, couldAsk: notes.couldAsk === true } }),
     policySource: args.input.kind === "task" ? "task" : "config",
   };
 }
@@ -840,6 +846,10 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
           notes.deniedToolCalls += 1;
           if (event.permission === "command") notes.deniedCommandCalls += 1;
         }
+        if (event.type === "confirmation_answered" && event.decision === "deny" && (event.by === "user" || event.by === "default" || event.by === "cancelled")) {
+          const denied = (notes.confirmationDenied ??= { user: 0, default: 0, cancelled: 0 });
+          denied[event.by] += 1;
+        }
       },
       close: () => recorded.close(),
     };
@@ -899,6 +909,7 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
       }
     }
     const confirm = args.quiet || io.ask === undefined ? undefined : terminalConfirm(io.ask, questions ?? createMessageCatalog("en"));
+    notes.couldAsk = confirm !== undefined;
     const deps = { ...assembled.deps, journal, ...(confirm === undefined ? {} : { confirm }) };
     let result: EngineResult | null = null;
     try {

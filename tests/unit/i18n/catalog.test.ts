@@ -589,7 +589,8 @@ describe("i18n catalog: language and wording", () => {
     assert.match(ko["help.output"], /그 결과와 오류는 --json을 주거나 stdout이나 stderr가 터미널이 아닐 때\(파이프, 파일, 예: 2> log\.txt\) stdout에 JSON 한 줄로도 냅니다/);
     // --quiet: no human lines, so the JSON line stays at a terminal too.
     assert.match(en["help.output"], /--quiet leaves the human lines out and prints the JSON line, at a terminal too\.$/);
-    assert.match(ko["help.output"], /--quiet면 사람용 줄을 내지 않고, 터미널에서도 JSON 한 줄을 냅니다\.$/);
+    // U-136: "--quiet 옵션을 주면" (no particle that changes with the last sound right after an option name).
+    assert.match(ko["help.output"], /--quiet 옵션을 주면 사람용 줄을 내지 않고, 터미널에서도 JSON 한 줄을 냅니다\.$/);
     for (const language of LANGS) assert.deepEqual(placeholders(MESSAGE_TEXTS[language]["help.output"]), [], language);
   });
 });

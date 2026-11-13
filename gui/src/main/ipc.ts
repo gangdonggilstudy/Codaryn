@@ -6,10 +6,12 @@
  */
 
 import { isAbsolute, join, relative } from "node:path";
+import { pathOnDisk } from "./on-disk.js";
 import { dialog, ipcMain } from "electron";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import {
   IPC_CHANNELS,
+  IPC_EVENTS,
   doctorMessageIds,
   isNoArgs,
   parseDoctorArgs,
@@ -239,6 +241,17 @@ export function registerIpc(deps: IpcDeps): void {
     return workspaces.treeReply(parsed.workspace, dir, response.value);
   });
 
+  /**
+   * U-123 (R-82 U-103 L1): a settings write may register a value a tree name held; every tree and
+   * changes id given before is dropped (copyPath and reveal refuse them as unknown_entry) and the
+   * window is told to read its tree again.
+   */
+  const dropTreeIds = (): void => {
+    workspaces.treeIds.clear();
+    const window = deps.window();
+    if (window !== null && !window.isDestroyed()) window.webContents.send(IPC_EVENTS.treeReset, {});
+  };
+
   handle(IPC_CHANNELS.reveal, async (args): Promise<boolean> => {
     const parsed = args.length === 1 ? parseRevealArgs(args[0]) : null;
     if (parsed === null) return false;
@@ -355,7 +368,9 @@ export function registerIpc(deps: IpcDeps): void {
     if (!("host" in state)) return { ok: false, code: state.failure };
     const response = await state.host.call("createSettings", { workspace: root }, SETTINGS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
-    return toCreateSettingsReply(response.value);
+    const created = toCreateSettingsReply(response.value);
+    if (created.ok) dropTreeIds();
+    return created;
   });
 
   handle(IPC_CHANNELS.settingsSuggestions, async (args): Promise<SuggestionsReply> => {
@@ -465,7 +480,9 @@ export function registerIpc(deps: IpcDeps): void {
     if (!("host" in state)) return { ok: false, code: state.failure };
     const response = await state.host.call("applySettings", { next: proposal.next, baseDigest: proposal.baseDigest, confirmWidening: widens }, SETTINGS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
-    return toWrittenReply(response.value);
+    const written = toWrittenReply(response.value);
+    if (written.ok && written.written) dropTreeIds();
+    return written;
   });
 
   handle(IPC_CHANNELS.listModels, async (args): Promise<ModelsReply> => {
@@ -754,7 +771,10 @@ export function registerIpc(deps: IpcDeps): void {
     if (!reply.ok) return reply;
     if (reply.runId !== parsed.runId) return { ok: false, code: "host_error" };
     // U-66 (3.4): "show in folder" takes the tree's ids, given here for plain paths that are there; the page never names a path.
-    return { ...reply, files: reply.files.map((file) => ({ ...file, id: revealableChange(file) ? workspaces.treeIds.issue(parsed.workspace, file.path) : null })) };
+    // U-123 (R-87 U-66 L1): "there" is looked at on disk (lstat inside the root): a path the app layer
+    // masked (a key shape shown as [key]) names nothing there and gets no id.
+    const files = await Promise.all(reply.files.map(async (file) => ({ ...file, id: revealableChange(file) && (await pathOnDisk(root, file.path)) ? workspaces.treeIds.issue(parsed.workspace, file.path) : null })));
+    return { ...reply, files };
   });
 
   // GU-3 (3.7): a run's report. It reads; it changes nothing. A run id, never "latest".

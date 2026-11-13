@@ -88,20 +88,50 @@ const MAIN = path.resolve(here, "..", "..", "..", "src", "cli", "main.js");
 const TERMINAL = pathToFileURL(path.join(here, "u115-terminal-preload.js")).href;
 const GUARD = pathToFileURL(path.resolve(here, "..", "..", "support", "net-guard.js")).href;
 
-/** The real CLI's `models --config <config>` in Korean; `terminal` names the streams seen as terminals. */
-async function models(t: TestContext, terminal: string): Promise<{ stdout: string; code: number | null }> {
+/** The question models asks at a terminal, in Korean (the config file's `model`). */
+const QUESTION = `${ko("models.use_prompt", { field: "model" })}: `;
+/** The imitated terminal's readline writes cursor moves (`ESC[1G`, `ESC[0J`, `ESC[nG`) around the question. */
+const shown = (text: string): string => text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+
+/**
+ * The real CLI's `models --config <config>` in Korean; `terminal` names the streams seen as terminals.
+ * At a terminal it answers the question once with Enter, after the whole question is shown. Before
+ * the R-97 note it ended stdin again on every later stdout chunk; when stdin was ending but not yet
+ * destroyed, that second end raised ERR_STREAM_WRITE_AFTER_END with no listener and failed the test
+ * now and then (1 in 50 runs). The streams are read as UTF-8 by a decoder, so a Hangul character
+ * split across two chunks stays whole.
+ */
+async function models(t: TestContext, terminal: string): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const sb = createSandbox(t);
   const api = await startFakeAnthropic(t, [], { models: { models: [fakeModel("fake-model-u156", "Fake U156", 1000, 100)] } });
   const config = writeConfigFile(sb, fakeApiConfig(api.url, { model: "fake-model-u156" } as object));
   const env = { ...cliEnv({ fakeApiKey: FAKE_API_KEY }), CODARYN_LANG: "ko", CODARYN_TEST_TERMINAL: terminal, CODARYN_IT_NET_GUARD_LOG: path.join(sb.base, "net-guard.log") };
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--import", GUARD, "--import", TERMINAL, MAIN, "models", "--config", config], { cwd: sb.base, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-      if (stdout.includes("(Enter") || stdout.includes("Enter면")) child.stdin.end("\n");
+    let stderr = "";
+    let answered = false;
+    let stdinError: Error | undefined;
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`no question "${QUESTION}" (stdin: ${stdinError?.message ?? "no error"}):\n${stderr}\n${shown(stdout)}`));
+    }, 30_000);
+    // A failed write to the child's stdin is shown in the timeout's message, not thrown at the test.
+    child.stdin.on("error", (error: Error) => (stdinError = error));
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => (stderr += chunk));
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (!answered && terminal !== "" && shown(stdout).includes(QUESTION)) {
+        answered = true;
+        child.stdin.end("\n");
+      }
     });
-    child.once("close", (code) => resolve({ stdout, code }));
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, code });
+    });
     if (terminal === "") child.stdin.end();
   });
 }
@@ -116,7 +146,8 @@ describe("U-156 on the real CLI: models in Korean", () => {
   });
 
   test("at a terminal: the question in Korean", async (t) => {
-    const { stdout } = await models(t, "stdin,stdout,stderr");
-    assert.ok(stdout.includes(`${ko("models.use_prompt", { field: "model" })}: `), stdout);
+    const { stdout, stderr, code } = await models(t, "stdin,stdout,stderr");
+    assert.ok(shown(stdout).includes(QUESTION), `${stderr}\n${shown(stdout)}`);
+    assert.equal(code, 0, `${stderr}\n${shown(stdout)}`);
   });
 });

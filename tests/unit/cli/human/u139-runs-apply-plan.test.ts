@@ -2,8 +2,9 @@
  * U-139 (UXM-5, PM): an apply run's row in the runs table did not say which plan it applied (the
  * JSON has RunListEntry.planRunId; the plan run's row names its apply run, runs.plan_applied). Now
  * the apply row's result column has " · " and runs.apply_of with that plan run's id right after its
- * status words, before the revert and records marks. Not on a model run's row, and not when the
- * id is missing or not a run id. The id and its texts are drafts (p4g-general, nb-i18n refine them).
+ * status words, before the revert and records marks. Not on a model run's row (U-198: a model run
+ * that carried out a run plan says runs.carried_plan there instead), and not when the id is missing
+ * or not a run id. The id and its texts are drafts (p4g-general, nb-i18n refine them).
  * Both languages with the real catalog. Fake values only.
  */
 
@@ -41,7 +42,9 @@ for (const language of MESSAGE_LANGUAGES) {
 
     test("not on a model run's row, nor without a plan run id that is a run id", () => {
       assert.equal(resultOf(entry({ kind: "run", planRunId: undefined, changes: 2 })), done);
-      assert.equal(resultOf(entry({ kind: "run", changes: 2 })), done, "a planRunId on a model run's entry is not shown");
+      // U-198 (DR-69 B-3, contract U-175): a planRunId on a model run's entry is the plan it carried out
+      // (store U-181); its row says runs.carried_plan, never runs.apply_of. No list before B-3 has one.
+      assert.equal(resultOf(entry({ kind: "run", changes: 2 })), `${done} · ${t("runs.carried_plan", { runId: PLAN })}`, "a model run's planRunId is the plan it carried out");
       for (const planRunId of [undefined, "../x", "a b", "", 7]) assert.equal(resultOf(entry({ planRunId })), done, String(planRunId));
     });
   });

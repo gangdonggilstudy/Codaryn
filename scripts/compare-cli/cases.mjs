@@ -397,6 +397,12 @@ function reviewSetup(dir) {
   write(dir, "doc-script.json", { schemaVersion: 1, steps: DOCUMENT_STEPS });
 }
 
+/** U-311 (C-8's cases): a run's file under the case folder, written or taken away between steps. */
+function runFile(dir, runId, name, content) {
+  if (content === null) rmSync(path.join(dir, "work", ".codaryn", "runs", runId, name), { force: true });
+  else write(dir, `work/.codaryn/runs/${runId}/${name}`, content);
+}
+
 export const CASES = [
   {
     name: "document-run",
@@ -749,6 +755,55 @@ export const CASES = [
         return { args: ["review", "--workspace", "work", "--workflow", "analyze", "--config", "bare-config.json", "--run", runIdOf(0)(ctx), "--reject"] };
       },
     ],
+  },
+  // U-311 (the CLI migration's C-8: the report's reading and checks move to the app layer): the report's
+  // paths no other case reaches. A run with a records-changed mark (the warning; recordsChanged in
+  // --json); a run whose result.json is gone (incomplete) and then not JSON; --workspace as a device
+  // path and as a folder that is not there; a runs/latest folder that makes --run latest ambiguous
+  // (N-18); and an apply run's report as JSON. The marked run's report again in Korean.
+  {
+    name: "report-paths",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(0)(ctx), "records-changed.json", { schemaVersion: 1, note: "compare" });
+        return report(runIdOf(0)(ctx));
+      },
+      (ctx) => report(runIdOf(0)(ctx), "--json"),
+      run(),
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(3)(ctx), "result.json", null);
+        return report(runIdOf(3)(ctx), "--json");
+      },
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(3)(ctx), "result.json", "{ not json\n");
+        return report(runIdOf(3)(ctx));
+      },
+      { args: ["report", "--workspace", "NUL", "--run", "latest"] },
+      { args: ["report", "--workspace", "nowhere", "--run", "latest"] },
+      (ctx) => {
+        mkdirSync(path.join(ctx.dir, "work", ".codaryn", "runs", "latest"), { recursive: true });
+        return report("latest");
+      },
+    ],
+  },
+  {
+    name: "report-paths-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(0)(ctx), "records-changed.json", { schemaVersion: 1, note: "compare" });
+        return report(runIdOf(0)(ctx));
+      },
+    ],
+  },
+  {
+    name: "report-apply",
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }), report("latest", "--json")],
   },
   // U-135: terminal cases (imitated: see the tool).
   {

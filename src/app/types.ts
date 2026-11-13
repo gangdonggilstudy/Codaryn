@@ -135,6 +135,11 @@ export interface SettingsWidening {
   readonly kind:
     | "command_added"
     | "extra_args_allowed"
+    /**
+     * U-107 (R-79 F-1): calls a rule asked a person about (U-74 `confirm: true`) are allowed without
+     * asking: the rule lost `confirm`, or a plain rule matching the same calls was added.
+     */
+    | "confirm_removed"
     | "limit_raised"
     | "protected_path_removed"
     | "integrity_path_removed"

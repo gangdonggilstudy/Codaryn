@@ -15,7 +15,9 @@ import {
   MARKDOWN_RULE_TYPES,
   MAX_EVIDENCE_BYTES,
   MAX_MARKDOWN_EVIDENCE_ITEMS,
+  MAX_MARKDOWN_BRACKET_DEPTH,
   MAX_MARKDOWN_EVIDENCE_ITEM_CHARS,
+  MAX_MARKDOWN_LINE_CHARS,
   MAX_MARKDOWN_HEADING_CHARS,
   MAX_MARKDOWN_RULE_FILE_BYTES,
   MAX_MARKDOWN_RULE_HEADINGS,
@@ -41,6 +43,12 @@ describe("U-116: the Markdown rules' types and limits (M-1, M-4)", () => {
     assert.equal(MAX_MARKDOWN_RULE_HEADINGS, 50);
     assert.equal(MAX_MARKDOWN_HEADING_CHARS, 200);
     assert.equal(MAX_MARKDOWN_EVIDENCE_ITEM_CHARS, 80);
+  });
+
+  test("R-89 M-1: the reader's bounds, a line of 10,000 code units and brackets nested 32 deep", () => {
+    assert.equal(MAX_MARKDOWN_LINE_CHARS, 10_000);
+    assert.equal(MAX_MARKDOWN_BRACKET_DEPTH, 32);
+    assert.ok(MAX_MARKDOWN_LINE_CHARS * 2 < MAX_MARKDOWN_RULE_FILE_BYTES, "a file holds many lines at the bound");
   });
 
   test("a rule is written as a task file writes it: level and order are optional (M-2)", () => {
@@ -125,6 +133,11 @@ describe("U-116: the shape of the evidence (M-5)", () => {
       headingsOutOfOrder: "headings not found in the given order",
       brokenLinks: "targets missing or outside the workspace",
       held: "all found",
+      targetsUnchecked: "targets that could not be looked at",
+      lineTooLong: "a line longer than 10000 characters, not checked",
+      bracketsTooDeep: "brackets nested deeper than 32, not checked",
+      fileTooLarge: "larger than 1048576 bytes, not read",
+      notUtf8: "not UTF-8 text",
     });
     const rule: MarkdownLinksRule = { type: "markdown_links", path: "docs/guide.md" };
     const list = markdownEvidenceList([{ text: "img/a.png", detail: "line 12, missing" }, { text: "../x.md", detail: "line 30, outside" }]);
@@ -132,6 +145,19 @@ describe("U-116: the shape of the evidence (M-5)", () => {
     assert.equal(
       line,
       'not held: "docs/guide.md" has relative links whose targets exist (targets missing or outside the workspace: "img/a.png" (line 12, missing), "../x.md" (line 30, outside))',
+    );
+  });
+
+  test("R-89: the undecided notes take the contract's lead words, then the line or the list", () => {
+    const rule: MarkdownLinksRule = { type: "markdown_links", path: "docs/guide.md" };
+    assert.equal(
+      `undecided: ${markdownRuleLabel(rule)} (${MARKDOWN_EVIDENCE_LEADS.lineTooLong}: line 3)`,
+      'undecided: "docs/guide.md" has relative links whose targets exist (a line longer than 10000 characters, not checked: line 3)',
+    );
+    assert.equal(`${MARKDOWN_EVIDENCE_LEADS.bracketsTooDeep}: line 12`, "brackets nested deeper than 32, not checked: line 12");
+    assert.equal(
+      `${MARKDOWN_EVIDENCE_LEADS.targetsUnchecked}: ${markdownEvidenceList([{ text: "img/a.png", detail: "line 4, EACCES" }])}`,
+      'targets that could not be looked at: "img/a.png" (line 4, EACCES)',
     );
   });
 
@@ -147,7 +173,7 @@ describe("U-116: the fixed texts", () => {
     const privacy = createPrivacyGateway({ secrets: ["fake-secret-VALUE-0116"] });
     const marker = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
     const texts = [...MARKDOWN_RULE_LIMITS, ...Object.values(MARKDOWN_EVIDENCE_LEADS)];
-    assert.equal(MARKDOWN_RULE_LIMITS.length, 3);
+    assert.equal(MARKDOWN_RULE_LIMITS.length, 6);
     for (const text of texts) {
       const masked = privacy.mask(text);
       assert.ok(masked.ok);
@@ -159,6 +185,23 @@ describe("U-116: the fixed texts", () => {
 
   test("the limits say what is not checked: anchors, schemes, the network, code", () => {
     const all = MARKDOWN_RULE_LIMITS.join(" ");
-    for (const words of ["anchors", "scheme", "network", "fenced code blocks", "indented code blocks"]) assert.ok(all.includes(words), words);
+    for (const words of [
+      "anchors",
+      "scheme",
+      "network",
+      "fenced code blocks",
+      "indented code blocks",
+      "HTML comments",
+      "other HTML",
+      "only top-level headings count",
+      "list items and block quotes",
+      "the one line above its underline",
+      "letter case",
+      `longer than ${MAX_MARKDOWN_LINE_CHARS} characters`,
+      `nested deeper than ${MAX_MARKDOWN_BRACKET_DEPTH}`,
+      "(inconclusive)",
+    ]) {
+      assert.ok(all.includes(words), words);
+    }
   });
 });

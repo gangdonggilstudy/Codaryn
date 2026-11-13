@@ -164,6 +164,9 @@ export const WIDENING_KINDS = [
   "profile_changed",
   "workflow_changed",
   "confirm_removed",
+  // U-192 (U-183, DR-69 B-4): a list of writable paths widened, or gone (no limit again).
+  "writable_path_added",
+  "writable_paths_unlimited",
   "other",
 ] as const;
 
@@ -215,6 +218,8 @@ const WIDEN_KO: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   profile_changed: "프로필 바꿈",
   workflow_changed: "작업 종류 정의 바꿈",
   confirm_removed: "묻던 명령을 묻지 않고 허용",
+  writable_path_added: "쓰기 허용 경로 넓힘",
+  writable_paths_unlimited: "쓰기 허용 경로 제한 없앰(파일 도구가 작업 공간 어디든 씀)",
   other: "그 밖의 넓히기",
 };
 
@@ -234,6 +239,8 @@ const WIDEN_EN: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   profile_changed: "a profile changed",
   workflow_changed: "a task type definition changed",
   confirm_removed: "a command that was asked about runs without asking",
+  writable_path_added: "a writable path added",
+  writable_paths_unlimited: "the writable paths limit removed (file tools may write anywhere in the workspace)",
   other: "another widening",
 };
 

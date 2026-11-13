@@ -7,8 +7,9 @@
  * 1. `apply_started`; the integrity baseline when protected material is configured.
  * 2. Preflight: the inventory, then every action judged by the apply task's `planActions`, the
  *    policy gate (PLAN_ACTION_DESCRIPTORS, before and after, the paths being already effective)
- *    and `executor.check`. `plan_checked` records it. A problem or the inventory limit ends the
- *    apply as failed/plan_stale with nothing moved.
+ *    and `executor.check` (U-105: `preflightPlan`, preflight.ts, given out for the app layer's
+ *    check). `plan_checked` records it. A problem or the inventory limit ends the apply as
+ *    failed/plan_stale with nothing moved.
  * 3. `markApplied`; a plan applied before ends the apply as failed/plan_stale, nothing moved.
  * 4. Each action in order. The signal and the duration limit are looked at before each action and
  *    after a failed one, so a cancel ends the apply as cancelled even when the executor reports
@@ -24,7 +25,6 @@ import {
   APPLY_NOTICE_KINDS,
   INVENTORY_VERIFIER_ID,
   JOURNAL_FILE_NAME,
-  PLAN_ACTION_DESCRIPTORS,
   RUNS_DIR_NAME,
   RUN_EXIT_CODES,
   STATE_DIR_NAME,
@@ -40,11 +40,9 @@ import type {
   IntegrityManifest,
   IntegrityPhase,
   InventoryManifest,
-  JsonObject,
   MaskedPlanAction,
   MaskedText,
   PlanItemOutcome,
-  PlanItemProblem,
   PlanRecordsUncheckedCause,
   RawVerifierResult,
   ResolvedPlanAction,
@@ -56,6 +54,7 @@ import type {
   VerifierResult,
 } from "../contracts/index.js";
 import { prepareEvidence } from "./feedback.js";
+import { preflightPlan } from "./preflight.js";
 import { RunState } from "./state.js";
 
 const PLAN_STALE_NOTICE = "the plan cannot be applied to the workspace as it is now; nothing was moved";
@@ -135,10 +134,6 @@ const PROTECTED_CHANGED: End = { status: "needs-input", reason: "protected_chang
 /** DR-38: the records changed other than by the apply, or could not be checked. */
 const STATE_CHANGED: End = { status: "failed", reason: "state_changed" };
 const CONSENT_REQUIRED: End = { status: "needs-input", reason: "consent_required" };
-
-function pathArgs(action: ResolvedPlanAction): JsonObject {
-  return action.kind === "move" ? { from: action.from, to: action.to } : { path: action.path };
-}
 
 export const applyPlan: ApplyPlan = async (deps) => {
   const {
@@ -221,19 +216,6 @@ export const applyPlan: ApplyPlan = async (deps) => {
     }
     const path = mask(action.path);
     return path === null ? null : { kind: "discard", path, sha256: action.sha256 };
-  };
-
-  /** The apply task's planActions and the policy gate, before and after (the paths are effective). */
-  const permitted = async (action: ResolvedPlanAction, index: number): Promise<boolean> => {
-    if (!planActions.includes(action.kind)) return false;
-    const descriptor = PLAN_ACTION_DESCRIPTORS[action.kind];
-    const call = { id: `action-${index}`, name: descriptor.name, args: pathArgs(action) };
-    try {
-      if (!policy.checkRequested(call, descriptor).allowed) return false;
-      return (await policy.checkEffective(call, descriptor)).allowed;
-    } catch {
-      return false;
-    }
   };
 
   /** One integrity check against the baseline. "changed" also when it cannot be completed. */
@@ -438,28 +420,18 @@ export const applyPlan: ApplyPlan = async (deps) => {
       notice(INVENTORY_FAILED_NOTICE);
       return PLAN_STALE;
     }
-    const problems: { index: number; problem: PlanItemProblem }[] = [];
-    /**
-     * DR-21: actions the check found possible only unsafely (a discard moves the file too). They
-     * are not problems; they need consent.
-     */
-    const unsafeMoves: number[] = [];
-    for (const [index, action] of plan.actions.entries()) {
-      const stop = interrupted();
-      if (stop !== null) return stop;
-      if (!(await permitted(action, index))) {
-        problems.push({ index, problem: "denied" });
-        continue;
-      }
-      let problem: PlanItemProblem | null;
-      try {
-        problem = await executor.check(action);
-      } catch {
-        problem = "io_error";
-      }
-      if (problem === "unsafe_move") unsafeMoves.push(index);
-      else if (problem !== null) problems.push({ index, problem });
-    }
+    // U-105: the judgement of each action is preflightPlan's (the one the app layer's check calls).
+    // A cancel or the duration limit is looked at before each action, as before.
+    const halt: { end: End | null } = { end: null };
+    const preflight = await preflightPlan({
+      actions: plan.actions,
+      planActions,
+      policy,
+      executor,
+      stop: () => (halt.end = interrupted()) !== null,
+    });
+    if (preflight.stopped) return halt.end ?? CANCELLED;
+    const { problems, unsafeMoves } = preflight;
     await journal.append({ type: "plan_checked", problems, inventoryLimitReached: before.limitReached, unsafeMoves });
     if (problems.length > 0) {
       notice(PLAN_STALE_NOTICE);

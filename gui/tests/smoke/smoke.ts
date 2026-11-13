@@ -638,6 +638,8 @@ startGui({
       await taskWith("organize", "a.txt를 moved 폴더로 옮긴다");
       const directRunId = await newResult(beforeDirect);
       await js("document.getElementById('run-view-plan')?.click(); true");
+      // U-119: the apply waits for the check before an apply.
+      const planCheckReady = (): Promise<unknown> => waitFor("(() => { const c = document.getElementById('plan-check')?.getAttribute('data-check'); return c && c !== 'checking' ? c : null; })()", 60_000);
       results["directPlanShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
       // U-62 (3.9): the digest's first 12 characters, as the plan shows them.
       await js("document.getElementById('plan-copy-digest')?.click(); true");
@@ -651,6 +653,7 @@ startGui({
       results["planAgentWords"] = await js(
         "(() => { const ids = [...(document.getElementById('plan')?.children ?? [])].map((c) => c.id); return { label: document.querySelector('#plan-agent-words .notice')?.textContent ?? null, text: document.getElementById('plan-agent-words-text')?.textContent ?? null, afterActions: ids.indexOf('plan-actions') >= 0 && ids.indexOf('plan-actions') < ids.indexOf('plan-agent-words') }; })()",
       );
+      await planCheckReady();
       await js("document.getElementById('plan-apply')?.click(); true");
       await newResult(directRunId);
       results["applyByWorkflow"] = await js(
@@ -678,6 +681,13 @@ startGui({
       results["consentUnasked"] = await js(
         `window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(planRunId)}, 'tidy').then((r) => window.codaryn.applyPlan(r.approval, true))`,
       );
+      // U-119 (3.9, DR-21): the check before the apply: clean on this drive, no consent needed, nothing left; a forged token is refused.
+      results["planCheck"] = {
+        state: await planCheckReady(),
+        rows: await js("document.querySelectorAll('#plan-actions [data-problem], #plan-actions [data-unsafe]').length"),
+        left: await js("document.querySelectorAll('#plan-check-probes-left, #plan-check-lock-left').length"),
+        forged: await js(`window.codaryn.checkPlan(${JSON.stringify("0".repeat(32))}).then((r) => (r.ok ? 'checked' : r.code))`),
+      };
       await js("document.getElementById('plan-apply')?.click(); true");
       await newResult(planRunId);
       results["applyDone"] = await js(
@@ -888,6 +898,7 @@ startGui({
       await js("document.querySelector('[data-screen=\"run\"]')?.click(); true");
       await js("document.getElementById('run-view-plan')?.click(); true");
       await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' && document.getElementById('plan-apply') !== null ? r : null; })()");
+      await planCheckReady();
       await js("document.getElementById('plan-apply')?.click(); true");
       const discardApplyId = String(await newResult(discardPlanId));
       const discardBox = join(SECOND, ".codaryn", "discarded", discardApplyId);

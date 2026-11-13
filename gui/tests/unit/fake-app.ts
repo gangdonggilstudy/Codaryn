@@ -31,6 +31,7 @@ export function fakeApp(overrides: Partial<HostApp> = {}): HostApp {
     applySettingsChange: unused,
     listWorkspaceDir: unused,
     listRunEvents: unused,
+    checkApply: unused,
     ...overrides,
   };
 }

@@ -21,6 +21,7 @@ import type { CleanupSelectionArg } from "../shared/cleanup.js";
 import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
 import { reportMarkdownValue } from "./report.js";
 import { runEventsValue } from "./run-events.js";
+import { planCheckValue } from "./plan-check.js";
 import { initValue, suggestionsValue } from "./setup.js";
 import type { Shown } from "./settings.js";
 import type { ModelText } from "./model-text.js";
@@ -61,6 +62,8 @@ export interface HostApp {
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   /** GU-3 (3.7): a run's report (ReportOutput), read only. */
   report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  /** U-119 (U-91, adapter-contract 5.14): a pending plan checked before it is applied (plan-check.ts). */
+  checkApply(request: { readonly settings: HostTaskForm; readonly planRunId: string; readonly digest: string }): Promise<unknown>;
   /** U-118 (U-90, adapter-contract 5.13): one page of a run's stored records (run-events.ts). */
   listRunEvents(request: { readonly settings: HostTaskForm; readonly runId: string; readonly offset: number }): Promise<unknown>;
   /** U-103 (U-89, adapter-contract 5.12): one directory of the workspace for the file tree (tree.ts). */
@@ -359,6 +362,16 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
         return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
+      }
+      case "checkPlan": {
+        // U-119 (3.9): the plan the main process showed (its approval's run and digest), checked before it is applied.
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "planRunId", "digest"]);
+        const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
+        const { planRunId, digest } = args;
+        if (typeof planRunId !== "string" || !RUN_ID.test(planRunId) || typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) throw new ArgsError();
+        return planCheckValue(await deps.app.checkApply({ settings: taskForm(workspace, profile, workflowRef), planRunId, digest }));
       }
       case "runEvents": {
         // U-118 (3.7): a page of the run's records, each as the progress list's line, in the window's language.

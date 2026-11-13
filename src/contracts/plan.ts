@@ -873,12 +873,24 @@ export type ApplyJournalRecord = ApplyJournalEvent & {
 };
 
 /**
+ * AC-D3 (the CLI migration's C-2, U-262): a stored line of an apply journal, as ApplyJournal.append
+ * resolves with it. ApplyJournalRecord's shape for any ApplyJournalEntry: the start record
+ * `plan_item_started` (R-9 I-4) is stored with `seq`, `at` and `runId` too, though no reader shows it.
+ */
+export type ApplyJournalEntryRecord = ApplyJournalEntry & {
+  readonly seq: number;
+  readonly at: string;
+  readonly runId: string;
+};
+
+/**
  * Same contract as Journal (append-only, masked text only), for apply records. A wrapper that also
  * shows progress (HumanOutput.applyProgressLine) passes on every entry and shows only
- * ApplyJournalEvent; `plan_item_started` has no progress line.
+ * ApplyJournalEvent; `plan_item_started` has no progress line. AC-D3: append resolves with the entry
+ * as it was stored (ApplyJournalEntryRecord), and a wrapper passes it on.
  */
 export interface ApplyJournal {
-  append(event: ApplyJournalEntry): Promise<void>;
+  append(event: ApplyJournalEntry): Promise<ApplyJournalEntryRecord>;
   close(): Promise<void>;
 }
 

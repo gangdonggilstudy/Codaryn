@@ -64,6 +64,7 @@ import {
   WORKFLOW_TOOL_NAMES,
   REFUSAL_HINTS,
   TOOL_FAILURE_HINTS,
+  QUERY_TABLE_PROBLEM_HINTS,
   asRawText,
   failedToolContent,
   safeModelText,
@@ -82,6 +83,7 @@ import type {
   IntegrityManifest,
   IntegrityPhase,
   JournalEvent,
+  JournalRecord,
   JsonObject,
   MaskedText,
   MaskedToolCall,
@@ -264,6 +266,8 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   ...Object.values(REFUSAL_HINTS),
   // U-50 (AXM-6): the hint after a tool runner's failure.
   ...(Object.values(TOOL_FAILURE_HINTS) as string[]),
+  // U-261: query_table's hints for each problem of a table (its invalid_table message ends with one).
+  ...new Set(Object.values(QUERY_TABLE_PROBLEM_HINTS)),
   ...FAILED_CONTENT_PARTS,
   WRITE_NOT_APPLIED_MESSAGE,
   VERIFIER_NOT_RUN_EVIDENCE,
@@ -559,7 +563,8 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
     return null;
   };
 
-  const record = (event: JournalEvent): Promise<void> => journal.append(event);
+  // AC-D3 (C-2): the journal resolves with the stored record; the engine needs only that it was stored.
+  const record = (event: JournalEvent): Promise<JournalRecord> => journal.append(event);
 
   /**
    * One integrity check (U-1, U-2): capture, compare with the run_start baseline, record the

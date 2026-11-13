@@ -147,7 +147,7 @@ test("journal is append-only: earlier bytes never change and seq grows by one", 
 test("journal keeps call order and whole lines for appends that are not awaited one by one", async () => {
   await withTempDir(async (root) => {
     const journal = createJournal({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock() });
-    const pending: Promise<void>[] = [];
+    const pending: Promise<unknown>[] = [];
     for (let turn = 1; turn <= 25; turn += 1) {
       pending.push(journal.append({ type: "model_error", turn, kind: "k", message: masked(`m${turn}`) }));
     }

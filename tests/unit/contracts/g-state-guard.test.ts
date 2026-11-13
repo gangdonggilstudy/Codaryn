@@ -96,7 +96,8 @@ describe("DR-38: changes to the run records during a run", () => {
 describe("DR-38 (PM after 93eed67): the recorders the CLI and the app make, and the apply run's guard", () => {
   test("createRunRecorders and createApplyRecorders, typed; the apply guard and its reason", async () => {
     const guard: StateGuard = { capture: async (tier) => ({ tier }) as unknown as StateFingerprint, compare: () => ({ changed: [], limited: false }), markRecordsChanged: async () => {} };
-    const journal = { append: async () => {}, close: async () => {} };
+    // AC-D3 (C-2): a journal resolves with the stored record, for the run's and the apply's alike.
+    const journal = { append: async <E extends object>(event: E) => ({ seq: 1, at: "1970-01-01T00:00:00.000Z", runId: "guard-run", ...event }), close: async () => {} };
     const runRecorders: CreateRunRecorders = (options) => {
       assert.equal(options.runId, "20261112T120000Z-0000abcd");
       return { journal, changeRecorder: {} as RunRecorders["changeRecorder"], planRecorder: {} as RunRecorders["planRecorder"], stateGuard: guard };

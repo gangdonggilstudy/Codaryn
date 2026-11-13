@@ -63,6 +63,12 @@ export interface VerifierRunnerOptions {
    * Absent: none. The CLI's and the app's assembly pass it once a parser takes the field (A-6).
    */
   readonly unreadablePaths?: readonly string[];
+  /**
+   * U-258 (PM, F-1): the run's group size k (ResolvedTaskSpec.minGroupSize). data_checks compares a
+   * grouped aggregate over a source under unreadable paths for the groups of at least k rows only.
+   * Absent: DEFAULT_MIN_GROUP_SIZE (5); never below 5.
+   */
+  readonly minGroupSize?: number;
 }
 
 function errorMessage(error: unknown): string {
@@ -280,7 +286,7 @@ async function runFileRulesVerifier(
 }
 
 export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRunner {
-  const { workspace, commandRunner, unreadablePaths } = options;
+  const { workspace, commandRunner, unreadablePaths, minGroupSize } = options;
   return {
     async run(config: VerifierConfig, signal: AbortSignal): Promise<RawVerifierResult> {
       try {
@@ -291,7 +297,10 @@ export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRu
           return await runFileRulesVerifier(config, workspace, signal);
         }
         if (config.kind === "data_checks") {
-          return await runDataChecksVerifier(config, workspace, signal, unreadablePaths === undefined ? {} : { unreadablePaths });
+          return await runDataChecksVerifier(config, workspace, signal, {
+            ...(unreadablePaths === undefined ? {} : { unreadablePaths }),
+            ...(minGroupSize === undefined ? {} : { minGroupSize }),
+          });
         }
       } catch (error) {
         return createRawVerifierResult({

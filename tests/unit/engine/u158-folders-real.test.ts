@@ -73,7 +73,7 @@ describe("U-158: the count with the real executor and inventory", () => {
       privacy: createPrivacyGateway({ secrets: [] }),
       verifiers: new FakeVerifiers(),
       inventory: createInventoryChecker({ workspaceRoot: workspace.root }),
-      journal: { append: async () => undefined, close: async () => undefined },
+      journal: { append: async (event) => ({ seq: 1, at: "1970-01-01T00:00:00.000Z", runId: "apply-run", ...event }), close: async () => undefined },
       clock: new FakeClock(),
       signal: new AbortController().signal,
       markApplied: async () => "marked",

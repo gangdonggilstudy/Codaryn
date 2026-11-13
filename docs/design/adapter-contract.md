@@ -567,7 +567,7 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 같은 항목인지는 정책 관문의 판정(`compilePathSet`의 `exact`: 조각 단위, Windows에서 대소문자 무시와 `\`, 끝의 `/`와 `./`는 없는 것)으로 본다. 쓸 수 없는 예전 목록은 어느 항목과도 같지 않다.
       - 좁히기: 항목을 뺌, 같은 항목을 다른 순서나 표기로, 목록이 없던 자리에 새로 둠(한정 없음보다 어디서나 좁다), 빈 목록.
       - 처음 판(ba7cec7)은 글자로 더 덮는 항목만 넓히기로 보았다. 예전 항목 안의 항목을 좁히기로 본 것을 V-8로 고쳤다.
-      - 아직 설정 파서는 이 필드를 받지 않는다(`unknown_field`, B-4까지). 판정이 먼저 안다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다.
+      - 설정 파서는 U-182(병합 `a1d5c65`)부터 이 필드를 받는다(설정 파일, 프로필, 작업 종류 정의의 `policy.writablePaths`). U-183이 쓰일 때는 판정이 파서보다 먼저였다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다. GUI의 설정 화면에는 이 필드를 고치는 편집이 없고, 넓히기 확인 대화상자는 두 종류에 이름을 붙인다(U-192, 병합 `111e25d`).
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
       - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).

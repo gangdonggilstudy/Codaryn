@@ -32,7 +32,7 @@ export const EN_MESSAGES: MessageTexts = {
   "error.hint.config_missing": "There is no config file yet (none at the default location). Create one with codaryn init.",
   // U-228, drafts for nb-i18n.
   "error.hint.plan_kind_differs":
-    "Give apply the task the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",
+    "Give apply the same task form the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",
   "error.hint.plan_tool_missing":
     "A task type with plan \"run\" needs propose_changes among its tools, and one with plan \"apply\" needs propose_plan. Add the tool to the task type's tools (and to the task's own tools if it lists them), or leave the plan mode out.",
   "error.hint.key_in_goal": "The key value is in the goal; take it out of the goal.",

@@ -31,9 +31,9 @@ export const KO_MESSAGES: MessageTexts = {
   "error.hint.config_missing": "설정 파일이 아직 없습니다(기본 위치에 없음). codaryn init으로 만드세요.",
   // U-228 (nb-i18n이 다듬을 초안).
   "error.hint.plan_kind_differs":
-    "계획을 만든 실행이 쓴 task를 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
+    "계획을 만든 실행과 같은 작업 지정을 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
   "error.hint.plan_tool_missing":
-    "계획 방식이 \"run\"인 작업 종류는 도구에 propose_changes가, \"apply\"인 작업 종류는 propose_plan이 있어야 합니다. 작업 종류의 도구(task가 도구를 적었다면 그 목록에도)에 그 도구를 더하거나 계획 방식을 빼세요.",
+    "계획 방식이 \"run\"인 작업 종류에는 propose_changes 도구가, \"apply\"인 작업 종류에는 propose_plan 도구가 있어야 합니다. 작업 종류의 도구(task가 도구를 적었다면 그 목록에도)에 그 도구를 더하거나 계획 방식을 빼세요.",
   "error.hint.key_in_goal": "목표 문장에 키 값이 있습니다. 목표에서 빼세요.",
   "error.hint.key_in_task": "--task 옵션으로 준 task 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
   "error.hint.key_in_config": "설정 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
@@ -414,7 +414,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.config_file.invalid_unlocated": "설정 파일({location})의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
   // U-228 (nb-i18n이 다듬을 초안).
   "doctor.config_file.plan_tool_missing":
-    "설정 파일({location})에 계획 방식의 계획 도구가 없는 작업 종류가 있습니다(\"run\"은 propose_changes, \"apply\"는 propose_plan이 필요합니다). 실행이 거부합니다",
+    "설정 파일({location})에 계획 방식에 맞는 계획 도구가 없는 작업 종류가 있습니다(계획 방식 \"run\"에는 propose_changes 도구, \"apply\"에는 propose_plan 도구가 필요합니다). 실행은 이를 거부합니다",
   "doctor.task_file.unreadable": "task 파일을 읽을 수 없습니다",
   "doctor.task_file.json_syntax": "task 파일의 JSON 문법 오류: {line}줄 {column}열",
   "doctor.task_file.key": "task 파일에 키 필드나 키 값이 있습니다",
@@ -423,7 +423,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.task_file.invalid_unlocated": "task 파일의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
   // U-228 (nb-i18n이 다듬을 초안).
   "doctor.task_file.plan_tool_missing":
-    "task의 계획 방식에 맞는 계획 도구가 도구 목록에 없습니다(\"run\"은 propose_changes, \"apply\"는 propose_plan이 필요합니다). 실행이 거부합니다",
+    "task의 계획 방식에 맞는 계획 도구가 도구 목록에 없습니다(계획 방식 \"run\"에는 propose_changes 도구, \"apply\"에는 propose_plan 도구가 필요합니다). 실행은 이 task를 거부합니다",
   "doctor.task_file.valid": "task 파일이 올바릅니다",
   "doctor.model.script_unreadable": "scripted 모델의 대본 파일을 읽을 수 없습니다",
   "doctor.model.script_json_syntax": "대본 파일의 JSON 문법 오류: {line}줄 {column}열",

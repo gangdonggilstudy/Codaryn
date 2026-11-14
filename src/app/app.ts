@@ -48,7 +48,7 @@ import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import type { CleanupOperations } from "../store/index.js";
-import { createRevertCommand } from "../cli/assemble.js";
+import { createRevertCommand, revertOnce, revertOutput, startRevert } from "./revert-command.js";
 import type { Assemble } from "./assembly.js";
 import { createRunCancelSource } from "./cancel.js";
 import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
@@ -62,8 +62,7 @@ import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { renderApplyReport, renderReport } from "../cli/report.js";
 import { jsonLine } from "../cli/guard.js";
-import { runRevert } from "../cli/revert.js";
-import { parseArgs, parsePlanArgs, parseReportArgs, parseReviewArgs } from "../cli/args.js";
+import { parseArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "../cli/args.js";
 import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
@@ -673,10 +672,9 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     const consent = revertConsentOf(request);
     if (!consent.ok) return consent;
     try {
-      // The CLI's revert with the options main.ts gives it (N-7, N-16, N-26, N-27 a): dry run,
-      // "latest", the store's judgement of one run, and the revert record written under the lock.
-      // As an adapter (AdapterRevert): no terminal question, the consent only from the request.
-      const { output, lockLeft } = await runRevert({
+      // U-322: keep the request/parser order and app-specific store options. The app rules own
+      // one revert; an adapter never asks at a terminal or starts the CLI's second attempt.
+      const io = {
         argv: ["revert", "--workspace", request.workspace, "--run", request.runId, ...(request.dryRun === true ? ["--dry-run"] : [])],
         cwd: environment.cwd,
         isDirectory: environment.isDirectory,
@@ -690,10 +688,18 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
           inspect: inspectRun,
         }),
         adapter: { unsafeMoveConsent: consent.consent },
-      });
-      if (output.kind !== "revert") return { ok: false, error: fromCliError(output) };
+      };
+      const parsed = parseRevertArgs(io.argv);
+      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
+      const { runId, dryRun, allowUnsafeMove, workspace } = parsed.args;
+      const start = await startRevert(io, { workspace, dryRun, allowUnsafeMove });
+      if (!start.ok) return { ok: false, error: fromCliError(start.outcome.output) };
+      const result = await revertOnce(io, start.started, runId, dryRun, start.started.consent);
+      if (result === null) return { ok: false, error: fromCliError(cliError("internal_error", "the revert stopped because of an internal error").output) };
+      if (!result.ok) return { ok: false, error: fromCliError(cliError(result.code, result.message).output) };
+      const { output } = revertOutput(result, dryRun);
       // U-229 (R-106 L-1, after U-220): a lock the revert could not release is told beside its output.
-      return lockLeft === true ? { ok: true, output, lockLeft: true } : { ok: true, output };
+      return result.lockLeft === true ? { ok: true, output, lockLeft: true } : { ok: true, output };
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }

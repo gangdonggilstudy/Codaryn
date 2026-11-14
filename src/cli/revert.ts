@@ -5,49 +5,26 @@
  * `--dry-run` reports the same decisions and changes nothing (no lock, no revert record).
  */
 
-import path from "node:path";
-import { REVERT_EXIT_CODES, RESULT_SCHEMA_VERSION, UNSAFE_MOVE_CONSENT_ARGUMENT } from "../contracts/index.js";
-import type { CliErrorOutput, Clock, MessageCatalog, PlanApplyState, RevertOutput } from "../contracts/index.js";
+import type { CliErrorOutput, MessageCatalog, PlanApplyState, RevertOutput } from "../contracts/index.js";
 import { parseRevertArgs } from "./args.js";
-import { revertStatus } from "./assemble.js";
-import type { PlanApply, RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
+import type { PlanApply } from "../app/revert-command.js";
 import { argumentsError, cliError } from "../app/prepare.js";
-import { createRunId } from "../app/input/run-id.js";
-import { localPathProblem } from "../app/input/task.js";
+import { revertOnce, revertOutput, startRevert } from "../app/revert-command.js";
+import type { RevertRulesEnvironment } from "../app/revert-command.js";
 
-export interface RevertEnvironment {
+// U-314 (CLI migration C-9a): the revert's rules are the app layer's (src/app/revert-command.ts); these
+// names stay for the tests and the app layer (plan A).
+export type { AdapterRevert, RevertRulesEnvironment } from "../app/revert-command.js";
+
+export interface RevertEnvironment extends RevertRulesEnvironment {
   readonly argv: readonly string[];
-  readonly cwd: string;
-  readonly isDirectory: (path: string) => Promise<boolean>;
-  readonly clock: Clock;
-  readonly randomBytes: (size: number) => Uint8Array;
-  /**
-   * `createRevertCommand(revertRun)` from assemble.ts; main.ts always passes it. When absent
-   * (a build without the store), the command stops before anything is read or changed.
-   */
-  readonly revert?: RevertCommand;
   /**
    * DR-25: shows the question on stderr and returns the line typed, or null. Present only when
    * stdin and stderr are terminals. Asked once, after a revert skipped files as `unsafe_move`.
    */
   readonly ask?: (question: string) => Promise<string | null>;
-  /** Set by the app layer only (AdapterRevert). Absent: the CLI's channels (argument, terminal). */
-  readonly adapter?: AdapterRevert;
   /** U-16 (R-55 L-1): the catalog of the hint's lines (revert.plan_*); English when absent. */
   readonly messages?: MessageCatalog;
-}
-
-/**
- * DR-25, as AdapterApply for apply: how the app layer reverts for an adapter (the GUI). Only the
- * app layer sets it.
- * - `unsafeMoveConsent` is the person's consent to move this run's files back unsafely, or null.
- *   The caller passes only what the person gave as input on screen for this one revert; never a
- *   value from a task, config, profile, record, model or an earlier revert. Its channel must be
- *   `adapter` and its `runId` the run reverted; anything else is refused before anything changes.
- * - No terminal question is asked and `--allow-unsafe-move` is refused.
- */
-export interface AdapterRevert {
-  readonly unsafeMoveConsent: { readonly channel: "adapter"; readonly runId: string } | null;
 }
 
 export interface RevertCliOutcome {
@@ -115,52 +92,15 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
   const parsed = parseRevertArgs(io.argv);
   if (!parsed.ok) return argumentsError(parsed);
   const { runId: requested, dryRun, quiet } = parsed.args;
-
-  // T-12 (S-5): a network or device path is refused before the file system is touched.
-  const problem = localPathProblem(parsed.args.workspace, io.cwd);
-  if (problem !== null) return cliError("invalid_arguments", `the path given by --workspace ${problem}`);
-
-  const workspace = path.resolve(io.cwd, parsed.args.workspace);
-  // DR-51 (U-38), review R-70 L-1 (PM): no typed path for the summary. revert knows no registered
-  // value, so its consent hint says <workspace> whatever was typed.
-  if (!(await io.isDirectory(workspace))) {
-    return cliError("workspace_not_found", "the workspace is not an existing directory");
-  }
-  const revert = io.revert;
-  if (revert === undefined) {
-    return cliError("internal_error", "revert is not connected in this build; nothing was changed");
-  }
-
-  // DR-25: the consent comes only from the person: the CLI's argument, the terminal answer below,
-  // or the app layer's adapter path. No file, record or model gives it.
-  const adapter = io.adapter;
-  const ask = adapter === undefined ? io.ask : undefined;
-  let consent: RevertCommandInput["consent"] = null;
-  if (adapter !== undefined) {
-    if (parsed.args.allowUnsafeMove) {
-      return cliError("invalid_arguments", `an adapter's revert takes the person's consent in its request, not ${UNSAFE_MOVE_CONSENT_ARGUMENT}; nothing was changed`);
-    }
-    const given = adapter.unsafeMoveConsent;
-    if (given !== null) {
-      if (given.channel !== "adapter" || typeof given.runId !== "string") {
-        return cliError("invalid_arguments", "the consent to unsafe moves is not the adapter's consent for one run; nothing was changed");
-      }
-      consent = { channel: "adapter", runId: given.runId };
-    }
-  } else if (parsed.args.allowUnsafeMove) {
-    consent = { channel: "cli-flag", runId: null };
-  }
-
-  // The lock is held under an id of its own, so it never looks like the reverted run is active.
-  const once = async (runId: string, given: RevertCommandInput["consent"]): Promise<RevertCommandOutcome | null> => {
-    const lockId = createRunId(new Date(io.clock.now()), io.randomBytes);
-    try {
-      return await revert({ workspace, runId, lockId, clock: io.clock, dryRun, consent: given });
-    } catch {
-      return null;
-    }
-  };
-  let result = await once(requested, consent);
+  // U-314 (C-9a): the revert's rules are the app layer's (startRevert, revertOnce, revertOutput); the
+  // DR-25 terminal question, the plan run's hint and what is printed are the CLI's. A consent given at
+  // the terminal is a second call, as before (PM Q-19).
+  const start = await startRevert(io, { workspace: parsed.args.workspace, dryRun, allowUnsafeMove: parsed.args.allowUnsafeMove });
+  if (!start.ok) return start.outcome;
+  const { started } = start;
+  const ask = started.mayAsk ? io.ask : undefined;
+  const consent = started.consent;
+  let result = await revertOnce(io, started, requested, dryRun, consent);
   if (result === null) return { ...cliError("internal_error", "the revert stopped because of an internal error"), quiet };
   if (!result.ok) return { ...cliError(result.code, result.message), quiet };
 
@@ -174,31 +114,16 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
       `Revert again and move ${unsafe === 1 ? "it" : "them"} back anyway, for this revert only? [y/N] `;
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (YES.has(answer)) {
-      const again = await once(result.runId, { channel: "cli-tty", runId: result.runId });
+      const again = await revertOnce(io, started, result.runId, dryRun, { channel: "cli-tty", runId: result.runId });
       if (again === null) return { ...cliError("internal_error", "the revert stopped because of an internal error"), quiet };
       if (!again.ok) return { ...cliError(again.code, again.message), quiet };
       result = again;
     }
   }
 
-  const status = revertStatus(result.outcome);
-  const exitCode = REVERT_EXIT_CODES[status];
+  const { output, exitCode } = revertOutput(result, dryRun);
   return {
-    output: {
-      schemaVersion: RESULT_SCHEMA_VERSION,
-      kind: "revert",
-      runId: result.runId,
-      status,
-      exitCode,
-      reverted: result.outcome.reverted,
-      skipped: result.outcome.skipped,
-      ...(dryRun ? { dryRun: true as const } : {}),
-      // DR-25: a dry run does not judge whether files can go back safely; the summary says so.
-      ...(result.outcome.moveSafetyUnchecked === true ? { moveSafetyUnchecked: true as const } : {}),
-      ...(result.revertedBefore === null ? {} : { revertedBefore: result.revertedBefore }),
-      // DR-38: the run has a records-changed mark; the revert still checked every file.
-      ...(result.recordsChanged === true ? { recordsChanged: true as const } : {}),
-    },
+    output,
     exitCode,
     quiet,
     ...(result.planApply === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planApply, dryRun, io.messages) }),

@@ -78,6 +78,13 @@ const KEPT: readonly { readonly file: string; readonly names: readonly string[];
   },
   { file: "run-ref.js", names: ["resolveRunReference", "STORE_RUN_REFERENCE_DEPS"], step: "C-7a (U-306; tests and the app's runs.ts take them)" },
   { file: "guard.js", names: ["jsonLine", "renderOutcome", "stdoutText", "runGuardedCommand"], step: "C-7a (U-306; a file that stays, its outcome types moved)" },
+  {
+    file: "report.js",
+    names: ["runReport", "readResult", "readApplyResult", "summarizeJournal", "summarizeApplyJournal", "failedCallsIn", "renderReport", "renderApplyReport", "REPORT_FIXED_LIMITS", "APPLY_REPORT_FIXED_LIMITS"],
+    step: "C-8 (U-311; names in a file that stays: tests and the app layer's app.ts and run-events.ts take them)",
+  },
+  { file: "revert.js", names: ["runRevert", "appliedPlanHint"], step: "C-9a (U-314; a file that stays: tests, main.ts and the app layer take them)" },
+  { file: "runs.js", names: ["runRuns", "parseRunsArgs", "resolveWorkspaceRoot", "resolveRunRef"], step: "C-9a (nc-human's U-315; a file that stays: tests and the app's runs.ts take them)" },
   { file: "json-position.js", names: ["jsonErrorOffset", "lineAndColumn", "jsonSyntaxPosition"], step: "C-5" },
 ];
 

@@ -102,7 +102,10 @@ export function revertValue(outcome: unknown, shown: Shown): Obj | HostFailure {
   const skipped: Obj[] = [];
   for (const file of Array.isArray(output["skipped"]) ? output["skipped"].slice(0, MAX_LIST) : []) {
     if (!isObj(file) || typeof file["path"] !== "string" || word(file["reason"]) === null) continue;
-    skipped.push({ path: shown(file["path"]), reason: file["reason"] });
+    // U-318 (R-119 L-1): a missing_record path comes from the snapshot index unmasked (SkippedFile), so it can
+    // hold a registered secret's text, which `shown` does not hide. The CLI's summary prints "?" for every one
+    // (HIDDEN_PATH), by the reason alone; it is not sent here either.
+    skipped.push({ path: file["reason"] === "missing_record" ? null : shown(file["path"]), reason: file["reason"] });
   }
   const before = output["revertedBefore"];
   return {

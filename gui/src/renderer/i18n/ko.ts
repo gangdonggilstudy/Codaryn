@@ -443,6 +443,7 @@ export const KO = {
   "skip.missing_snapshot": "원본 사본 없음",
   "skip.io_error": "읽거나 쓸 수 없음",
   "skip.missing_record": "기록 없음",
+  "runs.skipPathHidden": "?로 보인 파일은 기록이 없는 파일입니다. 그 이름은 가리지 않은 채로 와서 등록한 가릴 값이 들어 있을 수 있으므로 보이지 않습니다(CLI 요약도 같습니다).",
   "skip.already_reverted": "이미 되돌림",
   "skip.original_path_taken": "원래 자리에 다른 파일이 있음",
   "skip.unsafe_move": "덮어쓸 위험이 있는 이동이라 건너뜀",

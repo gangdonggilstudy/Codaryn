@@ -1167,6 +1167,51 @@ export const CASES = [
       runs(),
     ],
   },
+  // U-319 (the CLI migration's C-9b: the cleanup becomes one copy in the app layer): the cleanup's paths
+  // no other case reaches. A preview with no selection (U-86's example commands), in text and JSON;
+  // --workspace as a device path and as a folder that is not there; the arguments the CLI refuses (a
+  // digest that is not hex, --run latest, --delete-discarded without --confirm); --older-than past the
+  // app's request check (the CLI's own day range); a held lock under a confirmed digest
+  // (workspace_locked, the CLI's text), in text and JSON. The ones a person reads again in Korean.
+  {
+    name: "cleanup-paths",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      cleanup(),
+      cleanup("--json"),
+      { args: ["cleanup", "--workspace", "NUL"] },
+      { args: ["cleanup", "--workspace", "nowhere", "--json"] },
+      cleanup("--run", "latest"),
+      cleanup("--older-than", "1", "--confirm", "not-a-digest"),
+      cleanup("--older-than", "1", "--delete-discarded"),
+      cleanup("--older-than", "40000", "--json"),
+      (ctx) => {
+        lockHeld(ctx.dir);
+        return cleanup("--run", runIdOf(0)(ctx), "--json");
+      },
+      (ctx) => cleanup("--run", runIdOf(0)(ctx), "--confirm", cleanupDigestOf(9)(ctx), "--include-not-reverted"),
+      (ctx) => cleanup("--run", runIdOf(0)(ctx), "--confirm", cleanupDigestOf(9)(ctx), "--include-not-reverted", "--json"),
+      (ctx) => {
+        lockTaken(ctx.dir);
+        return runs();
+      },
+    ],
+  },
+  {
+    name: "cleanup-paths-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      cleanup(),
+      (ctx) => {
+        lockHeld(ctx.dir);
+        return cleanup("--run", runIdOf(0)(ctx), "--json");
+      },
+      (ctx) => cleanup("--run", runIdOf(0)(ctx), "--confirm", cleanupDigestOf(2)(ctx), "--include-not-reverted"),
+    ],
+  },
   // U-289 (C-6a's first commit): a run's life after step 7, see KO_CONFIG.
   { name: "model-not-found", api: { replies: [] }, setup: notFoundSetup, steps: [{ args: NOT_FOUND_RUN }, report("latest", "--json")] },
   { name: "model-not-found-ko", lang: "ko", api: { replies: [] }, setup: notFoundSetup, steps: [{ args: NOT_FOUND_RUN }] },

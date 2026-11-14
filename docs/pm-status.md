@@ -38,6 +38,15 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-32, 2026-11-14) — U-321 한정 수정 채택, APP-REPORT 검증 준비
+
+- main/origin/main `e56ba0dcbfac87dd119b6f8da98fb2cc3e1c0d78`: U-321 cleanup 메타데이터 검증을 채택·푸시했다. 구현 `399f7731`, 최종 판 `00f7085cc3dc77cb756ecd1c0eff5482832a7e94`; main 병합 트리 `c375487582e12759687d8d7f43ac49a47539994d`가 검증 판과 같았다. 작성자·본문 없는 커밋·staged 비밀 검사를 확인했다.
+- 최종 실측: typecheck/build 및 tracked/staged 비밀 검사 통과. 유닛 4,179 중 4,168 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 고정 출력 파일 변경 없음. 유닛의 추가 skip 2는 파일 symlink 권한과 열린 부모 디렉터리 rename 거부다. 통합 로그 끝의 assertion은 기존 U-295 TODO이며 실패 건수는 0이다. 증거는 `.worktrees/pm-unit/.codaryn/codex-u321-final-evidence/`에 보존했다.
+- [V-41b](reviews/2026-11-14-v41b-codex-verify-u321.md): 신규 0/0/0, 최종 archive 전용 시험 20통과/2skip, 실제 CLI/앱 24회와 store 16경계. 준비된 정션·하드 링크를 삭제 전에 거부하고 선택 기록을 보존했다. **기존 중간 잔여 위험은 미해결**: 마지막 검사 뒤 부모 교체로 외부 `.gitignore` 2바이트 쓰기, 마지막 검사 뒤 로그의 새 hard-link alias 추가로 같은 inode의 로그 137바이트 노출. 기준에도 같은 결과가 있고, 이번 채택은 정적으로 준비된 공격과 실행한 교체 경계의 한정 수정이다. 모든 경쟁 조건의 안전성을 승인한 것이 아니다.
+- U-316 APP-REPORT 구현은 codex-loop가 지정 두 파일만 완료했다. 기준에서 새 4시험을 먼저 통과시켰고 변경 뒤 관련 58시험·typecheck/build가 통과했다. PM 검토 중 시험의 네트워크형 경로를 loopback 표기로 맞추도록 지시했다. 아직 커밋·판 검증·채택 전이다. codex-audit는 기준 23a41eaf 공개 앱 352호출과 추가 16호출, 90 assertion을 고정했고 같은 기준 재실행에서 결과·파일 호출 순서 차이가 없었다. 후보에 대한 판정으로 세지 않는다.
+- 사용자 지시에 따라 Codex pane 명령 전달은 재확인하지 않는다. `herdr --skill`의 명령과 실제 pane을 확인해 기존 Codex만 배분한다. 세션 한도·크레딧 질문에는 답하지 않는다. U-316 다음은 앱 revert, applyPlan을 직렬로 진행한다. codex-sec의 revert 준비, codex-check의 C-10 준비 갱신, codex-probe의 C-11 의존 정리가 완료됐다.
+- C-11의 구현 경계를 [이행 계획의 2026-11-14 보완](reviews/2026-11-13-cli-migration-plan.md)에 기록했다. 기존 출력과 옛 경로 재수출을 보존하며 공용 순수 파서·표시 모듈을 옮기는 기술 선택이다. 새 기능이나 출력 변경 승인이 아니다. 기존 V-40 낮음 잠금 잔류와 U-321 경쟁 경계는 별도 미해결 항목으로 유지한다.
+
 ## 진행 요약 (CP-31, 2026-11-14) — C-7b 채택, 앱 후속 시작
 
 - main/origin/main `23a41eaf801d20a0ab365b8075936358e44e1688`: U-320 C-7b CLI apply 수명 전환 채택·푸시. 구현 `374103ff`, helper 거부 복구 `89f279bb`. 최종 판 `f930d147fa7374b7db7ffab713040854735fb76f`, main 병합 트리 `05d659f2751f4e439070a9e221fb28f0eb67c658`가 검증 판과 같았다. 최초 write-tree는 샌드박스의 index.lock 쓰기 거부로 실패했고, 허용된 권한으로 다시 산출해 일치를 확인했다.

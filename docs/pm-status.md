@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-33, 2026-11-14) — APP-REPORT 채택, 현재 운영 지시 정리
+
+- main/origin/main `e52ac23e07199b13aeccdc85f96ba54c90747cd1`: U-316 APP-REPORT 채택·푸시. 구현 `5f68f0c4`, 최종 판 `4122f0846394d512e327b5e851c4203615745b9d`, 최종 병합 트리 `f9db08f0210aeb0e46c3669b4251948d8a791737` 일치. report/reportMarkdown은 앱 readReport를 직접 부르며 기존 파서·renderer·직렬화·최종 가림을 유지한다. 앱→CLI 의존 0을 주장하지 않는다.
+- 최종 실측: typecheck/build·GUI build/lock 검사·tracked/staged 비밀 검사 통과. 유닛 4,183 중 4,172 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 고정 출력 파일 변경 없음. 로그는 `.worktrees/pm-unit/.codaryn/codex-u316-final-evidence/`에 보존했다. 최초 staged 검사에서 합성 시험값 표기 2건을 발견해 실행 바이트가 같은 분할 fixture로 고쳤고, 재검사 발견 0 뒤 커밋했다. 시험의 네트워크형 경로도 127.0.0.1로 맞췄다.
+- [V-42](reviews/2026-11-14-v42-codex-verify-u316.md) 높음 0/중간 0/낮음 0. 사전 봉인한 공개 앱 352+16호출 차이 0, 기본 호출의 파일 접근 순서 동일, 독립 조건 90개 통과, 253개 봉인 항목 불변, 관련 49시험 통과. JSON 직렬화 경계의 합성 현재 값이 기존 internal_error를 만드는 경우도 보존했다. 직접 CLI 모듈 의존은 jsonLine 때문에 8→9, 간접 CLI 모듈은 양쪽 22이며 C-11에서 정리할 잔여다.
+- U-322 APP-REVERT를 codex-loop에게 배정했다. 기존 `.worktrees/claude-workspace`, `unit/U-322-codex-loop`, 기준 e52ac23e. 소유 파일은 app.ts의 revert/import와 새 `tests/unit/app/u322-revert-direct.test.ts`뿐이다. 동의 선검사·파서·잠금·오류/JSON·lockLeft를 보존하며 app startRevert→revertOnce 1회→revertOutput을 직접 연결한다. loadPlan·취소·새 가림 정책을 추가하지 않는다. app.ts 작성자는 한 명이며 뒤의 applyPlan은 아직 구현하지 않는다.
+- codex-sec의 V-43 기준은 최종 U-316 판에서 공개 revert 54사례·파일 접근 1,298 events·관련 23시험으로 고정됐다. 수집 당시에는 미채택 후보였으나 위 최종 병합 트리 일치로 같은 원천임을 확인했다. 후보 U-322는 아직 미검증이다. codex-probe가 APP-APPLY 준비를, codex-check가 운영 규칙 점검을 맡았다.
+- APP-APPLY 준비에서 기존 앱 소비자의 onStoredRecord/onStoredRunRecord가 0회 전달됨을 확인했다. PM은 이번 이행에서 0회 동작을 유지하고 masked event·confirm만 기존 횟수/시점/this로 전달하도록 정했다. 계약상 선택 콜백의 실제 연결은 별도 후속 검토로 남기며 raw 기록이나 새 handle/IPC 필드를 이번 연결로 열지 않는다. codex-audit가 e52ac23e에서 변경 전 공개 API 기준을 준비하되 U-322 채택 후 같은 apply 원천인지 확인한다.
+- 사용자 지시대로 PM·오케스트레이션과 규칙 관리를 계속한다. [운영 문구 감사](reviews/2026-11-14-codex-rules-audit.md)는 중간 4/낮음 1을 찾았으며 제품 결함이나 실제 잘못된 병합의 수치가 아니다. 기존 지시를 반영해 AGENTS/workflow/personas/handoff의 Codex 전용 배정, 미보고 커밋에도 재작성 금지, 관리자도 worktree add 금지, 명시 배정 범위에서만 main 병합, 최신 체크포인트 우선 문구를 정리했다. 과거 체크포인트·종료한 위임 owner는 보존했다. 새 권한·정책을 추가한 것이 아니다.
+
 ## 진행 요약 (CP-32, 2026-11-14) — U-321 한정 수정 채택, APP-REPORT 검증 준비
 
 - main/origin/main `e56ba0dcbfac87dd119b6f8da98fb2cc3e1c0d78`: U-321 cleanup 메타데이터 검증을 채택·푸시했다. 구현 `399f7731`, 최종 판 `00f7085cc3dc77cb756ecd1c0eff5482832a7e94`; main 병합 트리 `c375487582e12759687d8d7f43ac49a47539994d`가 검증 판과 같았다. 작성자·본문 없는 커밋·staged 비밀 검사를 확인했다.

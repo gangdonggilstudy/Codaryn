@@ -1,6 +1,6 @@
-# 임시 PM 상태
+# PM 상태
 
-Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 작업 묶음마다 갱신한다. 작업별 상세는 [개발 진행 현황](progress.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 둔다.
+PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로 codex-review(w3:p3)가 PM과 통합을 회수했다. 아래 임시 위임 기록과 active 조건은 Claude 임시 PM에게 적용되며, 회수 후 Codex의 원래 관리 권한을 중단시키지 않는다. 작업별 상세는 [개발 진행 현황](progress.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 둔다.
 
 ## 위임
 
@@ -37,6 +37,17 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
+
+## 진행 요약 (CP-28, 2026-11-14) — Codex PM 회수
+
+- 사용자 인계 지시에 따라 codex-review(w3:p3)가 개발 관리자·통합 담당을 맡고 `pm-control.json`의 임시 위임을 `revoked`로 바꿨다. 기존 owner 필드는 종료한 위임의 이력이다. Claude PM의 새 배정·병합·푸시는 종료됐다.
+- 회수 전 확인: main과 로컬 origin/main은 `b129ebb80985d0c6a10fac59b3fa2d5b0e4f4003`, main과 두 미완료 단위의 추적 파일은 깨끗했다. 네트워크 fetch로 새 원격 상태를 조회한 것은 아니다.
+- U-319: `7cadaea69764593615cde1b7258bc2b368064929`, 기준 분기점 `0a47499b`. 완료 수치가 없고 기존 dist는 변이 시험 중 멈춘 것이므로 다시 빌드한다. PM이 기존 pm-unit에 후보판을 만들고 검증한 뒤 판단한다.
+- U-318: `818e58fb91e4be7fedbf3d798b4aa135db7d1fd3`, `.worktrees/claude-gui/.codaryn/report-U-318.md` 완료 보고 확인. 보고된 통과 수치는 아직 PM 재실행 결과가 아니다.
+- 배정(별도 git archive 사본, 제품 파일 수정 없음): codex-check는 b129ebb8 전체 기준 수치 재측정(BASE-28), codex-sec은 U-319 독립 보안 검증(V-37), codex-probe는 U-318 호스트·IPC·화면의 경로 가림 독립 검증(V-38), codex-loop는 C-7b CLI 전환 준비. 결과는 `.worktrees/codex-verify/.codaryn/`의 각 보고서에 쓴다. codex-audit는 후속 배정 대기.
+- Herdr 서버는 일반 클라이언트 접속을 거부했다. 서버나 권한을 바꾸지 않고 기존 Codex 작업 연결 도구로 위 네 세션에 전달했다. 한도·크레딧 질문은 조작하지 않았다.
+- 다음 순서: 기준 수치와 U-319 후보판 검증·독립 검증 → U-319 및 U-318 채택 판단 → C-7b 전환 → app.ts의 report/revert/applyPlan 후속을 직렬 처리 → C-10/C-11. 출력 변경을 요구하는 질문은 CP-25~27의 목록을 유지하고 하나씩 사용자에게 묻는다.
+- 실제 API·키 조회 금지, 시험 네트워크는 127.0.0.1, 이력 재작성·amend·검사 우회 금지, 지정 작성자와 trailer 없는 커밋, 새 board worktree 생성 금지, 이행 출력·JSON 유지 규칙을 그대로 적용한다.
 
 ## 진행 요약 (CP-27, 2026-11-14 09:26, main `2f2e103`) — Codex로 전수 인계
 

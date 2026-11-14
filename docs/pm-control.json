@@ -1,7 +1,7 @@
 {
   "version": 1,
   "delegation_id": "pm-20261112-01",
-  "status": "active",
+  "status": "revoked",
   "owner": "claude-temporary-pm",
   "owner_pane": "w3:p1",
   "owner_session_id": "35d190ab-f250-4f81-bf71-df394b34110a",

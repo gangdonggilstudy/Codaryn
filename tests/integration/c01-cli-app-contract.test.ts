@@ -46,6 +46,15 @@
  * another plan kind, a records-changed mark, a held lock, a plan applied already) and the mark found under
  * the lock; the consent to unsafe moves on a volume without hard links (fs-faults.ts makes one: links
  * under the workspace fail as they do on FAT); and a lock the apply cannot release (fs-faults.ts again).
+ *
+ * U-317 (ne-verify R-119 I-1; after C-9a moved the revert into the app layer): a run's revert by the CLI's
+ * `revert` and by the app's revert, which the GUI uses, from runs made by the CLI the same way. The preview,
+ * the revert and a second revert of a document run and of an apply of a plan of moves; three refusals (a
+ * missing run, a held lock, a damaged run), and a preview under the held lock, which takes no lock; the
+ * revert of an apply made unsafely on a volume without hard links (DR-25: skipped as unsafe_move without a
+ * consent, moved back with this run's). The output, the revert record (revert.json; its consent names its
+ * channel, checked on each side, then left out) and the files must match. R-119 L-1 (a missing_record path
+ * shown unmasked) is not pinned: no run here writes a secret-named file.
  */
 
 import assert from "node:assert/strict";
@@ -57,12 +66,12 @@ import type { TestContext } from "node:test";
 import { createCodarynApp, createNodeAppEnvironment } from "../../src/app/index.js";
 import { createMessageCatalog } from "../../src/i18n/index.js";
 import type { CodarynApp, TaskForm } from "../../src/app/index.js";
-import { PLAN_FILE_NAME, PRIVACY_TOKEN_PATTERN_SOURCE, RECORDS_CHANGED_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
-import type { ApplyJournalRecord, ApplyResult, CommandVerifierConfig, EngineResult, JournalRecord, ScriptStep } from "../../src/contracts/index.js";
+import { PLAN_FILE_NAME, PRIVACY_TOKEN_PATTERN_SOURCE, RECORDS_CHANGED_FILE_NAME, REVERT_RECORD_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
+import type { ApplyJournalRecord, ApplyResult, CommandVerifierConfig, EngineResult, JournalRecord, RevertOutput, ScriptStep } from "../../src/contracts/index.js";
 import { fakeApiConfig, writeConfigFile } from "../fixtures/anthropic.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
-import { ORGANIZE_ACTIONS, afterActions, createFileArgs, organizeScript, sha256Of, textStep, toolStep, writeGeneralTask, writeOrganizeTask, writeOrganizeWorkspace } from "../fixtures/general-tasks.js";
+import { ORGANIZE_ACTIONS, afterActions, createFileArgs, organizeScript, replaceTextArgs, sha256Of, textStep, toolStep, writeGeneralTask, writeOrganizeTask, writeOrganizeWorkspace } from "../fixtures/general-tasks.js";
 import { EDIT_RIGHT_FIX, EDIT_WRONG_FIX, PRICE_CHECK_PATH, PRICE_PATH, writeRepairProject } from "../fixtures/repair-project.js";
 import { FAKE_API_KEY, FAKE_SECRET_A, FAKE_SECRET_ENV_A } from "../fixtures/secrets.js";
 import { NODE, cliEnv, expectCliError, expectRunResult, lockPath, readRunFiles, runDirOf, runTask, sha256Hex, startCli, waitFor } from "../support/cli.js";
@@ -1120,4 +1129,210 @@ test("U-312 적용의 잠금을 풀지 못함(lock left): 두 길 모두 결과�
   for (const side of [cliSide, appSide]) assert.equal(existsSync(lockPath(side.sb.workspace)), true, "the lock is left");
   assertSameApply({ result: cliResult, records: readApplyJournal(cliSide.sb.workspace, cliResult.runId) }, cliSide, appRun, appSide, "a lock left");
   // As the app's apply result has no lockLeft yet (PM, C-7b D-3: a later unit), nothing is said of it here.
+});
+
+// ---------------------------------------------------------------------------------------------
+// U-317: after C-9a, a run's revert by the CLI's `revert` and by the app layer's revert (the GUI's)
+
+/** `codaryn revert` of a run (its JSON line and exit code), with `faults` (fs-faults.ts) in its process. */
+async function cliRevert(sb: Sandbox, env: NodeJS.ProcessEnv, runId: string, options: { readonly dryRun?: boolean; readonly consent?: boolean; readonly faults?: FsFaults } = {}) {
+  const args = ["revert", "--workspace", sb.workspace, "--run", runId, ...(options.dryRun === true ? ["--dry-run"] : []), ...(options.consent === true ? ["--allow-unsafe-move"] : [])];
+  const runEnv = options.faults === undefined ? env : { ...env, [FS_FAULTS_ENV]: JSON.stringify(options.faults) };
+  const run = await startCli(args, { cwd: sb.base, env: runEnv, timeoutMs: TIMEOUT_MS, ...(options.faults === undefined ? {} : { preload: [FS_FAULTS_MODULE_URL] }) }).done;
+  const json = JSON.parse(run.stdout.trim().split("\n").pop() ?? "{}") as Record<string, unknown>;
+  assert.equal(json["exitCode"], run.exitCode, "the JSON line's exitCode is the process's");
+  return { exitCode: run.exitCode, json };
+}
+
+/** The app layer's revert as the GUI's main process asks for it: the consent names the run reverted (DR-25). */
+const appRevert = (app: CodarynApp, sb: Sandbox, runId: string, options: { readonly dryRun?: boolean; readonly consent?: boolean } = {}) =>
+  app.revert({ workspace: sb.workspace, runId, dryRun: options.dryRun === true, unsafeMoveConsent: options.consent === true ? { runId } : null });
+
+/** The run's revert record (revert.json), or null when it has none. */
+function revertRecordOf(sb: Sandbox, runId: string): Record<string, unknown> | null {
+  const file = join(runDirOf(sb.workspace, runId), REVERT_RECORD_FILE_NAME);
+  return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : null;
+}
+
+interface Reverted {
+  readonly sb: Sandbox;
+  /** The run reverted, made the same way on both sides. */
+  readonly runId: string;
+}
+
+/**
+ * The CLI's revert and the app's the same: the output (runId aside) and the revert record, whose consent
+ * names its channel (contracts/changes.ts RevertRecord.unsafeMoveConsent: `cli-flag`, `adapter`), so it is
+ * left out here and each side's value is checked by the case. Returns the CLI's output and both records.
+ */
+function assertSameRevert(
+  cli: Reverted & { readonly done: Awaited<ReturnType<typeof cliRevert>> },
+  app: Reverted & { readonly done: Awaited<ReturnType<typeof appRevert>> },
+  label: string,
+): { readonly output: RevertOutput; readonly records: readonly [Record<string, unknown> | null, Record<string, unknown> | null] } {
+  assert.ok(app.done.ok, `${label}: ${JSON.stringify(app.done)}`);
+  assert.equal(cli.done.json["kind"], "revert", `${label}: ${JSON.stringify(cli.done.json)}`);
+  assert.equal("lockLeft" in app.done, false, `${label}: the app's revert released its lock`);
+  assert.deepEqual(normalized(app.done.output, app.sb, { RUN: app.runId }), normalized(cli.done.json, cli.sb, { RUN: cli.runId }), `${label}: the same RevertOutput`);
+  const records = [revertRecordOf(cli.sb, cli.runId), revertRecordOf(app.sb, app.runId)] as const;
+  const leaveOut = ["unsafeMoveConsent"];
+  assert.deepEqual(normalized(records[1], app.sb, { RUN: app.runId }, leaveOut), normalized(records[0], cli.sb, { RUN: cli.runId }, leaveOut), `${label}: the same revert record (channel aside)`);
+  return { output: cli.done.json as unknown as RevertOutput, records };
+}
+
+/** Sorted `path:action` and `path:reason` lists, with `unsafe` marked. */
+const revertLists = (output: RevertOutput): { readonly reverted: string[]; readonly skipped: string[] } => ({
+  reverted: output.reverted.map((file) => `${file.path}:${file.action}${file.unsafe === true ? ":unsafe" : ""}`).sort(),
+  skipped: output.skipped.map((file) => `${file.path}:${file.reason}`).sort(),
+});
+
+/** The organize plan's moves and discards as a revert lists them, sorted; `suffix` for unsafe or a skip reason. */
+const organizeBack = (suffix: string): string[] =>
+  ORGANIZE_ACTIONS.map((action) => (action.kind === "move" ? `${action.from}:${suffix === "" ? "moved_back" : suffix}` : `${action.path}:${suffix === "" ? "restored_from_discard" : suffix}`)).sort();
+
+/** A plan of moves made and applied by the CLI; `unsafe`: on a volume without hard links (fs-faults.ts), with the consent. */
+async function appliedSideOf(t: TestContext, env: NodeJS.ProcessEnv, unsafe = false) {
+  const side = await movesSideOf(t, env);
+  const applied = expectApplyResult((await cliApply(side, env, unsafe ? { faults: { noLinksUnder: side.sb.workspace }, extra: ["--allow-unsafe-move"] } : {})).run, side.planRunId);
+  assert.equal(applied.status, "done");
+  assert.ok(applied.applied.every((item) => (item.unsafe === true) === unsafe), JSON.stringify(applied.applied));
+  const moved = workspaceBytes(side.sb.workspace);
+  assert.deepEqual(moved, afterActions(side.original, ORGANIZE_ACTIONS), "moved as planned");
+  return { sb: side.sb, runId: applied.runId, original: side.original, moved };
+}
+
+const README_BEFORE = "# Readme\n\nfirst line\n";
+
+/** A document run made by the CLI: it changes README.md and creates summary.md (no secret-named file: R-119 L-1). */
+async function documentRunOf(t: TestContext, env: NodeJS.ProcessEnv): Promise<{ readonly sb: Sandbox; readonly runId: string; readonly original: ReadonlyMap<string, Buffer> }> {
+  const sb = createSandbox(t);
+  writeWorkspaceFile(sb, "README.md", README_BEFORE);
+  const original = workspaceBytes(sb.workspace);
+  const task = writeTask(sb, { id: "u317-document", workflow: "document", verifiers: [{ id: "summary", kind: "file_rules", rules: [{ type: "contains", path: "summary.md", text: "summary" }] }] }, [
+    toolStep("write_file", replaceTextArgs("README.md", README_BEFORE, "first line", "changed line")),
+    toolStep("write_file", createFileArgs("summary.md", "summary\n")),
+    textStep("done"),
+  ]);
+  const ran = expectRunResult(await runTask(task, { cwd: sb.base, env, timeoutMs: TIMEOUT_MS }));
+  assert.deepEqual([ran.status, ran.reason], ["done", "verified"]);
+  return { sb, runId: ran.runId, original };
+}
+
+test("U-317 되돌리기의 미리보기 → 되돌리기 → 다시: 문서 실행과 이동 계획 적용에서 CLI의 revert와 앱의 revert가 같은 결과·되돌리기 기록·파일을 남긴다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const documentRuns = [await documentRunOf(t, env), await documentRunOf(t, env)] as const;
+  const applies = [await appliedSideOf(t, env), await appliedSideOf(t, env)] as const;
+  for (const [label, [cliSide, appSide], expected] of [
+    ["a document run", documentRuns, { preview: { reverted: ["README.md:restored", "summary.md:deleted"], skipped: [] }, again: { reverted: [], skipped: ["README.md:already_reverted", "summary.md:already_reverted"] } }],
+    ["an apply of a plan of moves", applies, { preview: { reverted: organizeBack(""), skipped: [] }, again: { reverted: [], skipped: organizeBack("already_reverted") } }],
+  ] as const) {
+    const app = await appFor(appSide.sb, env);
+    const before = workspaceBytes(cliSide.sb.workspace);
+    const step = async (name: string, options: { readonly dryRun?: boolean }) =>
+      assertSameRevert({ ...cliSide, done: await cliRevert(cliSide.sb, env, cliSide.runId, options) }, { ...appSide, done: await appRevert(app, appSide.sb, appSide.runId, options) }, `${label}, ${name}`);
+
+    // The preview: what the revert would do; nothing changed, no record written.
+    const preview = await step("the preview", { dryRun: true });
+    assert.deepEqual([preview.output.status, preview.output.dryRun, revertLists(preview.output)], ["complete", true, expected.preview], `${label}: the preview`);
+    assert.equal(preview.output.moveSafetyUnchecked, label === "an apply of a plan of moves" ? true : undefined, `${label}: a preview that moves files back says their safety is unchecked`);
+    assert.deepEqual(preview.records, [null, null], `${label}: a preview writes no revert record`);
+    for (const side of [cliSide, appSide]) assert.deepEqual(workspaceBytes(side.sb.workspace), before, `${label}: the preview changed nothing`);
+
+    // The revert: the files as before the run, a complete record with no consent.
+    const done = await step("the revert", {});
+    assert.deepEqual([done.output.status, done.output.exitCode, "dryRun" in done.output, revertLists(done.output)], ["complete", 0, false, expected.preview], `${label}: the revert`);
+    assert.deepEqual(
+      done.records.map((record) => [record?.["status"], record?.["reverted"], record?.["skipped"], record?.["unsafeMoveConsent"], record?.["unsafeMoves"] ?? 0]),
+      [0, 1].map(() => ["complete", expected.preview.reverted.length, 0, null, 0]),
+      `${label}: the revert record`,
+    );
+    for (const side of [cliSide, appSide]) assert.deepEqual(workspaceBytes(side.sb.workspace), side.original, `${label}: the files as before the run`);
+
+    // Again: nothing to do (N-22: already_reverted does not count as partial), the earlier revert told,
+    // and the record written anew for this revert.
+    const again = await step("again", {});
+    assert.deepEqual([again.output.status, again.output.exitCode, again.output.revertedBefore?.status, revertLists(again.output)], ["complete", 0, "complete", expected.again], `${label}: again`);
+    assert.deepEqual(
+      again.records.map((record) => [record?.["status"], record?.["reverted"], record?.["skipped"], record?.["unsafeMoveConsent"]]),
+      [0, 1].map(() => ["complete", 0, expected.again.skipped.length, null]),
+      `${label}: the record of the second revert`,
+    );
+    for (const side of [cliSide, appSide]) assert.deepEqual(workspaceBytes(side.sb.workspace), side.original, `${label}: again changed nothing`);
+  }
+});
+
+test("U-317 되돌리기의 오류 셋(없는 실행, 쥔 잠금, 손상된 실행): CLI의 오류 JSON과 앱 revert의 거부가 같고 아무것도 바꾸지 않으며, 잠금을 잡지 않는 미리보기는 쥔 잠금 아래에서도 같다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const { sb, runId } = await documentRunOf(t, env);
+  const app = await appFor(sb, env);
+  const after = workspaceBytes(sb.workspace);
+  const refusedAlike = async (label: string, run: string, code: string, exitCode: number, options: { readonly dryRun?: boolean } = {}): Promise<Record<string, unknown>> => {
+    const cli = await cliRevert(sb, env, run, options);
+    assert.deepEqual([cli.exitCode, cli.json["code"]], [exitCode, code], `${label}: ${JSON.stringify(cli.json)}`);
+    const refused = await appRevert(app, sb, run, options);
+    assert.ok(!refused.ok, `${label}: the app's revert went on: ${JSON.stringify(refused)}`);
+    assert.deepEqual(errorFacts(refused.error), errorFacts(cli.json), `${label}: the same error back from the app`);
+    assert.deepEqual(workspaceBytes(sb.workspace), after, `${label}: nothing changed`);
+    assert.equal(revertRecordOf(sb, runId), null, `${label}: no revert record`);
+    assert.equal(existsSync(lockPath(sb.workspace)), label.startsWith("a held lock"), `${label}: no lock taken or left`);
+    return cli.json;
+  };
+
+  // 1. A run the workspace has no journal for, revert and preview.
+  for (const dryRun of [false, true]) await refusedAlike(`a missing run${dryRun ? ", the preview" : ""}`, "20200101T000000Z-00000000", "run_not_found", 2, { dryRun });
+
+  // 2. A lock a live process holds: the revert is refused in its own words; the preview takes no lock (N-7).
+  const holder = spawn(NODE, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+  t.after(() => {
+    holder.kill();
+  });
+  const holderRun = "20261114T000000Z-0a0a0a0a";
+  writeFileSync(lockPath(sb.workspace), JSON.stringify({ pid: holder.pid, runId: holderRun, startedAt: "2026-11-14T00:00:00.000Z" }));
+  const locked = await refusedAlike("a held lock", runId, "workspace_locked", 6);
+  assert.equal(locked["message"], `the workspace is locked by run ${holderRun} (pid ${holder.pid}); nothing was changed`);
+  const previewed = assertSameRevert({ sb, runId, done: await cliRevert(sb, env, runId, { dryRun: true }) }, { sb, runId, done: await appRevert(app, sb, runId, { dryRun: true }) }, "a held lock, the preview");
+  assert.deepEqual([previewed.output.status, previewed.output.dryRun, revertLists(previewed.output).reverted], ["complete", true, ["README.md:restored", "summary.md:deleted"]]);
+  rmSync(lockPath(sb.workspace));
+
+  // 3. The run's journal with a broken line: its records cannot be trusted, revert and preview.
+  const journal = join(runDirOf(sb.workspace, runId), "journal.jsonl");
+  const lines = readFileSync(journal, "utf8").split("\n");
+  lines[2] = "{ this line is broken";
+  writeFileSync(journal, lines.join("\n"));
+  for (const dryRun of [false, true]) await refusedAlike(`a damaged run${dryRun ? ", the preview" : ""}`, runId, "invalid_run_record", 2, { dryRun });
+});
+
+test("U-317 위험하게 옮긴 적용의 되돌리기(하드 링크가 없는 볼륨 흉내, DR-25): 동의 없이는 두 길 모두 unsafe_move로 건너뛰고, 이 실행의 동의(CLI --allow-unsafe-move, 앱 unsafeMoveConsent)로 같게 되옮긴다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const sides = [await appliedSideOf(t, env, true), await appliedSideOf(t, env, true)] as const;
+  const [cliSide, appSide] = sides;
+  const app = await appFor(appSide.sb, env);
+  const faults = installFsFaults({ noLinksUnder: appSide.sb.workspace });
+  try {
+    const step = async (name: string, options: { readonly dryRun?: boolean; readonly consent?: boolean }) =>
+      assertSameRevert(
+        { ...cliSide, done: await cliRevert(cliSide.sb, env, cliSide.runId, { ...options, faults: { noLinksUnder: cliSide.sb.workspace } }) },
+        { ...appSide, done: await appRevert(app, appSide.sb, appSide.runId, options) },
+        name,
+      );
+
+    // The preview checks no move's safety (it creates nothing) and says so.
+    const preview = await step("the preview", { dryRun: true });
+    assert.deepEqual([preview.output.status, preview.output.moveSafetyUnchecked, revertLists(preview.output).reverted], ["complete", true, organizeBack("")]);
+
+    // Without a consent: every file that would be moved back is skipped as unsafe_move; nothing moved.
+    const without = await step("without a consent", {});
+    assert.deepEqual([without.output.status, without.output.exitCode, revertLists(without.output)], ["partial", 3, { reverted: [], skipped: organizeBack("unsafe_move") }]);
+    assert.deepEqual(without.records.map((record) => [record?.["status"], record?.["unsafeMoveConsent"], record?.["unsafeMoves"] ?? 0]), [0, 1].map(() => ["partial", null, 0]));
+    for (const side of sides) assert.deepEqual(workspaceBytes(side.sb.workspace), side.moved, "nothing moved back");
+    assert.ok(faults.counts.links > 0, "the app's revert met the fault");
+
+    // With this run's consent: every file moved back unsafely, each record naming its own channel.
+    const consented = await step("with the run's consent", { consent: true });
+    assert.deepEqual([consented.output.status, consented.output.exitCode, consented.output.revertedBefore?.status, revertLists(consented.output)], ["complete", 0, "partial", { reverted: organizeBack("").map((entry) => `${entry}:unsafe`).sort(), skipped: [] }]);
+    assert.deepEqual(consented.records.map((record) => [record?.["status"], record?.["unsafeMoveConsent"], record?.["unsafeMoves"]]), [["complete", "cli-flag", ORGANIZE_ACTIONS.length], ["complete", "adapter", ORGANIZE_ACTIONS.length]], "each consent's own channel");
+    for (const side of sides) assert.deepEqual(workspaceBytes(side.sb.workspace), side.original, "the files as before the apply");
+  } finally {
+    faults.remove();
+  }
 });

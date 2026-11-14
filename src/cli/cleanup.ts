@@ -36,12 +36,15 @@
  *
  * U-34 (UXM-7, AXM-22): every line a person reads is a catalog text (cleanup.*), in their language;
  * the renderer adds only item names, run ids, and the options to type after a next-step text.
+ *
+ * U-319 (the CLI migration's C-9b, PM): the store's summary, plan and cleanup, the status rule and the
+ * failure's code are the app layer's one copy (src/app/cleanup.ts: summaryOf, cleanupPlanOf,
+ * cleanupConfirmed), which the GUI's calls use too; the workspace is the app's resolver's
+ * (resolveWorkspaceRoot, S-5). The CLI keeps its arguments and their limits (the app checks its own
+ * request form apart), the digest prefix matched to the plan it shows, its one output of summary and
+ * plan, its texts on the codes, the renderer and the hiding of keys.
  */
 
-import { realpath as realpathCallback } from "node:fs";
-import { lstat } from "node:fs/promises";
-import path from "node:path";
-import { promisify } from "node:util";
 import {
   CLEANUP_BLOCK_CODES,
   CLEANUP_CONFIRM_FLAGS,
@@ -51,7 +54,6 @@ import {
   CLEANUP_WARNING_CODES,
   MIN_PLAN_DIGEST_PREFIX,
   STATE_DISCARDED_WITHOUT_RECORDS,
-  cleanupStatusOf,
   needsNotRevertedConfirmation,
 } from "../contracts/index.js";
 import type {
@@ -73,7 +75,6 @@ import type {
 } from "../contracts/index.js";
 import { createMessageCatalog } from "../i18n/index.js";
 import { lockReleaseFailedLine } from "./human/index.js";
-import { applyCleanup as storeApplyCleanup, planCleanup as storePlanCleanup, summarizeState as storeSummarizeState } from "../store/index.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { RUN_ID_PATTERN } from "./args.js";
@@ -81,10 +82,9 @@ import type { ArgsFailure } from "./args.js";
 import { argumentsError, cliError } from "../app/prepare.js";
 import { knownKeyValues } from "../app/input/settings.js";
 import type { SettingsEnvironment } from "../app/input/settings.js";
-import { localPathProblem } from "../app/input/task.js";
 import { hideKeys } from "../app/input/text-safety.js";
-
-const realpathNative = promisify(realpathCallback.native);
+import { cleanupConfirmed, cleanupPlanOf, summaryOf } from "../app/cleanup.js";
+import { resolveWorkspaceRoot } from "../app/workspace-root.js";
 
 export const CLEANUP_USAGE =
   "codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] " +
@@ -223,48 +223,34 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
   if (!parsed.ok) return argumentsError(parsed);
   const { selection, confirm, deleteDiscarded, includeNotReverted, json } = parsed.args;
 
-  // S-5: a network or device path is refused before the file system is touched.
-  const problem = localPathProblem(parsed.args.workspace, io.cwd);
-  if (problem !== null) return cliError("invalid_arguments", `the path given by --workspace ${problem}`);
-  let workspaceRoot: string;
-  try {
-    workspaceRoot = await realpathNative(path.resolve(io.cwd, parsed.args.workspace));
-    if (!(await lstat(workspaceRoot)).isDirectory()) throw new Error("not a directory");
-  } catch {
-    return cliError("workspace_not_found", "the workspace is not an existing directory");
-  }
+  // S-5: a network or device path is refused before the file system is touched (U-319: the app's
+  // resolver, with the same texts).
+  const root = await resolveWorkspaceRoot(parsed.args.workspace, io.cwd);
+  if (!root.ok) return root.error;
+  const workspaceRoot = root.value;
 
-  const summarize = io.summarizeState ?? storeSummarizeState;
-  const plan = io.planCleanup ?? storePlanCleanup;
-  const apply = io.applyCleanup ?? storeApplyCleanup;
   // U-268: one reading of the clock for the plan shown and the store's plan under the lock (the
   // request's time selects by age only; the cleanup record's time is the store's own).
   const now = new Date(io.clock.now()).toISOString();
 
   let output: CleanupOutput;
   try {
-    const shown = await plan({ workspaceRoot, selection, now });
+    // U-319: the app's one copy, with the store's functions the tests give (io).
+    const shown = await cleanupPlanOf(workspaceRoot, selection, now, io);
     if (confirm === null) {
-      output = { schemaVersion: 1, kind: "cleanup", status: "preview", exitCode: CLEANUP_EXIT_CODES.preview, summary: await summarize({ workspaceRoot }), plan: shown };
+      output = { schemaVersion: 1, kind: "cleanup", status: "preview", exitCode: CLEANUP_EXIT_CODES.preview, summary: await summaryOf(workspaceRoot, io), plan: shown };
     } else if (!shown.digest.startsWith(confirm)) {
       return cliError("cleanup_plan_changed", PLAN_CHANGED_MESSAGE);
     } else {
-      const outcome = await apply({
-        workspaceRoot,
-        selection,
-        now,
-        confirmation: { digest: shown.digest, discarded: deleteDiscarded, includeNotReverted },
-      });
-      if (!outcome.ok) {
-        if (outcome.code === "workspace_locked") {
+      const done = await cleanupConfirmed(workspaceRoot, selection, now, { digest: shown.digest, discarded: deleteDiscarded, includeNotReverted }, io);
+      if (!done.ok) {
+        if (done.code === "workspace_locked") {
           return cliError("workspace_locked", "another Codaryn process holds the workspace lock; nothing was removed");
         }
         return cliError("cleanup_plan_changed", PLAN_CHANGED_MESSAGE);
       } else {
-        // U-22 (DR-48, AXM-3): the contract's one rule; ok only when something was removed and
-        // nothing was kept for a problem.
-        const status = cleanupStatusOf(outcome);
-        output = { schemaVersion: 1, kind: "cleanup", status, exitCode: CLEANUP_EXIT_CODES[status], outcome: { ...outcome, ok: status === "removed" } };
+        // U-22 (DR-48, AXM-3): the status and ok are the one copy's (the contract's one rule).
+        output = { schemaVersion: 1, kind: "cleanup", status: done.status, exitCode: CLEANUP_EXIT_CODES[done.status], outcome: done.outcome };
       }
     }
   } catch {

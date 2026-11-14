@@ -38,6 +38,15 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-40, 2026-11-14) — 공용 정리 B 채택, 전체 파서 이동 준비
+
+- main/origin/main `67d974b902e4115d12ab3d60d72866de902050b9`: U-328 SHARED-B 채택·푸시. 구현 `b7c237ff`, 실제 채택 A 부모 `400c12ae`, 정확한 최종 판 `3b1bf0300d870c4250b5cce736b0c95add1e5a7d`, 검증·병합 트리 `7cc341efb595524c07971014eeee6bc909598c89` 일치. 다섯 파일 +119/-84다. changes-plan-output의 순수 closure만 앱 원천으로 이동했고 옛 CLI와 human index는 같은 값·형을 재수출한다. CLI runIdOf·renderer·질문 tail, app.ts와 A의 reader/resolver는 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,230 중 4,219 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u328-final-evidence/`. A 채택 후 새 union 판의 결과를 읽고 독립 검증을 열었으며 최종 보고를 읽은 뒤 별도 병합했다.
+- [V47](reviews/2026-11-14-v47-codex-verify-u328.md) 높음 0/중간 0/낮음 0. 실제 A 부모 15소스 동일, 원래 24사례/48관찰·mask 102호출 차이 0, 관련 72시험 통과, 새/legacy/barrel binding·타입 호환과 원문 closure/tail 확인. 독립 타입 명령 최초 두 번의 설정 오류를 보존했고 명시적 Node 타입 설정의 최종 명령은 실제 종료 0이었다. 원래 34봉인과 expected/harness 불변이며 전체 앱 의존 0 선언은 아니다.
+- 다음 U-329 전체 args는 codex-loop 구현/codex-audit 검증으로 직렬 분리한다. 새 app/input/args.ts에 원래 파서 전체를 옮기고 CLI args.ts는 모든 값·형의 같은 binding 재수출, app.ts는 import 원천 한 줄만 바꾼다. 파서 규칙·문구·요청 변환·runs 전용 파서·고정 파일은 바꾸지 않는다. 채택 후 실제 부모의 source gate 확인 전 구현하지 않는다. 잠정 기준은 262호출/399조건·26값/18형·25봉인이다. B의 승인된 plan-view import 변경은 설명해서 대조하며 옛 88개 type 폐쇄 목록을 억지로 유지시키지 않는다.
+- 후속 writer는 codex-check 구현/codex-loop 검증으로 분리한다. 실제 소비자는 app/settings-change.ts이며 app/models.ts는 writer를 쓰지 않는다. 새 config-write·CLI models facade·settings-change import·새 관련 시험만 한 단위로 삼고 app.ts·모델 선택/질문/renderer는 제외한다. LF/BOM은 내부 공유 상수로 두고 CLI에서 재수출하지 않는다. 실제 post-ARGS source gate와 기존 26관찰을 먼저 확인한다.
+- models core의 독립 OLD 기준은 codex-probe가 eddd72df 자체 archive에서 85사례/541조건·같은 OLD 차이 0·205봉인으로 준비했다. 오류 outcome 31·거부 Promise 10은 의도한 관찰이며 실제 원자 쓰기 검증은 별도 writer 기준이다. 실제 post-args/writer 부모 확인 전 잠정이다. 모델/초기화 core와 app direct를 각각 나누고 JSON·report·최종 AST/fresh-dist 그래프를 뒤에 둔다. 기존 API·키 파일·외부 시험 네트워크 금지, 사용자 질문과 기존 한계는 그대로다.
+
 ## 진행 요약 (CP-39, 2026-11-14) — 공용 정리 A 채택, B 통합 검증
 
 - main/origin/main `38d4591e5d4a3cbe4a37b681066d02f9c3ed31bd`: U-327 SHARED-A 채택·푸시. 구현 `35eb7006`, 최종 판 `4c05d17378d71f643c14af7ee8bd83b992401b2c`, 검증·병합 트리 `4385e6f064c6d8ae8da8e1915068f55321be711d` 일치. 네 파일 +25/-9다. app.ts의 기존 앱 환경형 참조와 reader/resolver 원천 import만 정리했고 새 공개 포트는 없다. 컴파일한 app.js 55,889바이트가 OLD와 같고 옛 CLI 함수 binding도 유지했다.

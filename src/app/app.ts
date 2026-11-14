@@ -51,7 +51,7 @@ import { createRevertCommand, revertOnce, revertOutput, startRevert } from "./re
 import type { Assemble } from "./assembly.js";
 import { createRunCancelSource } from "./cancel.js";
 import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
-import { runDoctor } from "../cli/doctor.js";
+import { checkDoctor } from "./doctor.js";
 import type { CommandOutcome } from "./command-outcome.js";
 import { runInit } from "../cli/init.js";
 import { runModels } from "../cli/models.js";
@@ -62,7 +62,7 @@ import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { renderApplyReport, renderReport } from "../cli/report.js";
 import { jsonLine } from "../cli/guard.js";
-import { parseApplyArgs, parseArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "../cli/args.js";
+import { parseApplyArgs, parseArgs, parseDoctorArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "../cli/args.js";
 import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
@@ -734,7 +734,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     if (request.workspace !== null) argv.push("--workspace", request.workspace);
     argv.push("--json");
     try {
-      const outcome = await runDoctor({
+      const io = {
         argv,
         env: copyEnvironment(environment.env, platform),
         cwd: environment.cwd,
@@ -752,7 +752,21 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
         osLocale: environment.osLocale ?? null,
         explainLanguage: explainMessageLanguage,
-      });
+      };
+      const checking = (): Promise<CommandOutcome> => {
+        try {
+          const parsed = parseDoctorArgs(io.argv);
+          if (!parsed.ok) return Promise.resolve(argumentsError(parsed));
+          return checkDoctor(parsed.args, io, (checked): CommandOutcome => {
+            if (!checked.ok) return checked.outcome;
+            const { output, currentKey } = checked;
+            return { text: hideKeys(jsonLine(output), currentKey), exitCode: output.exitCode };
+          });
+        } catch (failure) {
+          return Promise.reject(failure);
+        }
+      };
+      const outcome = await checking();
       return jsonOutcome<DoctorOutput>(outcome, "doctor");
     } catch {
       return { ok: false, error: INTERNAL_ERROR };

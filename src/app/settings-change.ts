@@ -26,7 +26,7 @@
 import { createHash } from "node:crypto";
 import { API_PROVIDERS, API_PROVIDER_NAMES, effectiveMinGroupSize, mergeWorkflowPolicy, mergeWorkflowVerifiers } from "../contracts/index.js";
 import type { ApiProviderName, CodarynConfig, CommandRule, ConfirmableCommandRule, Limits } from "../contracts/index.js";
-import { writeConfigAtomic } from "../cli/models.js";
+import { writeConfigAtomic } from "./config-write.js";
 import { configFieldOf, providerSettingsOf } from "./input/settings.js";
 import { quickProvider } from "./input/task.js";
 import { compilePathSet } from "../policy/path-set.js";

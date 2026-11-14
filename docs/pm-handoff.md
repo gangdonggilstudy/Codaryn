@@ -83,7 +83,7 @@
 - **판 결과에서 실패 0을 읽은 뒤, 다른 호출로 병합한다**(한 명령에 묶지 않는다).
 - 병합: 관리용 main에서 `git merge --no-ff --no-commit <판>` → 병합 트리가 검증한 판의 트리와 같은지(`git write-tree` 대 `<판>^{tree}`) → `check-secrets --staged` → 작성자 `gangdonggil <gangdonggilstudy@gmail.com>`로 한 줄 제목만의 커밋(본문·trailer 없음) → `git push origin main`.
 - 임시 PM의 도우미 스크립트 사본: `D:\project\Codaryn\.codaryn\pm-tools\`(gitignore; `v.sh` 판, `mg.sh` 병합, `wait.sh`·`st.sh`는 Herdr 상태 보기). Git Bash용이다.
-- 임시 worktree를 만들지 않는다(`git worktree add`는 관리자 몫, workflow §10). 독립 검증은 `git archive` 사본을 `.worktrees/codex-verify/.codaryn/<이름>/` 아래에 풀어서 한다.
+- 임시 worktree를 만들지 않는다. 2026-11-14 현재 사용자 지시로 `git worktree add`는 관리자와 스크립트 경유에도 금지이며 기존 worktree를 재사용한다. 독립 검증은 `git archive` 사본을 `.worktrees/codex-verify/.codaryn/<이름>/` 아래에 풀어서 한다.
 
 ### 지켜 온 규칙 (사용자 지시와 그동안의 교훈)
 
@@ -96,7 +96,7 @@
 
 ### Codex 회수 확인 (2026-11-14)
 
-사용자 지시에 따라 codex-review(w3:p3)가 이 문서와 CP-27~25, CLI 이행 계획을 읽고 PM·통합을 인수했다. main `b129ebb8`의 깨끗한 상태를 확인한 뒤 `pm-control.json`의 임시 위임을 `revoked`로 바꿨다. 기존 Claude owner 값은 종료한 위임의 이력으로 남긴다. 회수 뒤 현재 배정과 진행은 [CP-28](pm-status.md)을 따른다. 사용자 지시에 따라 남은 구현도 기존 Codex 세션에 배정한다.
+사용자 지시에 따라 codex-review(w3:p3)가 이 문서와 CP-27~25, CLI 이행 계획을 읽고 PM·통합을 인수했다. main `b129ebb8`의 깨끗한 상태를 확인한 뒤 `pm-control.json`의 임시 위임을 `revoked`로 바꿨다. 기존 Claude owner 값은 종료한 위임의 이력으로 남긴다. 회수 뒤 현재 배정과 진행은 [pm-status의 최신 체크포인트와 최신 배정](pm-status.md)을 따른다. CP-27/28과 이전 세션 표는 인계 당시 이력이다. 사용자 지시에 따라 남은 구현도 기존 Codex 세션에만 배정하며 Codex pane 명령 전달을 재확인하지 않는다. 세션 한도·크레딧 질문에는 답하지 않는다.
 
 ### 인계 직후의 덧붙임 (2026-11-14 09:3x)
 

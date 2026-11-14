@@ -1,6 +1,6 @@
 # 개발 절차
 
-Codex(또는 위임받은 임시 PM)와 여러 Claude 세션이 함께 작업할 때의 배분, 격리, 인수인계, 검토, 통합 절차다.
+Codex 관리자와 배정된 작업자가 함께 작업할 때의 배분, 격리, 인수인계, 검토, 통합 절차다. 2026-11-14 사용자 지시로 현재 PM·통합자는 codex-review이며 기존 Codex 세션만 사용한다. 아래 Claude 위임·배치의 과거 기록은 현재 배정 권한이 아니다. 현재 상태는 pm-status의 최신 체크포인트를 따른다.
 - 2026-11-12에 단계 1a, 1b(모의 API까지), 2, 3의 오프라인 구현이 main에 병합됐다. 그 뒤의 상태(단계 4·5, 2026-11-13 main `3aca6b5`)는 [단계별 계획](roadmap.md)에 있다.
 - 실제 API 호출과 실제 모델의 자기 개발은 사용자의 실제 호출 점검 뒤로 미뤘다.
 - 역할 정의는 [전문 페르소나](personas.md)를 따른다.
@@ -14,7 +14,7 @@ Codex(또는 위임받은 임시 PM)와 여러 Claude 세션이 함께 작업할
 ## 1. 관리 권한과 위임
 
 - [관리] 기본 관리자는 Codex다. 하는 일: 기술 판단, 작업 배정, 검토, main 통합, push.
-- [운영] 사용자가 임시 PM(Herdr pane `w1:p3`)에게 관리 권한을 위임했다.
+- [운영·이력] 사용자가 임시 PM(Herdr pane `w1:p3`)에게 관리 권한을 위임했다. 2026-11-14 회수 뒤 `revoked`는 이 Claude 위임의 종료를 뜻하며 Codex 관리 권한을 중단시키지 않는다. 아래 상태 확인·중단 규칙은 임시 위임을 받은 PM에게 적용된다.
   - 위임 상태와 범위: `docs/pm-control.json`(상태, 위임 id, 담당 pane, 회수 문구)
   - 인계 내용: `docs/pm-handoff.md`
   - PM은 배정·커밋·병합·push 전에 매번 위임 상태를 확인한다.
@@ -31,8 +31,8 @@ Codex(또는 위임받은 임시 PM)와 여러 Claude 세션이 함께 작업할
 
 - [관리] `main`(`D:\project\Codaryn`)은 관리·통합용이다. 작업자는 main을 수정하지 않는다.
 - [관리] 작업자마다 별도 브랜치와 worktree를 쓴다. 같은 브랜치나 디렉터리에서 동시에 수정하지 않는다.
-- 현재 pane, worktree, 브랜치 배치는 `docs/pm-status.md`의 세션 표가 기준이다. 단계 0의 준비용 브랜치(`claude/*-ready`)와 초안 브랜치는 보존하며 이력을 재작성하지 않는다.
-- [운영] 작업자는 작업을 시작할 때 자기 worktree에서 `git merge main`을 한다. 지시가 있으면 기준 브랜치도 병합한다. 병합 커밋에도 trailer를 넣지 않는다.
+- 현재 pane, worktree, 브랜치 배치는 `docs/pm-status.md`의 최신 체크포인트와 최신 배정이 기준이다. 이전 세션 표는 이력이다. 단계 0의 준비용 브랜치(`claude/*-ready`)와 초안 브랜치는 보존하며 이력을 재작성하지 않는다.
+- [운영] 작업자는 관리자가 해당 작업에 main 또는 기준 브랜치 병합을 지시한 경우에만 자기 worktree에서 병합한다. 지정 해시의 판 검증·archive·읽기 전용 배정에서 자동으로 main을 합치지 않는다. 명시된 기준은 재확인 없이 따른다. 병합 커밋에도 trailer를 넣지 않는다.
 - [관리] worktree는 파일 변경을 분리하는 수단이다. 파일 접근이나 네트워크를 막는 보안 샌드박스가 아니다. 격리는 절차로 지킨다.
 
 ## 3. 시작 전 확인
@@ -100,7 +100,7 @@ git -C <지정 worktree> rev-parse --show-toplevel
 - [확정] Git trailer를 붙이지 않는다. `Co-authored-by`, `Signed-off-by`, `Claude-Session`, `Reviewed-by`와 도구가 넣는 귀속 문구가 모두 해당한다. `--signoff`, `--trailer`를 쓰지 않는다.
 - 커밋 후 `git -C <경로> log -1 --format='%an <%ae>%n%B'`로 다시 확인한다.
 - 이미 만든 커밋에 trailer나 잘못된 작성자가 있으면 amend, rebase, 추가 커밋으로 고치지 않는다. 해시를 관리자에게 보고하고 처리를 맡긴다.
-- [확정] 관리자에게 보고했거나 다른 브랜치가 받은 커밋은 고쳐 만들거나 되돌리지 않고 새 커밋으로 바로잡는다. 아직 보고하지 않은 자기 커밋은 고칠 수 있지만 그 사실(옛 해시와 새 해시, 이유)을 보고서에 적는다. 작업 트리를 버리는 `git reset --hard`는 계속 금지다(2026-11-12 사용자 확인, G-2).
+- [확정] 현재 사용자 지시(2026-11-14)는 보고 여부와 관계없이 amend·이력 재작성·force push·--no-verify를 금지한다. 코드·문서 내용 오류는 새 수정 커밋으로 바로잡는다. 기존 커밋의 작성자·trailer 오류는 위 항목대로 해당 해시를 관리자에게 보고하며 추가 커밋으로 고쳐졌다고 처리하지 않는다. 2026-11-12 G-2의 미보고 자기 커밋 재작성 예외는 현재 작업에 적용하지 않는다. 작업 트리를 버리는 `git reset --hard`도 계속 금지다.
 - [운영] **비밀 검사 훅**
   - 공용 `.git/hooks/pre-commit`이 `scripts/check-secrets.mjs --staged`와 같은 사본을 실행한다. 모든 worktree에 적용된다.
   - 문서와 시험에 키 모양 문자열이나 키 대입 형태를 쓰면 거부된다. 가짜 값은 실제 키 형식과 구별되게 쓴다.
@@ -163,7 +163,7 @@ git -C <지정 worktree> rev-parse --show-toplevel
 | stash | 공용(`refs/stash`) | `git stash`를 쓰지 않는다. 임시 보관은 자기 브랜치의 임시 커밋으로 하거나 보고한다 |
 | 공통 Git 설정, hooks, `.git/info/exclude` | 추적되지 않고 모든 worktree에 즉시 적용 | 변경하지 않는다. 비밀 검사 훅은 관리자가 설치·관리한다 |
 
-- `git worktree add/remove/prune`, `git gc`는 관리자만 실행한다. 후보 worktree는 관리자 판단 아래 `scripts/new-candidate.mjs`로 만든다(13절).
+- 현재 사용자 지시(2026-11-14)로 `git worktree add`는 관리자와 스크립트 경유에도 금지다. 기존 작업 worktree를 재사용하고 독립 검증은 지정 archive 사본을 쓴다. 13절의 `scripts/new-candidate.mjs`는 제품 기능 설명이며 현재 작업의 실행 허가가 아니다. `git worktree remove/prune`, `git gc`가 관리자 전용이라는 기존 범위는 그대로다.
 
 ## 11. 작업 상태와 완료 보고
 

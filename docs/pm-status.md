@@ -38,6 +38,26 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-29, 2026-11-14) — U-319 채택, Codex 전용 배분
+
+- 현재 PM은 codex-review(w3:p3). 사용자 재확인대로 `herdr --skill`·설치된 도움말·HERDR_ENV=1·실제 세션 목록을 확인하고 **기존 Codex만** 배정한다. Claude 세션이나 한도·크레딧 화면은 조작하지 않는다. Herdr 서버 접속에 필요한 권한은 사용자 승인으로 확보했다.
+- 회수 문서 `647a3bcf`와 U-319 채택 `e7229c030d10f333e42c64ee72a55017ebac7557`을 origin/main에 푸시했다. U-319 판은 `ac91a17ac0a02f2d68d81d2785303dc6abc3ae05`, 병합 트리는 검증 트리 `afe7e82935a219d1da69c515c805a978f4a4291e`와 일치했다. 작성자·단일 제목·trailer 없음과 staged 비밀 검사를 확인했다.
+- U-319 최종 PM 실측: 오프라인 npm ci, typecheck, build, tracked/staged 비밀 검사 통과. 유닛 4,159 중 4,150 통과/실패 0/skip 8/TODO 1, 통합 675 중 673 통과/실패 0/skip 1/TODO 1, GUI 424/424, Electron smoke 227/227. CLI 비교 95사례 차이 0. 고정 출력 파일 변경 없음. 로그는 `.worktrees/pm-unit/.codaryn/codex-u319-evidence/`에 보존했다.
+- 처음 샌드박스 시험은 프로세스 종료·정리 EPERM으로 완료되지 않았다. 후보판 재실행은 사용자 승인된 실행 권한, LANG·키를 상속하지 않는 환경, 설치 경로 밖의 합성 임시 폴더를 사용했다. 처음 잘못 둔 임시 폴더 때문에 발생한 workspace_is_install_dir 실패는 제품 회귀가 아니며 재실행과 구분한다. 위 통과 수치는 재실행의 실제 종료 코드 0을 읽은 뒤 기록했다. 8 skip은 8.3 이름 4개, 파일 링크 권한 2개, 대소문자 구분 파일시스템 1개, POSIX FIFO 1개다.
+- 기준 b129ebb8의 별도 샌드박스 재측정은 전체 통과가 아니다. [BASE-28](reviews/2026-11-14-cp28-codex-baseline.md): GUI 424 통과, full unit 미종료, 통합 665 통과/3 실패/1 취소/1 skip/1 TODO, smoke ACL 오류. 환경 제한을 후보판의 위 최종 결과와 섞지 않는다.
+- [V-37](reviews/2026-11-14-v37-codex-verify-u319.md): U-319 새 회귀 0/0/0, 관련 59시험, CLI 48쌍·공개 앱 11쌍 일치. **기존 중간 M1** 별도: 상태 폴더 정션 또는 cleanup.jsonl 하드 링크가 바깥 합성 파일 쓰기로 이어짐. 기준에도 재현되므로 이행에 섞지 않았으며 codex-sec에 최소 수정 설계를 배정했다. 미해결 결함이지 해결 완료가 아니다.
+- U-318: [V-38](reviews/2026-11-14-v38-codex-verify-u318.md) 0/0/0. 통합 후보판 `91d98b64d38c1e927e9fb8616b0825d9dc171a39`를 기존 pm-unit에 만들었고 PM 전체 검사와 codex-probe의 V-38b 진행 중. 아직 main 미병합.
+
+| Codex | 현재 작업 / 역할 | 소유와 경계 |
+| --- | --- | --- |
+| codex-loop p8 | U-320, C-7b CLI 개발 | 기존 claude-workspace, `unit/U-320-codex-loop`, 기준 e7229c03. plan-commands.ts/run.ts, 새 표시 연결 시험, 필요한 최소 u280·cli-contract 위치 설명. app.ts·apply-life·계약·고정 출력 제외. push는 PM만 |
+| codex-audit pE | C-7b 독립 검증 기대값 준비 | 기준판 archive에서 승인·동의·취소·잠금·기록 순서의 독립 결과를 고정. 구현 파일 수정 없음. app.ts 후속 세 작업의 준비 보고는 완료 |
+| codex-check pD | C-10 doctor 전환 준비 | 읽기 전용 범위·옮길 코드·불변식·시험 계획. 구현 배정 전까지 수정 없음 |
+| codex-sec pC | 기존 cleanup M1 수정 설계 | 읽기 전용. 공유 ensureStateDir 영향·로그 신원·경쟁 조건·기존 오류 매핑 검토. 구현은 별도 배정 |
+| codex-probe pF | U-318 통합판 V-38b | 자기 archive에서 호스트 IPC·메인 상태·한영 화면 재검증 |
+
+- app.ts 작성권은 아직 누구에게도 넘기지 않았다. C-7b 뒤 report → revert → applyPlan을 직렬로 배정한다. 사용자 결정 목록은 CP-25~27을 유지하며 출력 변경을 이행에 섞지 않는다.
+
 ## 진행 요약 (CP-28, 2026-11-14) — Codex PM 회수
 
 - 사용자 인계 지시에 따라 codex-review(w3:p3)가 개발 관리자·통합 담당을 맡고 `pm-control.json`의 임시 위임을 `revoked`로 바꿨다. 기존 owner 필드는 종료한 위임의 이력이다. Claude PM의 새 배정·병합·푸시는 종료됐다.

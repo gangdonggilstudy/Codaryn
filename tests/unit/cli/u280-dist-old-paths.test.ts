@@ -66,7 +66,7 @@ const KEPT: readonly { readonly file: string; readonly names: readonly string[];
   {
     file: "run.js",
     names: ["MODEL_NOT_FOUND_HINT", "notePrivateData", "defaultConfigNotice", "runPrepared"],
-    step: "C-6a (U-296; names in a file that stays: tests take the first three, plan-commands runPrepared)",
+    step: "C-6a (U-296; names stay for tests/compatibility; C-7b U-320 plan-commands uses createRunDisplay)",
   },
   { file: "failed-calls.js", names: ["createFailedCalls"], step: "C-6a (U-293 moved it; progress.ts takes it)" },
   { file: "result-fields.js", names: ["withoutEmptyStateChanged"], step: "C-6a (U-293 moved it)" },

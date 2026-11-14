@@ -13,68 +13,25 @@
  * - review: writes review.json only, under the lock, for a run that ended as `awaiting_review`.
  */
 
-import path from "node:path";
-import {
-  MIN_PLAN_DIGEST_PREFIX,
-  PLAN_ACTION_KINDS,
-  UNSAFE_MOVE_CONSENT_ARGUMENT,
-  toRunId,
-  toShownWorkspace,
-  workflowSettingsOf,
-} from "../contracts/index.js";
-import type {
-  ApplyJournal,
-  ApplyJournalEntry,
-  ApplyJournalEvent,
-  ApplyPlan,
-  ApplyResult,
-  ApprovalChannel,
-  UnsafeMoveConsent,
-  EngineResult,
-  HumanOutput,
-  LoadPlanOutcome,
-  MaskedPlanAction,
-  MessageCatalog,
-  PlanOutput,
-  PrivacyGateway,
-  ReviewOutput,
-  RunId,
-  ShownWorkspace,
-  StateUncheckedSince,
-} from "../contracts/index.js";
-import { applyPlan as engineApplyPlan } from "../engine/index.js";
-import {
-  acquireLock,
-  createApplyRecorders,
-  stateUncheckedSince as storeStateUncheckedSince,
-  prepareDiscardedRoot,
-  isRunTimestamp,
-  latestRun,
-  listRuns as storeListRuns,
-  releaseLock,
-  writeResult,
-} from "../store/index.js";
-import { createCommandRunner, createPlanExecutor, envValueFreeOfSecrets } from "../tools/index.js";
-import { createIntegrityChecker, createInventoryChecker, createVerifierRunner } from "../verify/index.js";
-import { createWorkspace } from "../workspace/index.js";
+import { MIN_PLAN_DIGEST_PREFIX, PLAN_ACTION_KINDS, toRunId, toShownWorkspace, workflowSettingsOf } from "../contracts/index.js";
+import type { HumanOutput, JournalRecord, MaskedPlanAction, MessageCatalog, PlanOutput, PrivacyGateway, ReviewOutput, RunId, ShownWorkspace } from "../contracts/index.js";
+import type { ApplyApprovalView, ApplyFacts, ApplyLifeHooks } from "../contracts/app.js";
+import { isRunTimestamp, latestRun } from "../store/index.js";
+import { applyLife } from "../app/apply-life.js";
+import type { ApplyLifeAdapter, ApplyLifeEnvironment } from "../app/apply-life.js";
 import { parseApplyArgs, parsePlanArgs, parseReviewArgs } from "./args.js";
 import type { ApplyArgs } from "./args.js";
 import type { CommandOutcome } from "./guard.js";
 import { jsonLine } from "./guard.js";
 import { PROGRESS_PREFIX } from "./progress.js";
-import { runPrepared } from "./run.js";
+import { createRunDisplay } from "./run.js";
 import type { CliEnvironment } from "./run.js";
-import { argumentsError, cliError, withHint } from "../app/prepare.js";
-import type { PreparedTask } from "../app/prepare.js";
-import { createRunId } from "../app/input/run-id.js";
+import { argumentsError } from "../app/prepare.js";
 import { knownKeyValues } from "../app/input/settings.js";
 import type { KnownKeys } from "../app/input/security/index.js";
-import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "../app/input/text-safety.js";
-import { runGuards } from "../app/input/unreadable.js";
-import { runArgsOf, prepareFor, LOAD_MESSAGES, loadAny, changesView, loadShown, planRunMarked, readPlanJournal, field, planSummary } from "../app/plan-view.js";
+import { runArgsOf, prepareFor, recordReview, showPlan } from "../app/plan-view.js";
 import type { PlanViewEnvironment, Prepared } from "../app/plan-view.js";
-import { recordReview, showPlan } from "../app/plan-view.js";
 
 // U-306 (CLI migration C-7a): the plan view's and review's preparation and checks are the app layer's
 // (src/app/plan-view.ts); these names stay for the tests (plan A).
@@ -104,44 +61,16 @@ export interface PlanCommandEnvironment extends PlanViewEnvironment {
  * - No terminal question is asked and `--allow-unsafe-move` is refused: the person's input comes
  *   through the adapter only.
  */
-export interface AdapterApply {
-  readonly unsafeMoveConsent: (UnsafeMoveConsent & { readonly channel: "adapter" }) | null;
-}
+export type AdapterApply = ApplyLifeAdapter;
 
-export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
-  readonly applyPlan?: ApplyPlan;
-  /**
-   * U-29 (R-44 R44-L1): the store's `stateUncheckedSince` (the default); injected by tests. Passed to
-   * the engine as ApplyDeps.planRecordsUnchecked, which asks it once after the U-1 check. U-33: the
-   * request names this apply's run id (`applyRunId`).
-   */
-  readonly stateUncheckedSince?: StateUncheckedSince;
-  /** Set by the app layer only (AdapterApply). Absent: the CLI's channels (`--digest`, terminal). */
-  readonly adapter?: AdapterApply;
-  /**
-   * DR-4: the parent environment of the verifiers' commands: the apply's own copy (the app layer's,
-   * with its variables file loaded), filtered by CHILD_ENV_ALLOWLIST as for a run. Absent: `env`,
-   * which is `process.env` in the CLI's own process (its variables file is loaded there).
-   */
-  readonly parentEnv?: Readonly<Record<string, string | undefined>>;
-  /** DR-4: the platform the copy was made for (Windows looks names up without case). Absent: this process's. */
-  readonly platform?: NodeJS.Platform;
-  /**
-   * Shows the question on stderr and returns the line typed, or null. Present only when stdin and
-   * stderr are terminals; without it an apply needs `--digest`.
-   */
+/** U-320: the app owns the life fields; the CLI adds only its drawing/input fields. */
+export interface ApplyCommandEnvironment extends PlanCommandEnvironment, ApplyLifeEnvironment {
+  /** Present only when stdin and stderr are terminals. */
   readonly ask?: (question: string) => Promise<string | null>;
-  /** One line (with its line feed) to stderr; absent or `--quiet`: nothing is written. */
+  /** One line (with its line feed) to stderr; absent or --quiet: no progress. */
   readonly writeProgress?: (line: string) => void;
-  /** The human renderer, for apply progress lines and the end summary (optional methods, G-A). */
   readonly human?: HumanOutput;
-  readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
-  /**
-   * U-195 (DR-69 B-3, B-4): `codaryn run`'s environment, for a plan of kind "changes", whose apply is a
-   * model run (runPrepared with the approved plan): the provider, the assembly, the progress lines
-   * and the end summary are a run's. Absent: such a plan is not carried out here (internal_error,
-   * nothing sent or written). A plan of mode apply never uses it.
-   */
+  /** The carrying run's CLI drawing fields extend the app's RunLifeEnvironment. */
   readonly run?: CliEnvironment;
 }
 
@@ -319,434 +248,129 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   const args = parsed.args;
   const ready = await prepareFor(io, args.form, args.runId, args.cancelFile, args.quiet);
   if (!ready.ok) return ready.outcome;
-  const { prepared, workspaceRoot, runId: planRunId } = ready.value;
-  const task = prepared.task;
-  const mode = workflowSettingsOf(task).plan;
-  // U-195 (DR-69 B-3, B-4): a task resolved to plan "run" carries out a run plan with a model run.
-  if (mode === "run") return applyChangesPlan(io, args, ready.value);
-  if (mode !== "apply") {
-    // U-228: a task with no plan mode. When the run has a plan, the message names its kind and the
-    // person is told to give the task the plan run used (plan_kind_differs); else as before.
-    const any = await loadAny(io, ready.value);
-    if (any.ok) {
-      const made = any.plan.kind === "changes" ? 'a plan of files to write (plan "run")' : 'a plan of moves and discards (plan "apply")';
-      return withHint(
-        cliError("run_not_plan", `that run made ${made}, but the task given to apply resolves to no plan mode; give the task the plan run used; nothing was moved or run`),
-        "plan_kind_differs",
-      );
-    }
-    return cliError("run_not_plan", 'the task given to apply resolves to no plan mode (neither plan "apply" nor plan "run"); nothing was moved or run');
-  }
-  const loaded = await loadAny(io, ready.value);
-  if (loaded.ok && loaded.plan.kind === "changes") {
-    // U-228: the run has a plan, of the other kind (plan_kind_differs); the message as before.
-    return withHint(
-      cliError(
-        "run_not_plan",
-        'that run made a plan of files to write (plan "run"), but the task given to apply resolves to plan "apply"; give the task the plan run used; nothing was moved',
-      ),
-      "plan_kind_differs",
-    );
-  }
-  const shown = await loadShown(io, ready.value, false, loaded as LoadPlanOutcome);
-  if (!shown.ok) return shown.outcome;
-  if (shown.output.appliedBy !== null) {
-    return cliError("plan_already_applied", "that plan was already applied; nothing was moved. Revert the apply run to undo it");
-  }
-  // U-1 (R-33 R33-L3): a plan run whose records were changed by something else may hold another plan
-  // than the one the person saw. It is refused before anything is asked; a mark that cannot be read
-  // counts (fail closed). The engine checks again under the lock (ApplyDeps.planRecordsChanged).
-  const planRecordsChanged = (): Promise<boolean> => planRunMarked(io, workspaceRoot, planRunId);
-  if (await planRecordsChanged()) {
-    return cliError(
-      "plan_records_changed",
-      "the plan run's records were changed by something other than the run (a records-changed mark), so its plan may not be the one shown; nothing was asked, recorded or moved. Make the plan again with a new codaryn run (codaryn plan only shows a plan, it does not make one)",
-    );
-  }
+  return applyThroughApp(io, args, ready.value);
+}
 
-  // DR-1, DR-21: an adapter's apply (AdapterApply) has the adapter's channel only: no terminal
-  // question, no consent argument, and a consent only from the person's input on its screen.
-  const adapter = io.adapter;
-  const ask = adapter === undefined ? io.ask : undefined;
-  if (adapter !== undefined) {
-    if (args.allowUnsafeMove) {
-      return cliError("invalid_arguments", `an adapter's apply takes the person's consent in its request, not ${UNSAFE_MOVE_CONSENT_ARGUMENT}; nothing was moved`);
-    }
-    const consent = adapter.unsafeMoveConsent;
-    if (consent !== null && (consent.channel !== "adapter" || consent.digest !== shown.digest)) {
-      return cliError("invalid_arguments", "the consent to unsafe moves is not the adapter's consent for this plan's digest; nothing was moved");
-    }
-  }
+/** Compatibility entry point: the caller already prepared this run plan (plan A). */
+export async function applyChangesPlan(io: ApplyCommandEnvironment, args: ApplyArgs, value: Prepared): Promise<CommandOutcome> {
+  return applyThroughApp(io, args, value);
+}
 
-  // U-131 (N5, UXM-15): a plan made with another task than this apply's is told before the
-  // approval question and right after the apply's start line, not only in the end summary (the
-  // engine's notice stays there). The same task id goes to the engine (ApplyDeps.planTaskId).
-  const planTaskId = await planTaskIdOf(io, workspaceRoot, planRunId);
-  const otherTask =
-    planTaskId !== null && planTaskId !== task.id
-      ? catalogLine(io.messages, (catalog) => catalog.format("apply.notice.plan_task_differs"), () => PLAN_TASK_DIFFERS_ENGLISH)
-      : null;
-
-  // Approval (6.4 1): the digest's first characters (cli-flag, or adapter for the app layer), or a
-  // [y/N] question at a terminal.
-  let approval: ApprovalChannel;
-  if (args.digest !== null) {
-    if (!shown.digest.startsWith(args.digest)) {
-      return cliError("plan_not_approved", "--digest does not match the plan's digest; nothing was moved. `codaryn plan` shows it");
-    }
-    approval = adapter === undefined ? "cli-flag" : "adapter";
-  } else if (ask !== undefined) {
-    // R-18 L1: the plan view lists the workspace (the inventory limit, DR-6) only here, and the
-    // apply's cancel stops that listing too. A cancel during it ends with nothing moved.
-    const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
-    let inventoryLimitReached: boolean;
+/** U-320 (C-7b): one app life; the CLI supplies only questions and drawing. */
+async function applyThroughApp(io: ApplyCommandEnvironment, args: ApplyArgs, value: Prepared): Promise<CommandOutcome> {
+  const write = args.quiet ? undefined : io.writeProgress;
+  const ask = io.adapter === undefined ? io.ask : undefined;
+  let facts = null as ApplyFacts | null;
+  let otherTask = null as string | null;
+  let announcedRun = false;
+  // U-309 deliberately turns hook failures into no. The old CLI instead rejected a failed ask
+  // (including its question renderer): remember it and rethrow after the life has cleaned up.
+  let questionFailed = false;
+  let questionError: unknown;
+  const question = async (render: () => string): Promise<boolean> => {
     try {
-      inventoryLimitReached = (await (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }).capture()).limitReached;
-    } catch {
-      if (cancel.signal.aborted) return cliError("plan_not_approved", "the apply was cancelled before the plan was shown; nothing was moved");
-      // Any other failure: the plan is shown without the limit line; the engine's own listing checks it.
-      inventoryLimitReached = false;
-    } finally {
-      cancel.dispose();
+      const answer = (await ask!(render()))?.trim().toLowerCase() ?? "";
+      return YES.has(answer);
+    } catch (error) {
+      questionFailed = true;
+      questionError = error;
+      return false;
     }
-    const currentKey = knownKeyValues(io.env);
-    // U-14 (AXM-15): the approval question shows the agent's description too (not part of the digest).
-    const summary = await planSummary(io, workspaceRoot, planRunId, shown.digest, shown.privacy);
-    const question = [
-      renderPlan({ ...shown.output, inventoryLimitReached, ...(summary === null ? {} : { summary }) }, currentKey, io.messages).trimEnd(),
-      ...(otherTask === null ? [] : [otherTask]),
-      applyQuestion(io.messages),
-    ].join("\n");
-    const answer = (await ask(question))?.trim().toLowerCase() ?? "";
-    if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
-    approval = "cli-tty";
-  } else {
-    return cliError("plan_not_approved", "an apply needs --digest with the plan's digest (codaryn plan shows it); nothing was moved");
-  }
-
-  /** One apply run: lock, engine, result.json, end summary. `unsafeMoves` is from its preflight record. */
-  const applyOnce = async (consent: UnsafeMoveConsent | null): Promise<{ ok: true; result: ApplyResult; unsafeMoves: number } | { ok: false; outcome: CommandOutcome }> => {
-    const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
-    const lock = await acquireLock({ workspaceRoot, runId, clock: io.clock });
-    if (!lock.ok) return { ok: false, outcome: cliError("workspace_locked", "another run or revert holds the workspace; nothing was moved") };
-    const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
-    let result: ApplyResult;
-    let unsafeMoves = 0;
-    /** U-220: the apply's lock could not be released at its end (told in its summary). */
-    let lockLeft = false;
-    try {
-      const workspace = await createWorkspace({ root: workspaceRoot });
-      const privacy = shown.privacy;
-      // T-1 as in a run; DR-4: the commands' parent environment is the apply's copy, never process.env
-      // behind the caller's back.
-      const commandRunner = createCommandRunner({
-        allowEnvValue: envValueFreeOfSecrets(privacy),
-        workspaceRoot,
-        parentEnv: (io.parentEnv ?? io.env) as NodeJS.ProcessEnv,
-        ...(io.platform === undefined ? {} : { platform: io.platform }),
-      });
-      // U-210 (U-203, R-3; R-108 H-1): the apply's task's unreadable paths, for its gate, its checks and
-      // its integrity checks (watched as the protected ones are), from one place (runGuards).
-      const guards = runGuards(task, workspace);
-      const protectedPaths = guards.protectedPaths;
-      const integrity =
-        protectedPaths.length > 0 || prepared.integrityPaths.length > 0
-          ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
-          : undefined;
-      // DR-38: the apply's journal and the plan run's applied mark come with the state guard that
-      // knows them (the store's createApplyRecorders, the contract's CreateApplyRecorders), passed as
-      // ApplyDeps.stateGuard. `runId` is this apply run; `planRunId` the plan run it carries out,
-      // whose directory gets the applied mark. The journal notes each discarded file as its own.
-      const recorders = createApplyRecorders({ workspaceRoot, runId, clock: io.clock, planRunId });
-      const journal = observeApply(
-        recorders.journal,
-        privacy,
-        args.quiet ? undefined : io.writeProgress,
-        io.human,
-        (event) => {
-          if (event.type === "plan_checked") unsafeMoves = event.unsafeMoves?.length ?? 0;
-        },
-        (event) => (event.type === "apply_started" ? otherTask : null),
-      );
-      result = await (io.applyPlan ?? engineApplyPlan)({
-        plan: shown.plan,
-        planRunId,
-        digest: shown.digest,
-        approval,
-        // DR-21: absent consent is none; the engine counts it only for this plan's digest.
-        unsafeMoveConsent: consent,
-        runId,
-        taskId: task.id,
-        maxDurationMs: task.limits.maxDurationMs,
-        verifierConfigs: task.verifiers,
-        executor: createPlanExecutor({ workspace, workspaceRoot, runId }),
-        // U-182 (DR-69 B-4): the apply's task's writable lists judge each action's writes, as the
-        // plan run's gate judged them when the plan was proposed (DR-5: the apply's own policy).
-        // U-210 (bundle A, A-6): and its unreadable paths, under which no action moves or discards a file.
-        policy: guards.gate(),
-        planActions: task.policy.planActions ?? [],
-        // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
-        discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
-        privacy,
-        // U-210 (R-6; U-223): the apply's checks keep the numbers of unreadable sources out, as a run's do.
-        verifiers: createVerifierRunner({ workspace, commandRunner, ...guards.verifiers }),
-        // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
-        inventory: (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }),
-        journal,
-        clock: io.clock,
-        signal: cancel.signal,
-        ...(integrity === undefined ? {} : { integrity }),
-        // At the apply clock's time (the store's markApplied uses the clock it was given).
-        markApplied: () => recorders.markApplied(),
-        stateGuard: recorders.stateGuard,
-        // U-1: the same check under the lock, right after apply_started (a mark written since).
-        planRecordsChanged,
-        // U-16 (UXM-15): the task the plan run ran with; the engine tells when it is not this one.
-        ...(planTaskId === null ? {} : { planTaskId }),
-        // U-29: whether a run since the plan could not check the state directory (told, not refused;
-        // the engine counts a rejection as unchecked). U-33 (R-56 Q-3): `applyRunId` is this apply,
-        // which the store leaves out (its journal has no run_finished yet).
-        planRecordsUnchecked: () => (io.stateUncheckedSince ?? storeStateUncheckedSince)({ workspaceRoot, planRunId, applyRunId: runId }),
-      });
-      // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
-      // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
-      result = withoutEmptyStateChanged(result);
-      await writeResult(workspaceRoot, result as unknown as EngineResult);
-    } catch {
-      return {
-        ok: false,
-        outcome: cliError("internal_error", "the apply stopped because of an internal error; `codaryn report` and `codaryn revert` work on what was done"),
-      };
-    } finally {
-      // U-220 (U-176, U-201): a release that throws after its retries, or answers false, leaves the
-      // lock; the apply's result and exit code stay and its summary says so, never internal_error.
-      lockLeft = !(await releaseLock({ workspaceRoot, runId }).then((value) => value === true, () => false));
-      cancel.dispose();
+  };
+  const announceRun = (): void => {
+    if (announcedRun) return;
+    announcedRun = true;
+    if (otherTask !== null && write !== undefined) {
+      try { write(cleanText(PROGRESS_PREFIX + otherTask) + "\n"); } catch { /* Progress is best effort. */ }
     }
-    if (!args.quiet && io.writeProgress !== undefined && io.human?.applySummary !== undefined) {
+  };
+  const runIo = io.run;
+  const display = runIo === undefined || workflowSettingsOf(value.prepared.task).plan !== "run"
+    ? undefined
+    : createRunDisplay(runIo, runArgsOf(args.form, args.cancelFile, args.quiet), value.notes, value.prepared.defaultDisplay);
+  let runPrivacy = null as PrivacyGateway | null;
+  const hooks: ApplyLifeHooks = {
+    ready(ready) {
+      facts = ready;
+      otherTask = ready.otherTask
+        ? catalogLine(io.messages, (catalog) => catalog.format("apply.notice.plan_task_differs"), () => PLAN_TASK_DIFFERS_ENGLISH)
+        : null;
+    },
+    ...(ask === undefined ? {} : {
+      approve: (view: ApplyApprovalView) => question(() => {
+        const key = knownKeyValues(io.env);
+        return view.kind === "moves"
+          ? [renderPlan(view.plan, key, io.messages).trimEnd(), ...(otherTask === null ? [] : [otherTask]), applyQuestion(io.messages)].join("\n")
+          : [renderChangesPlan(view.plan, key, io.messages).trimEnd(), ...(otherTask === null ? [] : [otherTask]), changesApprovalText(view.plan, { commandsAllowed: view.commandsAllowed }, io.messages).trimEnd(), changesApplyQuestion(io.messages)].join("\n");
+      }),
+      consentToUnsafeMoves: (count: number) => question(() => unsafeMoveQuestion(count, io.messages)),
+    }),
+    observer: {
+      onStoredRecord(record) {
+        if (write === undefined || facts === null) return;
+        const lines: string[] = [];
+        try {
+          const line = io.human?.applyProgressLine?.(record) ?? null;
+          if (line !== null) lines.push(line);
+          if (record.type === "apply_started" && otherTask !== null) lines.push(otherTask);
+        } catch { /* Progress is best effort. */ }
+        for (const line of lines) {
+          try {
+            const masked = facts.mask(PROGRESS_PREFIX + line);
+            if (masked !== null) write(cleanText(masked) + "\n");
+          } catch { /* Progress is best effort. */ }
+        }
+      },
+      ...(display === undefined ? {} : {
+        onStoredRunRecord: (record: JournalRecord) => display.observer.onStoredRecord?.(record),
+        ...(display.observer.confirm === undefined ? {} : { confirm: display.observer.confirm }),
+      }),
+    },
+    applyEnded({ result, lockLeft }) {
+      if (write === undefined || io.human?.applySummary === undefined || facts === null) return;
       try {
-        const form = args.form.input.kind === "task" ? "task" : "given";
-        // DR-51 (U-38): the typed --workspace of the quick form, after the apply's own masking.
         const input = args.form.input;
         const typed = input.kind === "quick" ? input.workspace : null;
-        const typedMasked = typed === null ? null : shown.privacy.mask(typed);
-        const workspaceShown = typed === null || typedMasked === null ? null : toShownWorkspace(typed, typedMasked.ok ? typedMasked.text : null);
-        const summary = io.human.applySummary(result, { workspaceForm: form, ...(workspaceShown === null ? {} : { workspaceShown }), ...(lockLeft ? { lockLeft: true } : {}) });
-        const masked = shown.privacy.mask(summary);
-        if (masked.ok) io.writeProgress(cleanText(masked.text, true));
-      } catch {
-        // Human output is best effort.
-      }
-    }
-    return { ok: true, result, unsafeMoves };
-  };
-
-  // DR-21: the person's consent to unsafe moves holds for one apply and comes only from the person:
-  // the CLI's own argument, or, at a terminal, the answer after an apply stopped as
-  // consent_required (nothing was moved, so the plan is not applied yet and a second apply run
-  // makes the moves), or the adapter's request (AdapterApply). No task, config, profile, plan or
-  // model gives it.
-  const givenConsent: UnsafeMoveConsent | null =
-    adapter !== undefined ? adapter.unsafeMoveConsent : args.allowUnsafeMove ? { channel: "cli-flag", digest: shown.digest } : null;
-  const first = await applyOnce(givenConsent);
-  if (!first.ok) return first.outcome;
-  let final = first;
-  if (first.result.reason === "consent_required" && givenConsent === null && ask !== undefined) {
-    const answer = (await ask(unsafeMoveQuestion(first.unsafeMoves, io.messages)))?.trim().toLowerCase() ?? "";
-    if (YES.has(answer)) {
-      const second = await applyOnce({ channel: "cli-tty", digest: shown.digest });
-      if (!second.ok) return second.outcome;
-      final = second;
-    }
-  }
-  return { output: final.result, exitCode: final.result.exitCode };
-}
-
-/**
- * U-195 (PM decision 2): the goal a run plan's run is given: the plan run's own goal, the person's
- * words, as its journal recorded them (the first model request's user message, masked by the plan
- * run), in every task form. Never the model's summary (the engine tells that as the approved plan).
- * null when it cannot be read: the journal is gone or not this run's, or that message is not there.
- */
-async function planRunGoal(io: PlanCommandEnvironment, workspaceRoot: string, planRunId: string): Promise<string | null> {
-  try {
-    const text = await (io.readJournal ?? readPlanJournal)(workspaceRoot, planRunId);
-    for (const line of text.split("\n")) {
-      if (line.length === 0) continue;
-      const record: unknown = JSON.parse(line);
-      if (field(record, "runId") !== planRunId) return null;
-      if (field(record, "type") !== "model_request") continue;
-      if (field(record, "turn") !== 1) return null;
-      const messages = field(record, "newMessages");
-      const first: unknown = Array.isArray(messages) ? messages[0] : undefined;
-      const content = field(first, "content");
-      return field(first, "role") === "user" && typeof content === "string" && content.trim().length > 0 ? content : null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * U-195 (DR-69 B-3, B-4, B-7): `codaryn apply` of a plan of kind "changes" (the task resolves to
- * `plan: "run"`). The approval is a plan of mode apply's (DR-1: --digest, the terminal question with
- * the plan's view, the adapter's), then a model run carries the plan out: runPrepared with the
- * approved plan, whose engine (runApprovedPlan) checks every planned file, claims the plan once
- * (applied.json) and writes planned files only. The output is the run's EngineResult (planRunId,
- * planDigest). Refused before anything is asked, sent or written: a plan of the other kind
- * (run_not_plan), a plan already carried out (plan_already_applied), a records-changed mark
- * (plan_records_changed), an unsafe-move consent (it is for moves: invalid_arguments), the view's
- * checks (plan_secrets_differ), a plan run whose goal cannot be read (invalid_run_record: the run is
- * given the plan run's goal, planRunGoal, in every task form).
- * Exported for tests while U-177 has the parsers refuse plan "run", so that no task resolves to it
- * yet and runApply cannot reach this path from the command line (the refusal goes with U-187's fix).
- */
-export async function applyChangesPlan(io: ApplyCommandEnvironment, args: ApplyArgs, value: Prepared): Promise<CommandOutcome> {
-  const { workspaceRoot, runId: planRunId } = value;
-  const loaded = await loadAny(io, value);
-  if (!loaded.ok) return cliError(loaded.code, LOAD_MESSAGES[loaded.code]);
-  if (loaded.plan.kind !== "changes") {
-    // U-228: the run has a plan, of the other kind (plan_kind_differs); the message as before.
-    return withHint(
-      cliError(
-        "run_not_plan",
-        'that run made a plan of moves and discards (plan "apply"), but the task given to apply resolves to plan "run"; give the task the plan run used; nothing was run',
-      ),
-      "plan_kind_differs",
-    );
-  }
-  const plan = loaded.plan;
-  if (loaded.applied !== null) {
-    return cliError("plan_already_applied", "that plan was already carried out; nothing was run. Revert the run that carried it out to undo it");
-  }
-  if (await planRunMarked(io, workspaceRoot, planRunId)) {
-    return cliError(
-      "plan_records_changed",
-      "the plan run's records were changed by something other than the run (a records-changed mark), so its plan may not be the one shown; nothing was asked, sent or written. Make the plan again with a new codaryn run",
-    );
-  }
-  const adapter = io.adapter;
-  if (args.allowUnsafeMove || (adapter !== undefined && adapter.unsafeMoveConsent !== null)) {
-    return cliError("invalid_arguments", `the consent to unsafe moves (${UNSAFE_MOVE_CONSENT_ARGUMENT}) is for a plan of moves; a run plan moves no file; nothing was run`);
-  }
-  const view = await changesView(io, value, { plan, digest: loaded.digest, applied: loaded.applied });
-  if (!view.ok) return view.outcome;
-  const goal = await planRunGoal(io, workspaceRoot, planRunId);
-  if (goal === null) {
-    return cliError("invalid_run_record", "the plan run's records do not hold the goal it was given, so its plan is not carried out; nothing was asked, sent or written");
-  }
-  const runIo = io.run;
-  if (runIo === undefined) return cliError("internal_error", "this build cannot carry out a run plan here; nothing was sent or written");
-
-  // U-131 (N5) as for a plan of mode apply: a plan made with another task is told before the question.
-  const planTaskId = await planTaskIdOf(io, workspaceRoot, planRunId);
-  const otherTask =
-    planTaskId !== null && planTaskId !== value.prepared.task.id
-      ? catalogLine(io.messages, (catalog) => catalog.format("apply.notice.plan_task_differs"), () => PLAN_TASK_DIFFERS_ENGLISH)
-      : null;
-  const ask = adapter === undefined ? io.ask : undefined;
-  let approval: ApprovalChannel;
-  if (args.digest !== null) {
-    if (!loaded.digest.startsWith(args.digest)) return cliError("plan_not_approved", "--digest does not match the plan's digest; nothing was run. `codaryn plan` shows it");
-    approval = adapter === undefined ? "cli-flag" : "adapter";
-  } else if (ask !== undefined) {
-    // U-228 (U-198's texts): after the plan's view, what approving starts (a run whose file tools write
-    // only these files; the summary's note; the commands' note when commands are allowed), then the
-    // question of a run plan, not the moves plan's apply.question.
-    const question = [
-      renderChangesPlan(view.output, knownKeyValues(io.env), io.messages).trimEnd(),
-      ...(otherTask === null ? [] : [otherTask]),
-      changesApprovalText(view.output, { commandsAllowed: value.prepared.task.policy.commands.length > 0 }, io.messages).trimEnd(),
-      changesApplyQuestion(io.messages),
-    ].join("\n");
-    const answer = (await ask(question))?.trim().toLowerCase() ?? "";
-    if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was run");
-    approval = "cli-tty";
-  } else {
-    return cliError("plan_not_approved", "an apply needs --digest with the plan's digest (codaryn plan shows it); nothing was run");
-  }
-  if (otherTask !== null && !args.quiet && io.writeProgress !== undefined) {
-    try {
-      io.writeProgress(`${cleanText(`${PROGRESS_PREFIX}${otherTask}`)}\n`);
-    } catch {
-      // Progress is best effort.
-    }
-  }
-  const prepared: PreparedTask = { ...value.prepared, task: { ...value.prepared.task, goal } };
-  const outcome = await runPrepared(runIo, runArgsOf(args.form, args.cancelFile, args.quiet), value.notes, prepared, {
-    planRunId,
-    digest: loaded.digest,
-    approval,
-    plan,
-  });
-  return { output: outcome.output, exitCode: outcome.exitCode };
-}
-
-/**
- * Writes an apply record's progress line after storing it (G-A applyProgressLine, best effort) and
- * tells `observe` of every stored shown record. Start records (`plan_item_started`) are stored only.
- */
-function observeApply(
-  journal: ApplyJournal,
-  privacy: PrivacyGateway,
-  write: ((line: string) => void) | undefined,
-  human: HumanOutput | undefined,
-  observe: (event: ApplyJournalEvent) => void,
-  /** U-131 (N5): one more progress line after a record's own (null: none). */
-  after: (event: ApplyJournalEvent) => string | null = () => null,
-): ApplyJournal {
-  const render = write === undefined || human?.applyProgressLine === undefined ? undefined : human.applyProgressLine.bind(human);
-  return {
-    async append(event: ApplyJournalEntry) {
-      const stored = await journal.append(event);
-      // R-9 I-4: a start record is stored for the revert only. It is not a shown record
-      // (ApplyJournalEvent): neither the observer nor the renderer gets it.
-      if (event.type === "plan_item_started") return stored;
-      observe(event);
-      if (write === undefined) return stored;
-      const lines: string[] = [];
-      try {
-        const line = render === undefined ? null : render(event);
-        if (line !== null) lines.push(line);
-        const more = after(event);
-        if (more !== null) lines.push(more);
-      } catch {
-        // Progress is best effort.
-      }
-      for (const line of lines) {
-        try {
-          const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
-          if (masked.ok) write(`${cleanText(masked.text)}\n`);
-        } catch {
-          // Progress is best effort.
-        }
-      }
-      return stored;
+        const workspaceShown = typed === null ? null : toShownWorkspace(typed, facts.mask(typed));
+        const summary = io.human.applySummary(result, {
+          workspaceForm: input.kind === "task" ? "task" : "given",
+          ...(workspaceShown === null ? {} : { workspaceShown }),
+          ...(lockLeft ? { lockLeft: true } : {}),
+        });
+        const masked = facts.mask(summary);
+        if (masked !== null) write(cleanText(masked, true));
+      } catch { /* Human output is best effort. */ }
     },
-    close: () => journal.close(),
+    runReady() {
+      announceRun();
+      if (runPrivacy !== null) display?.ready(runPrivacy);
+    },
   };
+  const end = await applyLife({
+    ...io,
+    ...(runIo === undefined ? {} : { run: {
+      ...runIo,
+      // Capture the same gateway for drawing only. applyLife alone wraps this journal and runs
+      // the engine; there is no second runPrepared/runLife call and no second CLI event wrapper.
+      assemble: async (input) => {
+        const assembled = await runIo.assemble(input);
+        if (assembled.ok) runPrivacy = assembled.deps.privacy;
+        return assembled;
+      },
+    } }),
+  }, args, value, hooks);
+  if (questionFailed) throw questionError;
+  if (end.kind === "error") return end.outcome;
+  if (end.kind === "applied") return { output: end.result, exitCode: end.result.exitCode };
+  // carried means approval succeeded, even if runLife refused before runReady (e.g. a lock).
+  // The old CLI wrote this notice before trying the run; failed approval must not write it.
+  announceRun();
+  return display!.finish(end.end);
 }
 
 /** U-131 (N5): the English of apply.notice.plan_task_differs, when no catalog is given. */
 const PLAN_TASK_DIFFERS_ENGLISH =
   "The plan was made with another task than the one given to this apply (for example a task file, and the quick form now): the checks and rules used are this apply's, not those of the plan's task. The apply was not stopped for this. An apply with the same task form as the plan run uses that task's checks and rules.";
-
-/**
- * U-16 (UXM-15, ApplyDeps.planTaskId): the task id the plan run ran with, as its run list entry
- * gives it (its run_started.taskId). null when it cannot be read: nothing is compared then.
- */
-async function planTaskIdOf(io: PlanCommandEnvironment, workspaceRoot: string, planRunId: string): Promise<string | null> {
-  try {
-    const listing = await (io.listRuns ?? storeListRuns)({ workspaceRoot });
-    for (const entry of listing.runs) {
-      if (entry.state === "checked" && entry.runId === planRunId) return typeof entry.taskId === "string" ? entry.taskId : null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * U-36: review's text without --json: the recorded line (review.recorded, or review.recorded_replaced

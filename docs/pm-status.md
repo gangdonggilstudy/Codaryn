@@ -38,6 +38,17 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-30, 2026-11-14) — U-318 채택, C-7b 호환성 재확인
+
+- main/origin/main `406d3860cd4f3dd0a2b053ed03ae0ee51cf76246`: U-318 GUI 경로 가림 수정까지 병합·푸시했다. 최초 시험 판 `91d98b64`, 최종 판 `9b589b3f`는 이후 PM 보고서 문서만 달랐다. 제품 차이 없음과 최종 병합 트리 `3043cfb9f46d6fb9d1db1b5ef345156694a580fe` 일치를 확인했다.
+- U-318 실측: 유닛 4,150 통과(전체 4,159/skip 8/TODO 1), 통합 673 통과(675/skip 1/TODO 1), GUI 426/426, smoke 227/227, 모두 실패 0. [V-38b](reviews/2026-11-14-v38b-codex-verify-u318.md) 새 회귀 0/0/0, 후보 4시험 통과, 다른 사유의 화면 24쌍 동일. 기록은 `.worktrees/pm-unit/.codaryn/codex-u318-evidence/`에 보존했다.
+- U-320 C-7b: codex-loop 구현 `374103ffde87aa1f716ae445bd270cb917f4d82b`(PM이 지정 5파일을 검토·검사 후 작업 브랜치에서 커밋). 후보판 `372ad5355f414e889088aca40db00d64a8e8f50b`. typecheck/build/비밀 검사 통과, 유닛 4,155/4,164(실패 0/skip 8/TODO 1), 통합 673/675(실패 0/skip 1/TODO 1), GUI 426, smoke 227, CLI 95사례 차이 0. **아직 미채택**이다.
+- C-7b 독립 기준: codex-audit가 전환 전 e7229c03에서 고정한 26사례/84 CLI 호출과 기대값 해시를 그대로 후보에 적용해 차이 0. 일반 run 12사례/72호출도 차이 0. 그러나 시험용 export `applyChangesPlan`에 moves 계획과 plan:apply task를 직접 주면 기존에는 run_not_plan/plan_kind_differs로 거부했는데 후보는 이동·폐기를 수행했다. 제품 호출자는 없고 문서의 task:run 전제 밖이지만, PM은 이행에서 해당 helper의 쓰기 허용 범위를 넓히지 않도록 기존 거부 복구를 지시했다. codex-loop가 같은 파일 소유권으로 수정하고 V-39 재확인을 받는다. 현재 판을 통과로 병합하지 않는다.
+- V-40(codex-sec)는 동의·잠금·취소·가림의 별도 보안 검증 중이다. 기준에도 있는 cancelSignal 생성 예외 뒤 잠금 잔류 후보를 분리해 조사한다. C-7b에서 기존 결함을 몰래 고치지 않는다.
+- 별도 U-321: codex-check가 기존 claude-store를 재사용, `unit/U-321-codex-check`, 기준 406d3860에서 cleanup M1 수정 중이다. 소유 파일은 `src/store/cleanup.ts`, 새 `tests/unit/store/u321-cleanup-metadata.test.ts`, 새 `tests/integration/u321-cleanup-metadata.test.ts` 세 개. 공통 ensureStateDir/lock/계약/CLI/고정 출력 수정 금지. 정적 상태 정션과 로그 하드 링크를 첫 외부 쓰기·삭제 전에 거부하며 잔여 경쟁 조건을 명시한다. 별도 보안 단위로 검토하고 이행 후보에 섞지 않는다. codex-sec이 작성자와 분리해 재검증한다.
+- 사용자 상시 지시 추가 확인: **기존 Codex pane 명령 전달은 재확인 없이 바로 한다.** `herdr --skill`에 따른 명령과 실제 agent 이름을 쓰고, `herdr agent prompt` 허용 규칙을 사용한다. Claude는 배정하지 않으며 사용 한도·크레딧 선택은 사용자 몫이다.
+- C-10 준비(codex-check)와 app.ts 세 후속 준비(codex-audit)는 보고서로 완료됐다. 구현 순서는 C-7b 채택 → app.ts report/revert/applyPlan 직렬 전환 → C-10/C-11이다. app.ts는 아직 작성자 미배정이다.
+
 ## 진행 요약 (CP-29, 2026-11-14) — U-319 채택, Codex 전용 배분
 
 - 현재 PM은 codex-review(w3:p3). 사용자 재확인대로 `herdr --skill`·설치된 도움말·HERDR_ENV=1·실제 세션 목록을 확인하고 **기존 Codex만** 배정한다. Claude 세션이나 한도·크레딧 화면은 조작하지 않는다. Herdr 서버 접속에 필요한 권한은 사용자 승인으로 확보했다.

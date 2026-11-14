@@ -1684,7 +1684,8 @@ export interface RevertView {
   readonly status: "complete" | "partial";
   readonly dryRun: boolean;
   readonly reverted: readonly { readonly path: string; readonly action: (typeof REVERT_ACTIONS)[number]; readonly from: string | null; readonly unsafe: boolean }[];
-  readonly skipped: readonly { readonly path: string; readonly reason: string }[];
+  /** U-318 (R-119 L-1): `path` null for a missing_record skip, whose path comes unmasked (the window shows "?"). */
+  readonly skipped: readonly { readonly path: string | null; readonly reason: string }[];
   readonly moveSafetyUnchecked: boolean;
   readonly revertedBefore: { readonly at: string; readonly status: "complete" | "partial" } | null;
   /** U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checks every file. Absent: none. */
@@ -1724,8 +1725,11 @@ export function toRevertView(value: unknown): { readonly ok: true; readonly view
   }
   const skips: RevertView["skipped"][number][] = [];
   for (const file of skipped) {
-    if (!isObj(file) || !shortText(file["path"]) || typeof file["reason"] !== "string" || !WORD.test(file["reason"])) return fail;
-    skips.push({ path: file["path"], reason: file["reason"] });
+    if (!isObj(file) || typeof file["reason"] !== "string" || !WORD.test(file["reason"])) return fail;
+    // U-318 (R-119 L-1): no missing_record path is kept, even one that came; every other skip has its path.
+    const hidden = file["reason"] === "missing_record";
+    if (hidden ? !(file["path"] === null || shortText(file["path"])) : !shortText(file["path"])) return fail;
+    skips.push({ path: hidden ? null : (file["path"] as string), reason: file["reason"] });
   }
   const recordsChanged = value["recordsChanged"] ?? false;
   if (typeof recordsChanged !== "boolean") return fail;

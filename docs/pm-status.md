@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-34, 2026-11-14) — APP-REVERT 채택, APP-APPLY 기준 확인
+
+- main/origin/main `d68ecab9406c61bb0c50d5bd60d039a3143b6e8b`: U-322 APP-REVERT 채택·푸시. 구현 `8cfa7ee4`, 최종 판 `ca00809ca4e474939857cc8a85f954e08de23c25`, 최종 병합 트리 `7c9d0d3f23590afdf943dbc4d225aff79d7b91c4` 일치. app.ts의 revert/import와 새 시험만 바뀌었고 공용 helper·store·CLI·계약·고정 출력은 그대로다.
+- 최종 실측: typecheck/build·GUI build/lock 검사·tracked/staged 비밀 검사 통과. 유닛 4,190 중 4,179 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 전체 판 결과를 읽은 뒤 V-43에 후보를 넘겼고, 최종 독립 결과·트리·staged 검사를 다시 확인한 뒤 병합했다. 증거는 `.worktrees/pm-unit/.codaryn/codex-u322-final-evidence/`에 있다.
+- [V-43](reviews/2026-11-14-v43-codex-verify-u322.md) 높음 0/중간 0/낮음 0. 공개 revert 54사례·접근 사건 1,298개·파일/기록/잠금·오류 키 순서 일치, 관련 30시험 통과(새 7 포함), 봉인 71파일 불변. 최종 비교는 PID와 복원 임시 이름만 좁게 대응했다. 동의 선검사·adapter 바인딩·단일 원복·loadPlan 부재·dryRun·lockLeft sibling을 보존했다.
+- 첫 독립 재생의 Windows 경로 치환 오류로 검증자 자신의 이전 비봉인 실행용 fixture가 재처리됐다. 그 실행은 전부 폐기하고 오류 증거를 보존했다. 봉인 expected/prestate/스크립트 71파일은 변하지 않았고, 새 fixture와 쓰기 경로 guard로 다시 비교했다. 최종 쓰기 가능 경로 인수 341개는 각 새 fixture 안이었다. 이전 시도 경로 194개는 실제 수정 파일 수가 아니며 저장소/작업자 트리는 변경되지 않았다. 이 도구 오류를 제품 결함이나 유효한 통과 수치로 섞지 않았다.
+- 다음 U-323 APP-APPLY를 기존 `.worktrees/claude-adapter`, `unit/U-323-codex-loop`, 기준 d68ecab9에서 시작했다. codex-loop가 app.ts의 applyPlan/import와 새 `tests/unit/app/u323-apply-direct.test.ts`만 직렬 소유한다. codex-audit가 채택 원천의 6개 app 블록·26개 의존 파일 및 원래 봉인 31개·추가 봉인 9개의 불변을 확인한 뒤 구현 배정을 열었다. 기존 raw callback 0회, masked event/confirm의 횟수·지연 조회·this·시작 gate·취소·환경·오류 순서를 유지한다. 기존 수명·공용 helper·계약·GUI는 소유 범위에 넣지 않는다.
+- V-44 기준 준비는 기존 46+4시나리오/451조건에 유효한 읽기 제외 10사례/153조건을 별도 봉인으로 추가했다. 네 원천의 승인 경로 제외는 모델 전 plan_stale, 실행 중 private read/write는 unreadable_path, 명령 validator와 함께면 준비 단계 invalid_task를 구분했다. 기존 잘못된 privacy 필드 사례는 입력 거부 대조로 유지했으며 기대값을 새 결과로 덮지 않았다. 후보 U-323 검증은 아직 아니다.
+- C-10 독립 기준은 codex-probe가 준비 중이다. C-11에서 새로 남은 jsonLine 의존은 순수 함수·주석만 `src/presentation/json.ts`로 이동하고 guard의 같은 binding 재수출과 planJsonLine identity를 유지하기로 했다. ASCII 직렬화·두 단계 가림·기존 오류 경계를 바꾸지 않는다. C-10 뒤 배정할 기술 경계이며 아직 구현하지 않았다. 운영 문구 정정은 15e981cb로 반영·교차 검토 완료, 미해결 제품 위험은 CP-31/32의 범위 그대로다.
+
 ## 진행 요약 (CP-33, 2026-11-14) — APP-REPORT 채택, 현재 운영 지시 정리
 
 - main/origin/main `e52ac23e07199b13aeccdc85f96ba54c90747cd1`: U-316 APP-REPORT 채택·푸시. 구현 `5f68f0c4`, 최종 판 `4122f0846394d512e327b5e851c4203615745b9d`, 최종 병합 트리 `f9db08f0210aeb0e46c3669b4251948d8a791737` 일치. report/reportMarkdown은 앱 readReport를 직접 부르며 기존 파서·renderer·직렬화·최종 가림을 유지한다. 앱→CLI 의존 0을 주장하지 않는다.

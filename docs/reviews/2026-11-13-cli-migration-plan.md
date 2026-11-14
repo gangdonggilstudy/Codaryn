@@ -460,6 +460,7 @@ C-7b와 C-9b 채택 뒤 실제 잔여 의존을 점검했다. 앱 report → rev
 - C-11 잔여 정리는 순수 파서 전체를 `src/app/input/args.ts`로 옮긴다. 일부 이름만 골라 누락시키지 않고 기존 `src/cli/args.ts`에서 모든 값·형을 재수출한다. 앱의 기존 요청→argv 해석 동작은 이 단계에서 재설계하지 않는다. changes-plan의 순수 출력·가림은 앱 모듈로, 앱의 포트 형은 앱/계약으로 옮긴다.
 - models의 목록·선택 규칙과 설정 원자 쓰기, init의 기본값·설정 생성 규칙은 각각 앱의 단일 원천으로 옮기되 CLI는 인자·질문·표시를 유지한다. 이미 앱으로 옮긴 provider와 command-outcome은 중복 구현하지 않는다.
 - reportMarkdown과 CLI report는 순수 Markdown 렌더러 한 벌을 `src/presentation/report.ts`에서 함께 사용한다. C-8의 "렌더러는 CLI에 남는다"는 물리적 위치 설명은 이 후속 단계에서 보완한다. CLI가 터미널/출력 방식을 결정하는 책임은 그대로이며 앱이 CLI 실행 함수를 다시 부르지 않는다. 필요한 순수 보조 함수·상수·형을 함께 옮기고 옛 CLI 경로에서 재수출한다.
+- U-316 뒤 남은 jsonLine 의존도 C-11에서 닫는다. 순수 함수와 N-19 주석만 `src/presentation/json.ts`로 옮기고 CLI guard는 같은 binding을 import·재수출한다. planJsonLine alias의 함수 신원, UTF-16 단위 ASCII escape·끝 LF·예외, 문자열별 가림→직렬화→전체 텍스트 가림→앱 재파싱 순서를 유지한다. guard의 프로세스·TTY 처리는 함께 옮기지 않는다.
 - 옛 경로 호환은 이행 동안 Plan A(재수출 유지)를 따른다. C-9a·C-11의 정리 문구를 근거로 기존 export나 dist 목록 행을 먼저 지우지 않는다. 완료 판정은 값뿐 아니라 type-only·동적 import·require·재수출과 중립 모듈을 경유한 간접 의존도 확인한다. reportMarkdown 예외 목록으로 앱→CLI 의존 0을 주장하지 않는다.
 
 세부 순서는 C-10 → 공용 잔여·파서 → models → init → 공용 presentation → 최종 그래프 검증이다. 한 번에 한 구현자가 app.ts와 해당 단위의 관련 파일을 소유하며, 앞 단위의 독립 검증·병합 뒤 다음 단위를 연다. 각 단위는 고정 출력 유지·판 비교 차이 0·관련/전체 회귀 검증이라는 기존 완료 기준을 따른다. 이 절은 아직 구현하지 않은 단계의 완료 선언이 아니다.

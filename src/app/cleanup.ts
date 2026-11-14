@@ -22,10 +22,26 @@
  *   non-negative day counts, `reverted: true` only, no unknown field, a timestamp of the contract's
  *   form, a 64-hex digest, a boolean for the discarded files.
  * - The values name run ids, sizes and codes only, never a person's file name or a path.
+ * - U-319 (the CLI migration's C-9b, PM): what follows the checks is one copy for the app and the CLI
+ *   (src/cli/cleanup.ts): the store's summary, plan and cleanup, the status rule and the failure's
+ *   code (summaryOf, cleanupPlanOf, cleanupConfirmed). Each caller checks its own input form first (the
+ *   app its request below, the CLI its arguments: their limits differ, and stay apart), gives a checked
+ *   selection, and puts its own text on the codes. The CLI matches its digest prefix to the plan it shows
+ *   and keeps its one output of summary and plan.
  */
 
 import { RUN_TIMESTAMP_PATTERN_SOURCE, cleanupStatusOf } from "../contracts/index.js";
-import type { CleanupConfirmation, CleanupFailureCode, CleanupSelection } from "../contracts/index.js";
+import type {
+  ApplyCleanup,
+  CleanupConfirmation,
+  CleanupFailureCode,
+  CleanupPlan,
+  CleanupSelection,
+  CleanupStatus,
+  PlanCleanup,
+  StateSummary,
+  SummarizeState,
+} from "../contracts/index.js";
 import { applyCleanupWith, isStoredRunId, planCleanup, summarizeState } from "../store/index.js";
 import type { CleanupOperations } from "../store/index.js";
 import { INTERNAL_ERROR, appError } from "./errors.js";
@@ -36,6 +52,7 @@ import type {
   AppError,
   ApplyCleanupRequest,
   CleanupApplied,
+  CleanupDoneOutcome,
   CleanupPreview,
   CleanupPreviewRequest,
   StateSummaryRequest,
@@ -107,11 +124,56 @@ function confirmationOf(value: unknown): Checked<CleanupConfirmation> {
   return { ok: true, value: { digest, discarded, includeNotReverted } };
 }
 
+/** U-319: the store's functions the one copy calls; each caller's tests may give their own. */
+export interface CleanupStoreCalls {
+  readonly summarizeState?: SummarizeState;
+  readonly planCleanup?: PlanCleanup;
+  /** The store's cleanup under the workspace lock. Absent: applyCleanupWith with `operations`. */
+  readonly applyCleanup?: ApplyCleanup;
+  /** The store's cleanup operations (its removal, its mark writer) for that default. */
+  readonly operations?: CleanupOperations;
+}
+
+/** U-319: what a confirmed cleanup did, with `ok` true only for `removed` (DR-48), or why nothing was removed. */
+export type CleanupConfirmed =
+  | { readonly ok: true; readonly status: Exclude<CleanupStatus, "preview">; readonly outcome: CleanupDoneOutcome }
+  | { readonly ok: false; readonly code: CleanupFailureCode };
+
+/** U-319, the one copy: the state's summary (DR-39). Throws what the store throws. */
+export function summaryOf(workspaceRoot: string, calls: CleanupStoreCalls = {}): Promise<StateSummary> {
+  return (calls.summarizeState ?? summarizeState)({ workspaceRoot });
+}
+
+/** U-319, the one copy: the plan for a checked selection at `now`; nothing is removed. Throws what the store throws. */
+export function cleanupPlanOf(workspaceRoot: string, selection: CleanupSelection, now: string, calls: CleanupStoreCalls = {}): Promise<CleanupPlan> {
+  return (calls.planCleanup ?? planCleanup)({ workspaceRoot, selection, now });
+}
+
+/**
+ * U-319, the one copy: the store's cleanup of a checked selection with the person's confirmation (the
+ * plan's whole digest). The store makes the plan again under the workspace lock and removes nothing
+ * unless its digest is the confirmed one. Throws what the store throws.
+ */
+export async function cleanupConfirmed(
+  workspaceRoot: string,
+  selection: CleanupSelection,
+  now: string,
+  confirmation: CleanupConfirmation,
+  calls: CleanupStoreCalls = {},
+): Promise<CleanupConfirmed> {
+  const apply: ApplyCleanup = calls.applyCleanup ?? ((request) => applyCleanupWith(request, calls.operations));
+  const outcome = await apply({ workspaceRoot, selection, now, confirmation });
+  if (!outcome.ok) return { ok: false, code: outcome.code };
+  // DR-48 (AXM-3): the contract's one rule; ok only when something was removed and nothing was kept for a problem.
+  const status = cleanupStatusOf(outcome);
+  return { ok: true, status, outcome: { ...outcome, ok: status === "removed" } };
+}
+
 export async function stateSummaryIn(environment: AppEnvironment, request: StateSummaryRequest): Promise<AppCallOutcome<StateSummaryView>> {
   const root = await workspaceRootOf(request.workspace, environment.cwd);
   if (!root.ok) return root;
   try {
-    return { ok: true, output: { kind: "state_summary", summary: await summarizeState({ workspaceRoot: root.value }) } };
+    return { ok: true, output: { kind: "state_summary", summary: await summaryOf(root.value) } };
   } catch {
     return { ok: false, error: INTERNAL_ERROR };
   }
@@ -124,7 +186,7 @@ export async function previewCleanupIn(environment: AppEnvironment, request: Cle
   if (!root.ok) return root;
   const now = new Date(environment.clock.now()).toISOString();
   try {
-    return { ok: true, output: { kind: "cleanup_preview", now, plan: await planCleanup({ workspaceRoot: root.value, selection: selection.value, now }) } };
+    return { ok: true, output: { kind: "cleanup_preview", now, plan: await cleanupPlanOf(root.value, selection.value, now) } };
   } catch {
     return { ok: false, error: INTERNAL_ERROR };
   }
@@ -149,10 +211,9 @@ export async function applyCleanupIn(environment: AppEnvironment, request: Apply
   const root = await workspaceRootOf(request.workspace, environment.cwd);
   if (!root.ok) return root;
   try {
-    const outcome = await applyCleanupWith({ workspaceRoot: root.value, selection: selection.value, now: request.now, confirmation: confirmation.value }, operations);
-    if (!outcome.ok) return { ok: false, error: cleanupFailure(outcome.code) };
-    const status = cleanupStatusOf(outcome);
-    return { ok: true, output: { kind: "cleanup_applied", status, outcome: { ...outcome, ok: status === "removed" } } };
+    const done = await cleanupConfirmed(root.value, selection.value, request.now, confirmation.value, { operations });
+    if (!done.ok) return { ok: false, error: cleanupFailure(done.code) };
+    return { ok: true, output: { kind: "cleanup_applied", status: done.status, outcome: done.outcome } };
   } catch {
     return { ok: false, error: INTERNAL_ERROR };
   }

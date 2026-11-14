@@ -22,7 +22,6 @@ import type {
   ApiProviderDeps,
   ApiProviderName,
   ApplyPlan,
-  ApplyResult,
   AnyPlanOutput,
   ChangesPlanOutput,
   PlanOutput,
@@ -56,25 +55,26 @@ import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "./command-outcome.js";
 import { runInit } from "../cli/init.js";
 import { runModels } from "../cli/models.js";
-import { runApply } from "../cli/plan-commands.js";
+import { applyLife } from "./apply-life.js";
+import type { ApplyLifeEnd } from "./apply-life.js";
 import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { renderApplyReport, renderReport } from "../cli/report.js";
 import { jsonLine } from "../cli/guard.js";
-import { parseArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "../cli/args.js";
+import { parseApplyArgs, parseArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "../cli/args.js";
 import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
 import { readReport } from "./report-read.js";
 import { hideKeys, hideKeysInStrings } from "./input/text-safety.js";
-import { recordReview, showPlan } from "./plan-view.js";
+import { prepareFor, recordReview, showPlan } from "./plan-view.js";
 import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
 import { runLife } from "./run-life.js";
 import type { RunLifeEnd } from "./run-life.js";
 import { tallyOf } from "./tally.js";
 import { knownKeyValues } from "./input/settings.js";
-import { applyArguments, applyJournalWithEvents } from "./apply.js";
+import { applyArguments, deliverApply } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
@@ -929,12 +929,12 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   }
 
   /**
-   * DR-1, DR-2, DR-21: the CLI's `apply` as an adapter (AdapterApply): the approval is recorded as
-   * `adapter` and the consent comes only from the request. The CLI chooses by the task's plan setting.
+   * DR-1, DR-2, DR-21, U-323: applyLife as an adapter: approval is recorded as `adapter`, consent
+   * comes only from the request, and the app lifetime chooses by the task's plan setting.
    * - A plan of moves (plan "apply"): the engine is the same `applyPlan`; only its journal is
-   *   wrapped so the apply's events reach `observer.onEvent` (start records left out).
+   *   observed by the lifetime so masked events reach `observer.onEvent` (start records left out).
    * - U-218 (DR-69 B-4, after U-195): a run plan (plan "run") is carried out by a model run, the
-   *   CLI's applyChangesPlan with the `run` environment: the hooks of a run through the app
+   *   lifetime's carrying run with the hooks of a run through the app
    *   (appRunHooks), whose events reach `observer.onRunEvent` and permission questions
    *   `observer.confirm`. The outcome is that run's EngineResult (planRunId, planDigest) with
    *   lockLeft as a run's.
@@ -949,18 +949,27 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     if (!consent.ok) return consent;
     const argv = applyArguments(request);
     const io = planCommandEnvironment(argv);
-    // U-218: the carrying run's observer: its events and permission questions, read from `observer` when they come.
-    const runObserver: RunObserver | undefined =
+    // U-323: the lifetime alone delivers masked events. Do not pass or inspect the consumer's
+    // raw callbacks. Moves subscribe at the original engine boundary; changes look up each call.
+    let movesSubscribed = false;
+    const movesEventErrors = new Map<number, { readonly value: unknown }>();
+    const movesEvent: NonNullable<ApplyObserver["onEvent"]> = (event) => {
+      const seq = event.kind === "record" ? event.record.seq : null;
+      try { deliverApply(observer, event); }
+      catch (value) { if (seq !== null) movesEventErrors.set(seq, { value }); }
+    };
+    const forwarding: ApplyObserver | undefined =
       observer === undefined
         ? undefined
         : {
-            onEvent: (event) => observer.onRunEvent?.(event),
+            get onEvent() { return movesSubscribed ? movesEvent : undefined; },
+            onRunEvent: (event) => observer.onRunEvent?.(event),
             confirm: (question, signal) => {
               const ask = observer.confirm;
               return typeof ask === "function" ? ask.call(observer, question, signal) : Promise.resolve({ decision: "dismissed" });
             },
           };
-    const run = appRunHooks(io.env, runObserver);
+    const run = appRunHooks(io.env, undefined);
     let reportMoves: (runId: string) => void = () => {};
     const movesStarted = new Promise<string>((resolve) => {
       reportMoves = resolve;
@@ -970,19 +979,48 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       openMoves = resolve;
     });
     const wrapped: ApplyPlan = async (deps) => {
-      const journal = applyJournalWithEvents(deps.journal, observer, deps.privacy);
+      // Match the old subscription lookup before reporting the run id or waiting on the gate.
+      movesSubscribed = observer?.onEvent !== undefined;
+      // deliverApply's first getter used to be outside its callback catch. Preserve that failure
+      // after the lifetime's single event delivery, without adding another event/masking wrapper.
+      const journal: typeof deps.journal = {
+        async append(entry) {
+          const stored = await deps.journal.append(entry);
+          const error = movesEventErrors.get(stored.seq);
+          if (error !== undefined) {
+            movesEventErrors.delete(stored.seq);
+            const { value } = error;
+            throw value;
+          }
+          return stored;
+        },
+        close: () => deps.journal.close(),
+      };
       reportMoves(deps.runId);
       await movesGate;
       await nextMacrotask();
       return (hooks.applyPlan ?? engineApplyPlan)({ ...deps, journal });
     };
-    const running = runApply({
+    const applying = {
       ...io,
       applyPlan: wrapped,
       adapter: { unsafeMoveConsent: consent.consent },
       cancelSignal: run.parts.cancelSignal,
       run: cliEnvironmentOf(argv, io.env, run.parts),
-    }).catch(() => null);
+    };
+    const running = (async (): Promise<ApplyLifeEnd> => {
+      const parsed = parseApplyArgs(argv);
+      if (!parsed.ok) return { kind: "error", outcome: argumentsError(parsed) };
+      const args = parsed.args;
+      const ready = await prepareFor(applying, args.form, args.runId, args.cancelFile, args.quiet);
+      if (!ready.ok) return { kind: "error", outcome: ready.outcome };
+      return applyLife(applying, args, ready.value, { observer: forwarding });
+    })().catch(() => null);
+    const failure = (end: ApplyLifeEnd | null): AppError => {
+      if (end?.kind === "error") return commandError(end.outcome);
+      if (end?.kind === "carried" && end.end.kind === "refused") return fromCliError(end.end.output);
+      return INTERNAL_ERROR;
+    };
 
     const first = await Promise.race([
       movesStarted.then((runId) => ({ kind: "started" as const, runId })),
@@ -990,17 +1028,15 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       running.then((outcome) => ({ kind: "ended" as const, outcome })),
     ]);
     if (first.kind === "ended") {
-      const output = first.outcome !== null && "output" in first.outcome ? first.outcome.output : undefined;
-      return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+      return { ok: false, error: failure(first.outcome) };
     }
     const done: Promise<ApplyOutcome> = running.then((outcome): ApplyOutcome => {
-      const output = outcome !== null && "output" in outcome ? outcome.output : undefined;
-      if (output?.kind === "apply") return { ok: true, output: output as ApplyResult };
-      if (output?.kind === "run") {
-        const result = output as EngineResult;
+      if (outcome?.kind === "applied") return { ok: true, output: outcome.result };
+      if (outcome?.kind === "carried" && outcome.end.kind === "ended") {
+        const result = outcome.end.result;
         return run.ended(result).lockLeft ? { ok: true, output: result, lockLeft: true } : { ok: true, output: result };
       }
-      return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+      return { ok: false, error: failure(outcome) };
     });
     const handle: ApplyHandle = {
       runId: first.runId,

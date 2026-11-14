@@ -40,7 +40,7 @@ import type { Assemble } from "../app/assembly.js";
 import { PROGRESS_PREFIX, englishProgressLines, writeProgressLines } from "./progress.js";
 import { journalWithEvents } from "../app/events.js";
 import { MODEL_NOT_FOUND_HINT, defaultConfigNotice, runLife } from "../app/run-life.js";
-import type { ApprovedRunPlan, RunLifeEnvironment } from "../app/run-life.js";
+import type { ApprovedRunPlan, RunLifeEnd, RunLifeEnvironment } from "../app/run-life.js";
 import type { RunObserver } from "../app/types.js";
 import { argumentsError, cliError as error, prepareTask } from "../app/prepare.js";
 import type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunArgs, RunNotes } from "../app/prepare.js";
@@ -156,14 +156,8 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
 }
 
 /**
- * U-296 (the CLI migration's C-6a, its fourth commit): a run's steps 8 on are the app layer's run life
- * (runLife: the model, the HTTP 404 watch, the cancel source, the assembly and the lock, the end
- * summary's counts, the engine, the notices, the end); since C-6b (U-300) also those of a run that
- * carries out an approved run plan (`approved`: the plan's claim, the records-changed mark looked at
- * again under the lock and the writes refused outside the plan are the life's, R-115 I-1), on this
- * run's own environment as
- * it is (process.env with the variables file loaded into it, the CLI's assembly: DR-4 as before), so
- * what a test gives reaches the life unchanged. The CLI draws what a person sees, as before:
+ * U-320 (C-7b): the same CLI drawing for runLife and applyLife's carrying run. This helper starts
+ * neither life and wraps no journal; each caller attaches its observer once. It draws:
  * - once assembled: the typed workspace for the end summary (DR-51), the renderer in the config's
  *   language, the permission question at a terminal (B-5), and each record as stored
  *   (RunObserver.onStoredRecord, through the app's journalWithEvents) drawn as its progress lines and
@@ -172,18 +166,29 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
  * - after the run, the lock released: the Y-4 line, the writablePaths line and the end summary.
  * The refusals are the life's own (cliError), so the JSON line keeps its keys' order.
  */
-async function runThroughApp(io: CliEnvironment, args: RunArgs, notes: RunNotes, prepared: PreparedTask, approved?: ApprovedRunPlan): Promise<CliRunOutcome> {
-  const { defaultDisplay } = prepared;
+export function createRunDisplay(io: CliEnvironment, args: RunArgs, notes: RunNotes, defaultDisplay: PreparedTask["defaultDisplay"]): {
+  readonly ready: (gateway: PrivacyGateway) => void;
+  readonly observer: RunObserver;
+  readonly finish: (end: RunLifeEnd) => CliRunOutcome;
+} {
   // U-8: progress lines follow the journal; they start only once the run has started.
   const write = args.quiet ? undefined : io.writeProgress;
   // Set once assembled (the closure below), so declared wide: control flow cannot see that.
   let privacy = null as PrivacyGateway | null;
   // N-4, N-5: the human renderer in the chosen language (the config's language is known now).
   let human = undefined as { readonly output: HumanOutput; readonly messages: MessageCatalog } | undefined;
-  const assemble: Assemble = async (input) => {
-    const assembled = await io.assemble(input);
-    if (!assembled.ok) return assembled;
-    const gateway = assembled.deps.privacy;
+  let stored: RunObserver["onStoredRecord"];
+  let confirm: RunObserver["confirm"];
+  // Stable delegates exist before applyLife assembles its carrying run. When there is no CLI
+  // terminal, omit confirm entirely so an adapter's assembled confirmation is not overwritten.
+  const observer: RunObserver = {
+    ...(write === undefined ? {} : { onStoredRecord: (record: Parameters<NonNullable<RunObserver["onStoredRecord"]>>[0]) => stored?.(record) }),
+    ...(args.quiet || io.ask === undefined ? {} : {
+      confirm: (request: Parameters<NonNullable<RunObserver["confirm"]>>[0], signal: AbortSignal) =>
+        confirm === undefined ? Promise.resolve({ decision: "dismissed" as const }) : confirm(request, signal),
+    }),
+  };
+  const ready = (gateway: PrivacyGateway): void => {
     privacy = gateway;
     // DR-51 (U-38): the typed --workspace for the end summary's hints, after the run's own masking.
     // Best effort, as the summary is: a gateway that cannot mask it leaves the hint at <workspace>.
@@ -214,7 +219,7 @@ async function runThroughApp(io: CliEnvironment, args: RunArgs, notes: RunNotes,
     };
     const render = shown === undefined ? englishProgressLines() : (event: JournalEvent) => shown.output.progressLine(event);
     let announced = defaultDisplay === null;
-    const observer: RunObserver =
+    const drawing: RunObserver =
       write === undefined
         ? {}
         : {
@@ -243,44 +248,60 @@ async function runThroughApp(io: CliEnvironment, args: RunArgs, notes: RunNotes,
         questions = undefined;
       }
     }
-    const confirm = args.quiet || io.ask === undefined ? undefined : terminalConfirm(io.ask, questions ?? createMessageCatalog("en"));
+    confirm = args.quiet || io.ask === undefined ? undefined : terminalConfirm(io.ask, questions ?? createMessageCatalog("en"));
     notes.couldAsk = confirm !== undefined;
-    const journal = journalWithEvents(assembled.deps.journal, observer, gateway);
+    stored = drawing.onStoredRecord;
+  };
+  const finish = (end: RunLifeEnd): CliRunOutcome => {
+    if (end.kind === "refused") return { output: end.output, exitCode: end.output.exitCode };
+    const result = end.result;
+    try {
+      if (write !== undefined && privacy !== null) {
+        const gateway: PrivacyGateway = privacy;
+        const shown = human;
+        // Y-4: the line in the chosen language when the life added the hint; the notice stays English.
+        if (end.modelNotFound) writeMasked(write, gateway, shown === undefined ? MODEL_NOT_FOUND_HINT : shown.messages.format("progress.model_not_found"));
+        // U-182 (DR-69 B-4): writes denied as path_not_writable, and how to allow a file. A progress
+        // line only; the result is unchanged. U-195 (Codex V-14 L-1, U-198): not in a run that carries
+        // out a plan, whose refused writes are counted as outside the plan (deniedNotPlanned), which no
+        // writablePaths entry widens; the end summary tells those and how to go on.
+        const notWritable = notes.deniedNotWritable ?? 0;
+        if (notWritable > 0) {
+          writeMasked(write, gateway, shown === undefined ? notWritableHint(notWritable) : shown.messages.format("progress.not_writable_hint", { count: notWritable }));
+        }
+        // N-5: the end summary on stderr, after the lock is released.
+        if (shown !== undefined) {
+          let summary = "";
+          try {
+            summary = shown.output.runSummary(result, summaryContext(args, notes));
+          } catch {
+            summary = "";
+          }
+          writeHuman(write, gateway, summary);
+        }
+      }
+    } catch {
+      // As before, when a line after the engine could not be drawn (the life has released the lock).
+      return error("internal_error", "the run stopped because of an internal error");
+    }
+    return { output: result, exitCode: result.exitCode };
+  };
+  return { ready, observer, finish };
+}
+
+/** One run life, with the shared CLI display attached exactly once. */
+async function runThroughApp(io: CliEnvironment, args: RunArgs, notes: RunNotes, prepared: PreparedTask, approved?: ApprovedRunPlan): Promise<CliRunOutcome> {
+  const display = createRunDisplay(io, args, notes, prepared.defaultDisplay);
+  const assemble: Assemble = async (input) => {
+    const assembled = await io.assemble(input);
+    if (!assembled.ok) return assembled;
+    const privacy = assembled.deps.privacy;
+    display.ready(privacy);
+    const journal = journalWithEvents(assembled.deps.journal, display.observer, privacy);
+    const confirm = display.observer.confirm;
     return { ...assembled, deps: { ...assembled.deps, journal, ...(confirm === undefined ? {} : { confirm }) } };
   };
-  const end = await runLife({ ...io, assemble }, args, notes, prepared, approved);
-  if (end.kind === "refused") return { output: end.output, exitCode: end.output.exitCode };
-  const result = end.result;
-  try {
-    if (write !== undefined && privacy !== null) {
-      const gateway: PrivacyGateway = privacy;
-      const shown = human;
-      // Y-4: the line in the chosen language when the life added the hint; the notice stays English.
-      if (end.modelNotFound) writeMasked(write, gateway, shown === undefined ? MODEL_NOT_FOUND_HINT : shown.messages.format("progress.model_not_found"));
-      // U-182 (DR-69 B-4): writes denied as path_not_writable, and how to allow a file. A progress
-      // line only; the result is unchanged. U-195 (Codex V-14 L-1, U-198): not in a run that carries
-      // out a plan, whose refused writes are counted as outside the plan (deniedNotPlanned), which no
-      // writablePaths entry widens; the end summary tells those and how to go on.
-      const notWritable = notes.deniedNotWritable ?? 0;
-      if (notWritable > 0) {
-        writeMasked(write, gateway, shown === undefined ? notWritableHint(notWritable) : shown.messages.format("progress.not_writable_hint", { count: notWritable }));
-      }
-      // N-5: the end summary on stderr, after the lock is released.
-      if (shown !== undefined) {
-        let summary = "";
-        try {
-          summary = shown.output.runSummary(result, summaryContext(args, notes));
-        } catch {
-          summary = "";
-        }
-        writeHuman(write, gateway, summary);
-      }
-    }
-  } catch {
-    // As before, when a line after the engine could not be drawn (the life has released the lock).
-    return error("internal_error", "the run stopped because of an internal error");
-  }
-  return { output: result, exitCode: result.exitCode };
+  return display.finish(await runLife({ ...io, assemble }, args, notes, prepared, approved));
 }
 
 /**

@@ -1,21 +1,24 @@
 /** U-320: CLI seams kept while apply delegates its life. Real local plans; no API. */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { assembleRun } from "../../../src/app/assembly.js";
-import { runApply } from "../../../src/cli/plan-commands.js";
+import { applyChangesPlan, runApply } from "../../../src/cli/plan-commands.js";
+import type { ApplyCommandEnvironment } from "../../../src/cli/plan-commands.js";
+import { parseApplyArgs } from "../../../src/cli/args.js";
+import { prepareFor } from "../../../src/app/plan-view.js";
 import { runCli } from "../../../src/cli/run.js";
 import { createHumanOutput } from "../../../src/cli/human/index.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/app/input/security/index.js";
-import { acquireLock, releaseLock } from "../../../src/store/index.js";
+import { acquireLock, loadAnyPlan, releaseLock } from "../../../src/store/index.js";
 import type { EngineResult } from "../../../src/contracts/index.js";
 import { installFsFaults } from "../../support/fs-faults.js";
 
-async function fixture(t: TestContext, kind: "moves" | "changes" = "moves") {
+async function fixture(t: TestContext, kind: "moves" | "changes" = "moves", action: "move" | "discard" = "move") {
   const base = await mkdtemp(path.join(os.tmpdir(), "codaryn-u320-"));
   t.after(() => rm(base, { recursive: true, force: true }));
   await mkdir(path.join(base, "work"));
@@ -36,7 +39,7 @@ async function fixture(t: TestContext, kind: "moves" | "changes" = "moves") {
     schemaVersion: 1, id: "u320-plan", goal: "Make the planned change.", workflow: "u320",
     workflowRef: kind === "moves" ? "organize" : "rewrite", workspaceRoot: "./work",
     model: { provider: "scripted", scriptPath: "./script.json" },
-    policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move"] },
+    policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: [action] },
     privacy: { secretEnv: [] },
     limits: { maxModelTurns: 4, maxToolCalls: 8, maxTotalTokens: null, maxDurationMs: 60_000 },
     verifiers: [],
@@ -47,7 +50,7 @@ async function fixture(t: TestContext, kind: "moves" | "changes" = "moves") {
     schemaVersion: 1, workflows: { rewrite: { tools: ["read_file", "write_file", "propose_changes"], plan: "run" } },
   }));
   const tool = kind === "moves"
-    ? { name: "propose_plan", args: { summary: "Sort", actions: [{ kind: "move", from: "a.txt", to: "sorted/a.txt" }] } }
+    ? { name: "propose_plan", args: { summary: "Sort", actions: [action === "move" ? { kind: "move", from: "a.txt", to: "sorted/a.txt" } : { kind: "discard", path: "a.txt" }] } }
     : { name: "propose_changes", args: { summary: "Write", files: [{ path: "summary.md", change: "create" }] } };
   await writeFile(path.join(base, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ toolCalls: [tool] }, { text: "planned" }] }));
   const config = kind === "moves" ? [] : ["--config", "config.json"];
@@ -59,6 +62,45 @@ async function fixture(t: TestContext, kind: "moves" | "changes" = "moves") {
   const argv = ["apply", "--task", "task.json", ...config, "--run", plan.runId];
   return { base, io, argv, digest: plan.plan.digest };
 }
+
+async function workspaceSnapshot(root: string): Promise<unknown> {
+  const entries = await readdir(root, { withFileTypes: true });
+  return Promise.all(entries.sort((a, b) => a.name.localeCompare(b.name)).map(async (entry) => [
+    entry.name, entry.isDirectory()
+      ? await workspaceSnapshot(path.join(root, entry.name))
+      : (await readFile(path.join(root, entry.name))).toString("hex"),
+  ]));
+}
+
+test("U-320: direct changes helper refuses moves/discards even with an apply-mode task, without side effects", async (t) => {
+  for (const action of ["move", "discard"] as const) {
+    const f = await fixture(t, "moves", action);
+    const argv = [...f.argv, "--digest", f.digest];
+    const parsed = parseApplyArgs(argv);
+    assert.ok(parsed.ok);
+    const args = parsed.args;
+    const ready = await prepareFor(f.io, args.form, args.runId, args.cancelFile, args.quiet);
+    assert.ok(ready.ok);
+    assert.equal(ready.value.prepared.task.plan, "apply");
+    const before = await workspaceSnapshot(path.join(f.base, "work"));
+    for (const mode of ["apply", "run"] as const) {
+      let reads = 0;
+      const unexpected = () => { throw new Error("must refuse before questions, assembly, or run creation"); };
+      const out = await applyChangesPlan({
+        ...f.io, argv, randomBytes: unexpected, ask: unexpected, writeProgress: unexpected,
+        run: { ...f.io, argv: [], assemble: unexpected },
+        loadAnyPlan: (input) => { reads++; return loadAnyPlan(input); },
+      }, args, { ...ready.value, prepared: { ...ready.value.prepared, task: { ...ready.value.prepared.task, plan: mode } } });
+      assert.deepEqual(out, { output: {
+        schemaVersion: 1, kind: "error", code: "run_not_plan",
+        message: 'that run made a plan of moves and discards (plan "apply"), but the task given to apply resolves to plan "run"; give the task the plan run used; nothing was run',
+        exitCode: 2, category: "input", retryable: false, hint: "plan_kind_differs",
+      }, exitCode: 2 });
+      assert.equal(reads, 1);
+      assert.deepEqual(await workspaceSnapshot(path.join(f.base, "work")), before);
+    }
+  }
+});
 
 test("U-320: approval ask rejection propagates unchanged, for moves and run plans", async (t) => {
   for (const kind of ["moves", "changes"] as const) {
@@ -135,7 +177,7 @@ test("U-320: other-task run notice survives assembly refusal, but not rejected a
   } finally { await releaseLock({ workspaceRoot, runId: lockId }); }
 });
 
-test("U-320: a carried run draws each stored record and its end summary once", async (t) => {
+for (const direct of [false, true]) test(`U-320: ${direct ? "direct helper" : "runApply"} carries once, with one plan read and one drawing of each record/summary`, async (t) => {
   const f = await fixture(t, "changes");
   await writeFile(path.join(f.base, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [
     { toolCalls: [{ name: "write_file", args: { path: "summary.md", expectedHash: null, change: { kind: "replace_all", content: "written\n" } } }] },
@@ -145,17 +187,28 @@ test("U-320: a carried run draws each stored record and its end summary once", a
   const output = createHumanOutput(messages);
   const seen: unknown[] = [];
   let summaries = 0;
-  const out = await runApply({
+  const order: string[] = [];
+  const io: ApplyCommandEnvironment = {
     ...f.io, argv: [...f.argv, "--digest", f.digest],
+    loadAnyPlan: (input: Parameters<typeof loadAnyPlan>[0]) => { order.push("load"); return loadAnyPlan(input); },
     run: {
-      ...f.io, argv: [], assemble: assembleRun, writeProgress: () => {},
+      ...f.io, argv: [],
+      assemble: (input: Parameters<typeof assembleRun>[0]) => { order.push("assemble"); return assembleRun(input); },
+      writeProgress: () => {},
       human: () => ({ messages, output: {
         ...output,
         progressLine(record) { seen.push(record); return output.progressLine(record); },
         runSummary(result, context) { summaries++; return output.runSummary(result, context); },
       } }),
     },
-  });
+  };
+  const parsed = parseApplyArgs(io.argv);
+  assert.ok(parsed.ok);
+  const args = parsed.args;
+  const ready = await prepareFor(io, args.form, args.runId, args.cancelFile, args.quiet);
+  assert.ok(ready.ok);
+  const out = await (direct ? applyChangesPlan(io, args, ready.value) : runApply(io));
+  assert.deepEqual(order, ["load", "assemble"]);
   assert.equal(out.exitCode, 3, JSON.stringify(out));
   assert.ok("output" in out && out.output.kind === "run");
   assert.equal(out.output.reason, "no_verifier");

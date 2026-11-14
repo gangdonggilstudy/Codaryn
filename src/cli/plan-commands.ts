@@ -26,11 +26,11 @@ import { jsonLine } from "./guard.js";
 import { PROGRESS_PREFIX } from "./progress.js";
 import { createRunDisplay } from "./run.js";
 import type { CliEnvironment } from "./run.js";
-import { argumentsError } from "../app/prepare.js";
+import { argumentsError, cliError, withHint } from "../app/prepare.js";
 import { knownKeyValues } from "../app/input/settings.js";
 import type { KnownKeys } from "../app/input/security/index.js";
 import { cleanText, hideKeys } from "../app/input/text-safety.js";
-import { runArgsOf, prepareFor, recordReview, showPlan } from "../app/plan-view.js";
+import { LOAD_MESSAGES, loadAny, runArgsOf, prepareFor, recordReview, showPlan } from "../app/plan-view.js";
 import type { PlanViewEnvironment, Prepared } from "../app/plan-view.js";
 
 // U-306 (CLI migration C-7a): the plan view's and review's preparation and checks are the app layer's
@@ -251,8 +251,23 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   return applyThroughApp(io, args, ready.value);
 }
 
-/** Compatibility entry point: the caller already prepared this run plan (plan A). */
+/** Compatibility entry point: the caller already prepared a task with plan "run" (plan A). */
 export async function applyChangesPlan(io: ApplyCommandEnvironment, args: ApplyArgs, value: Prepared): Promise<CommandOutcome> {
+  // Even callers outside that precondition must never turn this changes-only helper into a
+  // moves/discards lifetime. Supported calls keep applyLife's existing single read and order.
+  if (workflowSettingsOf(value.prepared.task).plan !== "run") {
+    const loaded = await loadAny(io, value);
+    if (!loaded.ok) return cliError(loaded.code, LOAD_MESSAGES[loaded.code]);
+    if (loaded.plan.kind !== "changes") {
+      return withHint(
+        cliError(
+          "run_not_plan",
+          'that run made a plan of moves and discards (plan "apply"), but the task given to apply resolves to plan "run"; give the task the plan run used; nothing was run',
+        ),
+        "plan_kind_differs",
+      );
+    }
+  }
   return applyThroughApp(io, args, value);
 }
 

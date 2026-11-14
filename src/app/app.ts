@@ -32,6 +32,7 @@ import type {
   EngineResult,
   InitOutput,
   ListAnthropicModels,
+  MessageCatalog,
   ModelsOutput,
   PrivacyGateway,
   ReportOutput,
@@ -53,7 +54,8 @@ import { createRunCancelSource } from "./cancel.js";
 import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { checkDoctor } from "./doctor.js";
 import type { CommandOutcome } from "./command-outcome.js";
-import { runInit } from "../cli/init.js";
+import { initIn } from "./init-command.js";
+import type { InitPorts } from "./init-core.js";
 import { runModelsIn, scrub } from "./models-command.js";
 import { applyLife } from "./apply-life.js";
 import type { ApplyLifeEnd } from "./apply-life.js";
@@ -61,7 +63,7 @@ import type { ModelsCommandEnvironment } from "./models-command.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { renderApplyReport, renderReport } from "../cli/report.js";
 import { jsonLine } from "../cli/guard.js";
-import { parseApplyArgs, parseArgs, parseDoctorArgs, parseModelsArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "./input/args.js";
+import { parseApplyArgs, parseArgs, parseDoctorArgs, parseInitArgs, parseModelsArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
 import { readReport } from "./report-read.js";
@@ -193,6 +195,23 @@ export function runArguments(request: StartRunRequest): string[] {
   if (request.workflowRef !== null) argv.push("--workflow", request.workflowRef);
   if (request.cancelFile !== null) argv.push("--cancel-file", request.cancelFile);
   return argv;
+}
+
+/** The app's init --json facade; returns the original core Promise without another await. */
+function appInitCommand(io: InitPorts & { readonly argv: readonly string[]; readonly messages: MessageCatalog }): Promise<CommandOutcome> {
+  try {
+    const parsed = parseInitArgs(io.argv);
+    if (!parsed.ok) return Promise.resolve(argumentsError(parsed));
+    const platform = io.platform ?? process.platform;
+    // Retain catalog acquisition after platform, even though JSON completion needs no text.
+    const messages = io.messages;
+    return initIn(io, parsed.args, platform, {
+      complete: (result) => ({ output: result, exitCode: result.exitCode }),
+      begin: () => undefined,
+    });
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 /** The app's models command: no question, with the existing JSON and whole-text masking. */
@@ -833,14 +852,14 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   /** `codaryn init --json` as main.ts calls it, without questions (no `ask`). */
   async function createSettings(request: CreateSettingsRequest): Promise<AppCallOutcome<InitOutput>> {
     try {
-      const outcome = await runInit({
+      const outcome = await appInitCommand({
         argv: initArguments(request),
         env: copyEnvironment(environment.env, platform),
         cwd: environment.cwd,
         platform,
         defaultConfig: defaultConfigOf(),
         defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
-        // --json prints no text; the catalog is only what runInit needs to exist.
+        // --json prints no text; retain the catalog's original evaluation position.
         messages: createMessageCatalog("en"),
         readFile: environment.readFile,
         isDirectory: environment.isDirectory,

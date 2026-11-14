@@ -85,6 +85,7 @@ const KEPT: readonly { readonly file: string; readonly names: readonly string[];
   },
   { file: "revert.js", names: ["runRevert", "appliedPlanHint"], step: "C-9a (U-314; a file that stays: tests, main.ts and the app layer take them)" },
   { file: "runs.js", names: ["runRuns", "parseRunsArgs", "resolveWorkspaceRoot", "resolveRunRef"], step: "C-9a (nc-human's U-315; a file that stays: tests and the app's runs.ts take them)" },
+  { file: "cleanup.js", names: ["runCleanup", "parseCleanupArgs", "renderCleanup", "itemName", "CLEANUP_USAGE"], step: "C-9b (U-319; a file that stays: tests, main.ts and help.ts take them)" },
   { file: "json-position.js", names: ["jsonErrorOffset", "lineAndColumn", "jsonSyntaxPosition"], step: "C-5" },
 ];
 

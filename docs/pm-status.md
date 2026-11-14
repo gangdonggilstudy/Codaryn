@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-41, 2026-11-14) — 전체 파서 채택, 설정 writer 준비
+
+- main/origin/main `056ed984730df0932ca0fab1e1059bfc551215d3`: U-329 C11-ARGS 채택·푸시. 구현 `dac2ad05`, 정확한 최종 판 `79371e7d19b7abb28bc1415d5000420e3d5dad2b`, 검증·병합 트리 `94630692419f510f0319e094f19bee00748c51a2` 일치. 네 파일 +644/-595=1,239줄이다. 원래 594줄 parser는 app/input/args.ts로 옮기고 상대 import 7곳만 바꿨다. CLI args.ts는 모든 값·형의 재수출, app.ts는 import 원천 한 줄만 바꿨다. 기존 runs 전용 파서는 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,258 중 4,247 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u329-final-evidence/`. 종료 집계 후 독립 검증을 열고 최종 보고를 읽은 뒤 정확한 SHA·트리로 별도 병합했다.
+- [V48](reviews/2026-11-14-v48-codex-verify-u329.md) 높음 0/중간 0/낮음 0. 원래 262호출/399조건 차이 0, 옛/새 26값 Object.is 동일, 10함수·15문자열 bytes·contracts 정규식 binding 유지, 18옛 경로 형·18개 양방향 및 canonical 3형 호환 통과. 관련 204시험·c01 프로세스 24시험 통과, 원래 25봉인 불변이다. parser JS는 contracts 경로, app TS/JS는 parser import 외 동일하다. source map까지 동일하다고 주장하지 않는다.
+- adapter-contract 현재 입력 그림·의존 설명·7.2 상태만 갱신했다. 과거 U308 실측 및 옛 main의 설계 이력은 보존했다. CLI 계약의 동작이나 문구는 바꾸지 않았다. 전체 app→CLI 의존 0은 아직 아니다.
+- 다음 U-330 설정 writer는 codex-check 구현/codex-loop 독립 검증이다. 새 app/config-write.ts·CLI models facade·app/settings-change.ts import·새 공개/fs 시험만 소유하고 app.ts·app/models.ts·모델 선택/질문/renderer는 제외한다. LF/BOM은 새 앱 모듈의 내부 export를 CLI에서 local import하며 CLI public export에 더하지 않는다. 원래 오류 우선순위·원자 쓰기·모델 ID 무검증을 보존한다. LOOP가 채택280d148e에서 원래 26관찰(계약 안25/밖JS1)·14봉인·8블록 동일을 확인했으나 실제 post-ARGS 부모의 좁은 확인 전 구현하지 않는다.
+- 모델·초기화 후속은 core와 앱 직접 연결을 나눠 채택한다. PROBE의 앱 모델 OLD 20사례/157조건·335봉인과 앱 초기화 OLD 16사례/182조건·333봉인을 준비했다. SEC의 CLI 초기화 OLD는 40조건/40호출(반환35·거부5, 계약 밖 exists 거부1 포함)·같은 OLD 차이 0·80봉인이다. 봉인 전 Symbol 메타데이터 저장 오류의 폐기 실행은 최종 수에 가산하지 않았다. 기존 CLI 모델 85/541과 함께 잠정 기준으로 보존한다. 각 실제 부모 확인과 core 채택 때에도 CLI·앱 기준을 함께 재생해 기존 wrapper 소비자의 경계를 확인한다.
+- SEC는 기존 TypeScript 7 native AST/해석기와 fresh dist를 쓰는 최종 그래프 감사 도구를 자기 폴더에서 준비한다. 타입·동적 import·require·재수출·중립 경유 및 불명 경로를 구분하며 정규식 검색이나 예외 목록으로 0을 선언하지 않는다. 아직 최종 후보 검증이 아니다. 실제 API·키 파일·외부 시험망 금지 및 이전 사용자 질문·기존 한계는 그대로다.
+
 ## 진행 요약 (CP-40, 2026-11-14) — 공용 정리 B 채택, 전체 파서 이동 준비
 
 - main/origin/main `67d974b902e4115d12ab3d60d72866de902050b9`: U-328 SHARED-B 채택·푸시. 구현 `b7c237ff`, 실제 채택 A 부모 `400c12ae`, 정확한 최종 판 `3b1bf0300d870c4250b5cce736b0c95add1e5a7d`, 검증·병합 트리 `7cc341efb595524c07971014eeee6bc909598c89` 일치. 다섯 파일 +119/-84다. changes-plan-output의 순수 closure만 앱 원천으로 이동했고 옛 CLI와 human index는 같은 값·형을 재수출한다. CLI runIdOf·renderer·질문 tail, app.ts와 A의 reader/resolver는 그대로다.

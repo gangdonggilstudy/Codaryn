@@ -93,3 +93,11 @@
 - 대기 중인 판이 있으면 같은 파일(특히 `docs/cli-contract.md`, `docs/design/adapter-contract.md`, `scripts/compare-cli/cases.mjs`, 목록 시험 `tests/unit/cli/u280-dist-old-paths.test.ts`)을 건드리는 다른 단위를 먼저 넣지 않는다.
 - 이행에서는 출력과 JSON을 한 글자도 바꾸지 않는다. 고정 출력이 바뀌는 일은 사용자에게 묻는다.
 - 새 지침은 사용자 확인 뒤에만 더한다. 사용자 결정이 필요한 질문은 모아 두었다가 권장과 함께 하나씩 묻는다(목록은 pm-status의 CP-25~CP-27).
+
+### 인계 직후의 덧붙임 (2026-11-14 09:3x)
+
+- 인계 알림을 Codex 여섯(이끄는 것은 codex-review, w3:p3)과 Claude 작업자 일곱에게 보냈다. Claude 작업자에게는 "하던 곳까지 커밋하고 `.codaryn` 보고서에 적은 뒤 새 단위를 시작하지 말 것, 푸시하지 말 것"이라고 했다.
+- **na-core(w3:p2)는 09:27에 주간 한도 안내에서 멈췄다**(11/15 21시 재설정; 화면의 선택지는 누르지 않았다 - 사용자 몫). 알림은 전달되지 않았다.
+  - `unit/U-319-na-core`(C-9b)는 끝 `7cadaea6`까지 커밋 여섯(판 사례, 글 고정과 목록 시험, 앱 쪽 한 벌, CLI 전환, 한 벌 시험, cli-contract)이 있고 worktree는 깨끗하다. 완료 보고와 수치는 받지 못했다.
+  - 멈출 때 빌드된 `dist`에 변이를 넣어 보는 중이었다. 그 worktree(`.worktrees/claude-workspace`)의 `dist`는 믿지 말고 다시 빌드한다. 추적 파일은 바뀌지 않았다.
+  - 이 가지는 판을 만들어 처음부터 검증해야 한다(판 비교, 유닛·통합, GUI 유닛, 독립 검증). 담당의 보고서는 `.worktrees/claude-workspace/.codaryn/report-N-A.md`의 끝 절에 일부 있을 수 있다.

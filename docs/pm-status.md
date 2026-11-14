@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-46, 2026-11-14) — 초기화 core 채택과 복구 후 검증
+
+- main/origin/main `db688901f395665e91f5547ae3e21b892391c309`: U333 INIT-CORE 채택·push. 구현 `b4a76402dbb0ff75da8f3c350bad3f20ff93224c`, 정확한 검증판 `f852df5892b80f17f62bafce42af80d205e4d280`, 검증·병합 tree `a0406098d084e1c6705516f9ff23d2c06f69d7dc` 일치. 5파일 +542/-296=838줄이며 상수·설정 생성·생성 규칙은 app/init-core·init-command에 단일 원천으로, 인자·질문·해석·표시는 CLI에 둔다. 기존6개 export와4개 binding을 보존하고 app/init.ts는 import 원천 한 곳만 바꿨다. app.ts 직접 연결은 아직이다.
+- PM 실측: 오프라인 ci·typecheck/clean build·GUI build/lock·tracked/staged 비밀 검사 통과. 최종 같은 판 유닛4306 중4295pass/0fail/10skip/1TODO, 통합684 중682pass/0fail/1skip/1TODO, GUI426/426(skip/TODO0), smoke227/227, CLI95 차이0, 고정5파일 변경 없음. 증거는 pm-unit의 `.codaryn/codex-u333-recovered-final-evidence/`와 별도 유닛 재실행 `.codaryn/codex-u333-retry1/`이다. 전체 결과와 독립 원문을 읽고 별도 호출로 literal SHA를 병합해 tree·staged scan·작성자/메시지를 확인한 뒤 PM이 push했다.
+- **최초 전체 유닛은 실패1이었다.** u22 only-busy report가 run_in_progress 대신 run_not_found였다(4306/4294pass/1fail/10skip/1TODO). 제품·시험을 바꾸지 않고 다른 전체 검사 종료 뒤 같은 SHA로 재실행해 위 최종 실패0을 확인했다. [독립 분석](reviews/2026-11-14-u333-unit-flake-analysis.md)은 관련9소스 동일과 busyOn이 damaged 목록도 준비 완료로 받는 기존 빈틈을 확인했다. OLD/후보 제한 재현 각1회는 둘 다 통과했다. **실제 최초 원인은 미확정**이며 초기 journal 경합은 가능한 설명이다. 최초 실패를 성공으로 덮지 않았고 U333의 직접 회귀 근거를 찾지 못한 것과 모든 timing의 보장을 구분한다. 이 기존 위험은 미해결 후속 항목이다.
+- [V52](reviews/2026-11-14-v52-codex-verify-u333.md) 신규 H0/M0/L0. 별도 exact archive/fresh build에서 원래 CLI40·APP16/182 차이0, 봉인80/333/637 불변, 독립 소스69검사·strict 타입12조건·공개 binding/Promise9검사 통과. 관련 고유92개 중 최초91pass/1검증 guard 실패 뒤 sp0 파일2개만 재실행해2pass(중복1)를 기록했다. 최초 실패는127.0.0.1 모의 서버까지 막은 검증 guard였고 제품/시험은 고치지 않았다. SEC 원문은 실패·도구 수정·한계를 구분한다. 증거3213개 봉인도 PM이 재확인했다.
+- 커밋 전 staged 비밀 검사가 합성 fixture 표기1건을 거부했다. 커밋 없이 지정5파일만 unstage한 뒤 담당자에게 반환했고, 계산 property 한 줄로 실행 이름·합성 값을 동일하게 유지했다. 제품4파일 hash 불변, OLD12·HEAD92·타입/binding/source42 및 실제 staged 검사0 뒤 커밋했다. 원래 실패 로그·봉인·기대값을 보존했고 scanner를 바꾸지 않았다.
+- runInit의 AsyncFunction→일반 Function 반사 차이는 C10/U331과 같은 허용된 경계로 공개한다. 실제 Promise·예외·microtask·receiver/getter·질문 await와 동기 finish는 보존했다. init wx 생성을 CAS writer로 합치지 않았다. 전체 app→CLI0이나 최종 그래프 완료를 선언하지 않는다.
+- 다음 U334 APP-INIT-DIRECT는 LOOP가 app.ts의 createSettings/직접 필요한 helper·import와 새 공개 시험만 맡고 PROBE가 독립 검증한다. 실제 채택 부모의 source/원래 CLI40+APP16 gate를 확인한 뒤 구현을 연다. JSON→REPORT→최종 source union/fresh-dist CLI0·unknown0은 이후다. Codex만 배정하고 결과 수신·검토·통합·push는 오케스트레이터가 맡는다. 실제 API·키·외부 시험망 금지와 U321 경쟁 경계 등 기존 한계는 유지한다.
+
 ## 진행 요약 (CP-45, 2026-11-14) — 강제 종료 복구와 Codex 재교육
 
 - 사용자 재개 지시로 codex-review가 Codaryn 오케스트레이션을 이어간다. 최신 사용자 지시: Claude에는 토큰 소진으로 업무를 배정하지 않는다. 기존 Codex 작업 지시는 재확인 없이 직접 전달한다. 작업자는 결과를 오케스트레이터에게 제출하며 **원격 push는 오케스트레이터만 수행한다**. 다른 프로젝트의 세션은 배정하지 않았다.

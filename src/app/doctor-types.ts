@@ -1,7 +1,9 @@
 /** U-324 (C10-1): the doctor's check ports, moved from src/cli/doctor.ts. CLI presentation stays there. */
-import type { DefaultConfigLocation, ExplainMessageLanguage, ListParkedFiles } from "../contracts/index.js";
+import type { DefaultConfigLocation, DoctorOutput, ExplainMessageLanguage, ListParkedFiles } from "../contracts/index.js";
 import type { PathRelation, WorkspaceLocation } from "./input/security/index.js";
 import type { SettingsEnvironment } from "./input/settings.js";
+import type { KnownKeys } from "./input/security/index.js";
+import type { CommandOutcome } from "./command-outcome.js";
 
 export interface DoctorCheckEnvironment {
   /** The process environment. Read, never changed. */
@@ -40,3 +42,23 @@ export interface DoctorCheckEnvironment {
  * reclaimed while it stays.
  */
 export type LockState = "none" | "held" | "stale" | "unreadable" | "reclaim_left";
+
+/** U-325: the parsed check input's structural fields, independent of CLI arguments and presentation. */
+export interface DoctorCheckInput {
+  readonly configPath: string | null;
+  readonly varsFile: string | null;
+  readonly taskPath: string | null;
+  readonly workspace: string | null;
+  readonly profile: string | null;
+}
+
+/** Internal, same-process context only. Never expose currentKey in a public outcome, IPC or log. */
+export type DoctorCheckResult =
+  | { readonly ok: false; readonly outcome: CommandOutcome }
+  | {
+      readonly ok: true;
+      readonly output: DoctorOutput;
+      readonly currentKey: KnownKeys;
+      /** The already observed platform; the renderer must not observe the environment getter again. */
+      readonly platform: NodeJS.Platform;
+    };

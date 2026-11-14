@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-36, 2026-11-14) — doctor helper 채택
+
+- main/origin/main `cf6868bf0de8dfbcca7bbb71c76939306cbf4532`: U-324 C10-1 helper·점검 포트 이동 채택·푸시. 구현 `fc40e42f`, 최종 판 `68e74aed42c0b28e675db2724c995442050a1b07`, 검증·병합 트리 `6a78f509bdb13ad06f5447c184e5e3d55319c7d8` 일치. 지정 4파일 +436/-346=782줄. 새 doctor-checks/types가 단일 원천이고 옛 CLI 값·형 export는 유지한다. app.ts·CLI renderer·runDoctor 본문·고정 시험은 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,204 중 4,193 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 각 종료 JSON과 집계를 읽은 뒤 V45a를 열고 최종 독립 보고를 읽은 뒤 별도 병합했다. 증거 `.worktrees/pm-unit/.codaryn/codex-u324-final-evidence/`.
+- [V45a](reviews/2026-11-14-v45a-codex-verify-u324.md) 높음 0/중간 0/낮음 0. 원래 99+E4 양성 20관찰 모두 동일, 관련 68시험 통과, 입력 101개·봉인 불변. helper 실행문과 주석은 export·환경 타입·EOF 경계 외 동일하며 core·renderer는 바이트 동일하다. 옛 값 binding과 환경/LockState 타입도 확인했다. helper 런타임 폐쇄 70모듈의 CLI 도달 0이며 전체 앱의 의존 0을 선언한 것은 아니다. currentKeys/context를 새 공개 결과나 IPC로 추가하지 않았다.
+- 실제 staged 검사에서 새 파일 EOF 빈 줄 두 곳을 발견해 담당이 각 1바이트만 제거하고 재동결했다. cached diff-check와 비밀 검사 통과 뒤 커밋했으며 최종 전체 판은 정리된 바이트로 검증했다. 최초 작업자의 untracked 제외 diff-check만으로 공백 검증을 마쳤다고 처리하지 않았다.
+- 다음 U-325는 같은 codex-check의 기존 claude-store에서 점검 본문만 앱 doctor.ts로 옮긴다. 소유 범위는 새 core·필요한 check input/result 형·CLI wrapper이며 app.ts는 U-326까지 제외한다. renderer·parse·마지막 가림·오류/await 순서와 옛 export를 유지하고 앞 단계의 봉인 119관찰을 재생한다. U-326 뒤에만 C-10 전체 완료를 판정한다.
+- 뒤 단계 준비는 구현과 겹치지 않는 자기 archive에서 병렬 수행했다. C11-ARGS(codex-audit): 공개 262호출/399조건, value export 26·type export 18, 같은 기준 차이 0, 25파일 봉인. C11-JSON(codex-sec): 25사례/50관찰, 예외 identity/순서·옛 alias 확인, 같은 기준 차이 0, 29파일 봉인. 둘 다 기준 d1a95ce2의 잠정 자료이며 실제 착수 parent 확인·후보 비교 전 통과로 승격하지 않는다. 설정 writer 기준은 codex-loop가 준비 중이고 그 단위 구현은 다른 담당에게 배정해 독립성을 유지한다.
+- 새 정책/출력 변경 없이 CP-35의 단위 경계를 따른다. 실제 API·키 파일·외부 시험 네트워크는 미수행이며 사용자 출력 질문과 기존 위험은 이전 CP 범위 그대로다.
+
 ## 진행 요약 (CP-35, 2026-11-14) — APP-APPLY 채택, 남은 단위 분할
 
 - main/origin/main `00cfa2b6aa98107089b298a13d684aa8222ee180`: U-323 APP-APPLY 채택·푸시. 구현 `9e86d99d`, 최종 판 `dbb849fe14dfbc98df327e307f9e6c31ce736cd3`, 병합 트리 `0a68b54ec5d3daf4060af37d21d3e16debdac860` 일치. app.ts의 applyPlan/import와 새 시험 두 파일만 바뀌었다. 같은 parse/prepare 뒤 앱 applyLife를 직접 한 번 부르며 기존 raw callback 0회·시작 gate·늦은 조회/this·가림·changes만의 lockLeft를 유지한다.

@@ -38,6 +38,17 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-42, 2026-11-14) — 설정 writer 채택, 모델 core 준비
+
+- main/origin/main `9a0f33284f047af9f5a48c2da5782ccc5f466b8d`: U-330 CONFIG-WRITER 채택·푸시. 구현 `1af048d4`, 최종 판 `4b8598f88aa535594366b50bee6f7cea0288d14a`, 검증·병합 트리 `c26ef3c06efd851607280e4efeee28b2fec64889` 일치. 네 파일 +240/-86=326줄이다. app/config-write.ts가 writer 단일 원천이고 CLI는 같은 두 함수·형을 재수출한다. LF/BOM은 내부 공유이며 CLI public export는 네 개 그대로다. settings-change의 import 한 줄 외 소비자·모델 선택/질문/renderer·app.ts는 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,272 중 4,261 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u330-final-evidence/`. 집계 후 독립 검증을 열고 최종 보고를 읽은 뒤 별도 병합했다.
+- [V49](reviews/2026-11-14-v49-codex-verify-u330.md) 높음 0/중간 0/낮음 0. 원래 26관찰(계약 안25/밖JS1) JSON bytes 동일·14봉인 유지, 공개14+관련130+프로세스40=184시험 통과. 8블록/주석·CLI 나머지·settings import만 확인, 같은 함수 binding·옵션형·오류/cleanup 우선순위 유지. 새 core의 runtime은 builtin3, type 폐쇄의 CLI 도달0이며 전체 앱 의존0을 선언하지 않았다.
+- 별도 [모델 소비자 검증](reviews/2026-11-14-u330-models-consumer.md)도 높음 0/중간 0/낮음 0이다. CLI85/541·APP20/157=105사례/698조건 차이0, 원래205+335봉인 불변. writer 이동 후에도 모델 호출·가림·getters/Promise 경계가 같다. 실제 post-writer M1 부모 확인 전에는 구현 승인으로 쓰지 않는다.
+- 작업자 최초 프로세스37통과/3실패는 설치 내부 TEMP 설정 오류였고 제품 수정 없이 외부 전용 TEMP로 해당 두 파일만 재실행40통과했다. 최초 로그 및 독립 검증 도구 초기 오류는 보존했다. READY 후 PM 커밋에 따라 작업자의 oldHEAD assertion이 멈춰 final-state.json은 생성되지 않았다는 정정을 받았다. 소스 네 해시는 같았으며 없는 파일을 증거로 쓰지 않고 정확한 판을 새로 전체·독립 검증했다.
+- [V48 해시 출처 보충](reviews/2026-11-14-v48-hash-format.md): archive CRLF와 raw Git LF는 594줄/594바이트 차이이고 줄 끝만 변환하면 양방향 bytes 동일하다. V48의 두 형식 지문은 모두 맞으며 고정판·채택판·문서판의 raw blob도 같다. 기존 보고서·봉인·기대값을 고치지 않았다.
+- 다음 U-331 MODELS-CORE는 codex-loop 구현/codex-probe 검증으로 새 app/models-command.ts·CLI models.ts·새 관련 시험을 소유한다. app.ts와 공개 계약은 제외하고 core와 앱 직접 연결을 직렬로 나눈다. 실제 채택 부모 source gate 후 시작하며 sync completion·기존 ask Promise·getter/this·최종 JSON/전체 가림 순서를 보존한다. CLI85와 APP20을 core 단계부터 함께 검증한다. 1,500줄을 넘는 논리 폐쇄는 별도 분할한다.
+- 최종 그래프 도구의 독립 검토에서 package imports alias가 node:module로 해석되는 합성 runtime 사례의 거짓0을 찾았다. 같은 사례는 source에서 incomplete여서 이중 게이트 우회·제품 결함으로 주장하지 않는다. 원본 도구/30사례/봉인은 보존하고 SEC가 별도 v2에서 실제 해석 뒤 capability를 판정하도록 수정 중이며 AUDIT 재확인 전 최종 완료에 쓰지 않는다. 기존 API·키 파일·외부 시험망 금지, 사용자 질문과 한계는 그대로다.
+
 ## 진행 요약 (CP-41, 2026-11-14) — 전체 파서 채택, 설정 writer 준비
 
 - main/origin/main `056ed984730df0932ca0fab1e1059bfc551215d3`: U-329 C11-ARGS 채택·푸시. 구현 `dac2ad05`, 정확한 최종 판 `79371e7d19b7abb28bc1415d5000420e3d5dad2b`, 검증·병합 트리 `94630692419f510f0319e094f19bee00748c51a2` 일치. 네 파일 +644/-595=1,239줄이다. 원래 594줄 parser는 app/input/args.ts로 옮기고 상대 import 7곳만 바꿨다. CLI args.ts는 모든 값·형의 재수출, app.ts는 import 원천 한 줄만 바꿨다. 기존 runs 전용 파서는 그대로다.

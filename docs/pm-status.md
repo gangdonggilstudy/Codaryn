@@ -38,6 +38,15 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-45, 2026-11-14) — 강제 종료 복구와 Codex 재교육
+
+- 사용자 재개 지시로 codex-review가 Codaryn 오케스트레이션을 이어간다. 최신 사용자 지시: Claude에는 토큰 소진으로 업무를 배정하지 않는다. 기존 Codex 작업 지시는 재확인 없이 직접 전달한다. 작업자는 결과를 오케스트레이터에게 제출하며 **원격 push는 오케스트레이터만 수행한다**. 다른 프로젝트의 세션은 배정하지 않았다.
+- 복구 기준은 main/origin/main `88484a844d9c093f5da3d971b5d5ddaa73af7a58`(CP44 기록)이다. 초기 main은 깨끗했고 기존 worktree를 모두 조회했다. U333의 `claude-store` / `unit/U-333-codex-check`에 중단 전 새 시험 `tests/unit/app/u333-init-command.test.ts` 하나가 미추적으로 남아 있어 보존·재사용을 명시했다. 나머지 기존 worktree 11개에는 변경 표시가 없었다. 새 worktree를 만들거나 기존 변경을 지우지 않았다.
+- OPTIONAL(`w3:t3`)·OPTIONAL-sub(`w3:t5`)의 기존 Codex 다섯 worker를 확인하고 역할 이름을 복구했다. `codex-check`(`w3:pD`)는 U333 구현, `codex-sec`(`w3:pC`)는 V52 독립 검증, `codex-loop`(`w3:p8`)는 U334 후속 구현, `codex-probe`(`w3:pF`)는 U334 독립 검증, `codex-audit`(`w3:pE`)는 REPORT 독립 감사 준비를 맡는다. PM은 `w3:p3`이다. Claude pane에는 업무를 보내지 않았다.
+- 다섯 worker에게 main AGENTS·personas·development-workflow·CP44·현재 배정표를 읽히고 역할, 소유 파일/worktree/브랜치, 완료 기준, 금지사항, OLD 확인→구현→정확한 통합판 전체 검사→독립 검증→PM 채택 순서를 복창하게 해 확인했다. 현재 CHECK만 제품을 구현한다. 나머지는 각자 교육 기록만 지정된 ignored 경로에 남기고 기준을 동결한 채 대기한다. 모든 worker의 직접 push를 금지했으며 CHECK는 stage/commit도 하지 않고 READY 후 명령을 정지한다.
+- PM이 기존 SEC 실제 부모 `88484a84` gate 보고를 다시 읽었다(CLI40+APP16/182조건 차이0, 원본 및 새637봉인 보존). 이는 중단 전 검증 증거이며 이번 후보 검증으로 세지 않는다. 재개 후 CHECK의 기존 제품 새 빌드에서 새 공개 시험 12개 통과 로그를 확인했다. CP44의 전체 검사 결과는 이전 실행 기록이며 재부팅 후 전체 검사 완료로 기록하지 않는다. U333은 아직 구현·후보 전체 검사·V52·채택 전이다.
+- 다음 순서는 U333 READY 검토→PM 커밋과 정확한 통합판 전체 검사→SEC V52→SHA/tree·staged 비밀 검사·작성자/메시지 확인 후 PM 채택·push→실제 부모를 지정해 LOOP U334를 연다. JSON·REPORT·최종 그래프는 그 뒤다. 기존 corpus/oracle/expected/seal·실패 기록을 보존한다. 실제 API·키 조회·외부 시험망 금지, 이력 재작성·새 worktree 금지 및 U321 경쟁 경계 등 기존 미해결 한계는 유지한다.
+
 ## 진행 요약 (CP-44, 2026-11-14) — 앱 모델 직접 연결 채택, 초기화 core 준비
 
 - main/origin/main `d3db0d26d2ae95cf126e7c8a5607023567254c83`: U-332 APP-MODELS-DIRECT 채택·푸시. 구현 `8a864de3`, 최종 판 `1575bde19948162612bf1af1d3e49ccc28a04375`, 검증·병합 트리 `b8761df68721d67554ccf34a18445cc80d599077` 일치. 두 파일 +193/-5=198줄이다. app.ts는 모델 core와 canonical hook형을 직접 쓰고 private Promise adapter에서 기존 JSON·가림을 완료한다. CLI/core/writer/계약/기존 시험은 그대로다.

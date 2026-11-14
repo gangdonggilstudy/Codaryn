@@ -9,14 +9,19 @@
 // - U-167: a third build with nine texts changed (three of codaryn models, and the six that carry
 //   U-131's five hand-off texts) differs in the models and hand-off cases exactly at the steps that
 //   show them, and only by those texts.
+// - U-313: the file system faults' preload (fsFaults) on its own, in a child process: a hard link
+//   under the named folder fails with ENOTSUP and one beside it is made; the named lock file cannot be
+//   removed (EPERM) and another file can.
 // Scripted models, and a fake API on 127.0.0.1 for the cases that need one; nothing leaves the
 // machine. The temporary folder is removed at the end.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { compareBuilds, main, prepareBoard, reportOf } from "../compare-cli-boards.mjs";
 import { CASES } from "./cases.mjs";
 import { compareSides, diffLines, normalizeSide, pathForms } from "./normalize.mjs";
@@ -259,6 +264,50 @@ describe("two real builds of HEAD", () => {
     const lines = results.flatMap((result) => result.differences.flatMap((item) => item.lines.map((line) => line.head)));
     for (const word of ["overrides it", "applied in run", "Undo: ", "made only", "has the moves", "came from another", "put into", "고를 수 있는", "Saved"]) {
       assert.ok(lines.some((line) => line.includes(word)), `seen: ${word}`);
+    }
+  });
+});
+
+describe("U-313: the file system faults' preload", () => {
+  test("links under the folder fail as on a volume without hard links; the lock file cannot be removed", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "codaryn-compare-faults-"));
+    try {
+      writeFileSync(path.join(dir, "source.txt"), "a\n");
+      writeFileSync(path.join(dir, "lock.json"), "{}\n");
+      writeFileSync(path.join(dir, "other.json"), "{}\n");
+      const preload = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), "fs-faults-preload.mjs")).href;
+      // The child tries each call through node:fs/promises' named imports, as the CLI's modules make them.
+      const script = [
+        'import { link, rm, mkdir } from "node:fs/promises";',
+        'import path from "node:path";',
+        "const dir = process.argv[1];",
+        "const code = (promise) => promise.then(() => 'ok', (error) => error.code);",
+        "await mkdir(path.join(dir, 'work'));",
+        "const out = {",
+        "  under: await code(link(path.join(dir, 'source.txt'), path.join(dir, 'work', 'moved.txt'))),",
+        "  beside: await code(link(path.join(dir, 'source.txt'), path.join(dir, 'beside.txt'))),",
+        "  lock: await code(rm(path.join(dir, 'lock.json'))),",
+        "  other: await code(rm(path.join(dir, 'other.json'))),",
+        "};",
+        "process.stdout.write(JSON.stringify(out));",
+      ].join("\n");
+      const faults = JSON.stringify({ noLinksUnder: path.join(dir, "work"), failLockRemoval: path.join(dir, "lock.json") });
+      const child = spawnSync(process.execPath, ["--import", preload, "--input-type=module", "-e", script, dir], {
+        encoding: "utf8",
+        env: { ...process.env, CODARYN_CMP_FS_FAULTS: faults },
+      });
+      assert.equal(child.status, 0, child.stderr);
+      assert.deepEqual(JSON.parse(child.stdout), { under: "ENOTSUP", beside: "ok", lock: "EPERM", other: "ok" });
+      assert.equal(existsSync(path.join(dir, "lock.json")), true, "the lock file is still there");
+      // Without the variable the preload changes nothing.
+      const plain = spawnSync(process.execPath, ["--import", preload, "--input-type=module", "-e", 'import { link } from "node:fs/promises"; import path from "node:path"; await link(path.join(process.argv[1], "source.txt"), path.join(process.argv[1], "work", "plain.txt"));', dir], {
+        encoding: "utf8",
+        env: { ...process.env, CODARYN_CMP_FS_FAULTS: "" },
+      });
+      assert.equal(plain.status, 0, plain.stderr);
+      assert.equal(existsSync(path.join(dir, "work", "plain.txt")), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

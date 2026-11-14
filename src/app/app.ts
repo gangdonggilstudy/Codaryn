@@ -57,21 +57,20 @@ import { runInit } from "../cli/init.js";
 import { runModels } from "../cli/models.js";
 import { applyLife } from "./apply-life.js";
 import type { ApplyLifeEnd } from "./apply-life.js";
-import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { renderApplyReport, renderReport } from "../cli/report.js";
 import { jsonLine } from "../cli/guard.js";
 import { parseApplyArgs, parseArgs, parseDoctorArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "../cli/args.js";
-import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
 import { readReport } from "./report-read.js";
 import { hideKeys, hideKeysInStrings } from "./input/text-safety.js";
 import { prepareFor, recordReview, showPlan } from "./plan-view.js";
+import type { PlanViewEnvironment } from "./plan-view.js";
 import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
 import { runLife } from "./run-life.js";
-import type { RunLifeEnd } from "./run-life.js";
+import type { RunLifeEnd, RunLifeEnvironment } from "./run-life.js";
 import { tallyOf } from "./tally.js";
 import { knownKeyValues } from "./input/settings.js";
 import { applyArguments, deliverApply } from "./apply.js";
@@ -257,8 +256,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   function cliEnvironmentOf(
     argv: readonly string[],
     env: Record<string, string | undefined>,
-    parts: Pick<CliEnvironment, "assemble" | "cancelSignal"> & { readonly runTask?: RunTask; readonly runApprovedPlan?: RunApprovedPlan },
-  ): CliEnvironment {
+    parts: Pick<RunLifeEnvironment, "assemble" | "cancelSignal"> & { readonly runTask?: RunTask; readonly runApprovedPlan?: RunApprovedPlan },
+  ): PrepareEnvironment & RunLifeEnvironment & { readonly argv: readonly string[] } {
     return {
       argv,
       env,
@@ -346,7 +345,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       engineNotices = ended.notices.length;
       return ended;
     };
-    const cancelSignal: CliEnvironment["cancelSignal"] = (cancelFile) =>
+    const cancelSignal: RunLifeEnvironment["cancelSignal"] = (cancelFile) =>
       createRunCancelSource({
         cancelFile,
         fileExists: (file) => existsSync(file),
@@ -885,7 +884,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
    * this call's own environment copy: the variables file is loaded into it, never into the
    * caller's object or `process.env`.
    */
-  function planCommandEnvironment(argv: readonly string[]): PlanCommandEnvironment & { readonly env: Record<string, string | undefined> } {
+  function planCommandEnvironment(argv: readonly string[]): PlanViewEnvironment & { readonly argv: readonly string[]; readonly env: Record<string, string | undefined> } {
     const env = copyEnvironment(environment.env, platform);
     return {
       argv,

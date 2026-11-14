@@ -13,7 +13,7 @@ import { LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_EXIT_CODES, RUNS_MAX_LIMIT }
 import type { RunListing, RunsOutput } from "../contracts/index.js";
 import { listRuns as storeListRuns } from "../store/index.js";
 import { RUN_ID_PATTERN } from "../contracts/index.js";
-import { resolveWorkspaceRoot } from "../cli/runs.js";
+import { resolveWorkspaceRoot } from "./workspace-root.js";
 import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "./input/run-ref.js";
 import { knownKeyValues } from "./input/settings.js";
 // U-315 (C-9a): the shared key hiding for the JSON, in place of a copy of it here.

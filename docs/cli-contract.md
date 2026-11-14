@@ -1521,6 +1521,18 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 출력(계약의 `CleanupOutput`, U-22·DR-48·AXM-3): `status`가 일어난 일을 말하고 종료 코드는 `CLEANUP_EXIT_CODES`를 따른다. `preview`(종료 0, `summary`·`plan`), `removed`(0: 지운 것이 있고 문제로 남긴 것이 없음), `nothing_removed`(3: 지운 것이 없고 문제로 남긴 것도 없음. 확인을 주지 않았거나 규칙으로 남긴 것뿐), `partly_failed`(1: `CLEANUP_PROBLEM_KEPT_REASONS`의 이유로 남긴 것이 있음). 뒤의 셋은 `outcome`을 담고 `outcome.ok`는 `removed`일 때만 true다. 예전의 `mode` 필드는 없다. 확인한 다이제스트가 계획의 것이 아니면 `CleanupOutput`이 아니라 오류 `cleanup_plan_changed`(종료 2)이고 아무것도 지우지 않는다. 지운 것이 없으면 글은 "Nothing was removed."로 시작한다. U-13(UXM-1): 폐기 보관함에 파일이 남는 적용 실행의 기록은 그 폐기 보관함을 같은 정리에서 지우지 않으면(`--delete-discarded`와 폐기 보관함 선택) 남긴다(`discarded_left`, 그 적용이 쓰는 계획 실행은 `used_by_kept_apply`). 미리보기는 그런 적용의 수를 안내 줄로, 완료 출력은 `cleanup.done_discarded_left` 줄과 항목별 이유로 알린다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
 - 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
 - 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.
+- 자리(이행 C-9b, U-319): 검사 뒤의 일은 앱과 CLI가 한 벌로 쓴다. 앱의 `src/app/cleanup.ts`가 그 일을 한다.
+  - `summaryOf`: store의 요약.
+  - `cleanupPlanOf`: 검사를 마친 선택과 시각으로 만든 계획.
+  - `cleanupConfirmed`: 계획의 전체 다이제스트로 하는 store의 정리, 상태 규칙(`ok`는 `removed`일 때만), 실패의 코드.
+  - GUI가 쓰는 앱의 `stateSummary`·`previewCleanup`·`applyCleanup`도 이 셋을 부른다.
+  - 작업 공간은 앱의 `resolveWorkspaceRoot`(`src/app/workspace-root.ts`, S-5)로 정한다. 글은 전과 같다.
+  - CLI(`src/cli/cleanup.ts`)에 남는 것
+    - 인자 해석(`parseCleanupArgs`)과 그 한계. 앱은 자기 요청의 꼴을 따로 검사한다. 날 수, 실행 id의 수, `latest`, 겹친 id에서 둘의 한계가 다르다. 하나로 맞추는 일은 이행 뒤의 기능 단위 후보다.
+    - 보인 계획과 다이제스트 앞부분 맞춤.
+    - 요약과 계획을 한 출력으로 묶는 일.
+    - 코드에 붙이는 CLI의 글: `workspace_locked`, `cleanup_plan_changed`, `internal_error`.
+    - 렌더러(`renderCleanup`, `itemName`)와 키 가림.
 
 ### 18.14 읽기 명령의 가벼운 형식과 `--workspace` 생략 (U-17, UXM-3, UXM-19, AXM-14, DR-46)
 

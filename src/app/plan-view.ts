@@ -74,8 +74,8 @@ import { goalHoldsKey } from "./input/security/index.js";
 import type { PrepareEnvironment, PreparedTask, RunArgs, RunNotes } from "./prepare.js";
 import { knownKeyValues } from "./input/settings.js";
 import { cleanText, hideKeys } from "./input/text-safety.js";
-import { changesPlanOutput } from "../cli/human/changes-plan.js";
-import type { LoadedChangesPlan } from "../cli/human/changes-plan.js";
+import { changesPlanOutput } from "./changes-plan-output.js";
+import type { LoadedChangesPlan } from "./changes-plan-output.js";
 
 /**
  * G-F (DR-17): the task form `plan`, `apply` and `review` share with `run`: `--task <file>`, or

@@ -21,7 +21,7 @@
 
 import { approvedPlanWritablePathSets } from "../contracts/index.js";
 import type { ChangesPlanOutput, LoadPlanOutcome, PolicyConfig, PrivacyGateway, WritablePathSet } from "../contracts/index.js";
-import { changesPlanOutput } from "../cli/human/changes-plan.js";
+import { changesPlanOutput } from "./changes-plan-output.js";
 import { runGuards } from "./input/unreadable.js";
 import { judgePlannedFile } from "../engine/index.js";
 import { hasRecordsChangedMark, loadAnyPlan } from "../store/index.js";

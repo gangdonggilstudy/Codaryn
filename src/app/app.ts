@@ -61,7 +61,7 @@ import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { renderApplyReport, renderReport } from "../cli/report.js";
 import { jsonLine } from "../cli/guard.js";
-import { parseApplyArgs, parseArgs, parseDoctorArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "../cli/args.js";
+import { parseApplyArgs, parseArgs, parseDoctorArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
 import { readReport } from "./report-read.js";

@@ -721,7 +721,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - 엔진의 재수정 반복과 CLI의 새 한도·보호 경로 전달은 연결되어 있다.
 - 실행 조립(`src/app/assembly.ts`의 `assembleRun`. 이행 C-4 전에는 `src/cli/assemble.ts`)은 실행마다 `createChangeRecorder({ workspaceRoot, runId })`를 만들어 `createToolRunner`의 `changeRecorder`로 넘긴다. 따라서 `write_file`은 쓰기 전에 원문을 스냅샷으로 남긴다.
-- `src/cli/main.ts`는 `revert` 명령에 `createRevertCommand(revertRun)`을 넘긴다. 이 함수는 journal 확인, 잠금, `revertRun` 호출, 잠금 해제를 한다.
+- `src/cli/main.ts`는 `revert` 명령에 `createRevertCommand(revertRun)`을 넘긴다. 이 함수는 journal 확인, 잠금, `revertRun` 호출, 잠금 해제를 한다. 이행 C-9a(U-314)부터 이 함수와 `revert`의 규칙(`startRevert`: S-5, 작업 공간, DR-25의 동의 통로; `revertOnce`; `revertOutput`)은 앱의 `src/app/revert-command.ts`에 있다. CLI(`src/cli/revert.ts`)에는 인자 해석, DR-25의 터미널 질문(동의하면 한 번 더 부름), 계획 실행의 안내(`appliedPlanHint`), 출력이 남는다.
 - 유닛 검증(`tests/unit/cli/sc-wire.test.ts`)에서 실제 저장소로 실행하고 되돌려 다음을 확인했다.
   - 원래 바이트가 복원된다.
   - 실행이 만든 파일이 지워진다.
@@ -1382,7 +1382,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - 터미널에서 되돌리기가 `unsafe_move`로 건너뛴 파일이 있으면 그 수를 넣어 `[y/N]`을 한 번 묻는다(`cli-tty`).
     - 예이면 그 실행만 동의를 붙여 다시 되돌린다.
     - 이미 되돌린 파일은 `already_reverted`로 건드리지 않는다.
-  - 앱 계층: `RevertEnvironment.adapter`(`AdapterRevert`, `src/cli/revert.ts`)
+  - 앱 계층: `RevertEnvironment.adapter`(`AdapterRevert`, 이행 C-9a부터 `src/app/revert-command.ts`. `src/cli/revert.ts`가 다시 내보낸다)
     - 호출자가 사람의 화면 입력으로 그 되돌리기 한 번에 받은 동의만 넘긴다. 경로는 `adapter`, `runId`는 되돌리는 실행이어야 한다. 아니면 실행 전에 `invalid_arguments`다.
     - 터미널 질문은 하지 않고, `--allow-unsafe-move`는 거부한다.
 - store에는 `RevertRequest.unsafeMoveConsent { channel, runId }`로 넘긴다. 그렇게 옮긴 파일은 `reverted`에 `unsafe: true`로 나온다.

@@ -38,6 +38,14 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-39, 2026-11-14) — 공용 정리 A 채택, B 통합 검증
+
+- main/origin/main `38d4591e5d4a3cbe4a37b681066d02f9c3ed31bd`: U-327 SHARED-A 채택·푸시. 구현 `35eb7006`, 최종 판 `4c05d17378d71f643c14af7ee8bd83b992401b2c`, 검증·병합 트리 `4385e6f064c6d8ae8da8e1915068f55321be711d` 일치. 네 파일 +25/-9다. app.ts의 기존 앱 환경형 참조와 reader/resolver 원천 import만 정리했고 새 공개 포트는 없다. 컴파일한 app.js 55,889바이트가 OLD와 같고 옛 CLI 함수 binding도 유지했다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,229 중 4,218 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u327-final-evidence/`. 종료 집계를 읽은 뒤 독립 검증을 열고 최종 보고를 읽은 뒤 정확한 SHA를 별도 병합했다.
+- [V46](reviews/2026-11-14-v46-codex-verify-u327.md) 높음 0/중간 0/낮음 0. 불변 V44 60사례/604조건 차이 0, 31+9봉인 불변, strict 타입 호환 검사와 옛 경로 함수 5개 identity 통과. 관련 93개 고유 사례는 최초 92통과/1환경 실패였으며, 빠진 PowerShell PATH를 보완한 뒤 실패 사례 하나만 재실행해 통과했다. 최초 전체 명령의 종료 1과 재실행 로그를 보존했으며 처음부터 전체 통과였다고 처리하지 않았다.
+- U-328 B는 codex-check의 구현 `b7c237ff`로 다섯 파일 +119/-84를 동결했다. 순수 changes 계획 출력 closure만 이동하고 CLI 질문·renderer는 남긴다. 이 문서가 채택된 A main에 B를 합친 정확한 별도 판에서 PM 전체 검사 후 codex-sec의 V47을 받는다. 작업자 옛 기준에서의 시험으로 최종 union 검증을 대신하지 않는다. 다음 args·writer·models·init·표시·최종 그래프는 기존 순서이며 app.ts 작성자는 계속 한 명이다.
+- codex-probe는 자체 새 archive에서 models 명령의 OLD 비교 기준만 준비한다. 제품 수정은 없고 실제 args/writer 뒤 parent의 원천 확인 전 구현을 열지 않는다. API·키 파일·외부 시험 네트워크 금지, 사용자 확인 대기와 기존 한계는 그대로다. 전체 app→CLI 의존 0을 아직 선언하지 않는다.
+
 ## 진행 요약 (CP-38, 2026-11-14) — C10 완료, 공용 정리 분담
 
 - main/origin/main `ae90664b6180c965c3c23aea50e23eed7c0ec674`: U-326 APP-DOCTOR 채택·푸시. 구현 `a70c71cc`, 최종 판 `de99a20d86905ca035559b835db5d60b946af90e`, 검증·병합 트리 `7f35dc0faef78e70491c39eda5c25b08c0a647a6` 일치. app.ts doctor/import와 새 공개 시험 두 파일만 +193/-4다. 요청·io 구성 원문, inner Promise 한 번 await, 동기 completion의 JSON/전체 가림, 기존 결과·예외 변환을 유지했다. C10의 helper→core→앱 연결 세 단위가 모두 채택됐다.

@@ -441,6 +441,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "skip.missing_snapshot": "no copy of the original",
   "skip.io_error": "cannot be read or written",
   "skip.missing_record": "no record",
+  "runs.skipPathHidden": "A file shown as ? has no record: its name comes unmasked and may hold a registered secret, so it is not shown (as in the CLI's summary).",
   "skip.already_reverted": "already reverted",
   "skip.original_path_taken": "another file is at the original place",
   "skip.unsafe_move": "skipped: a move that could replace a file",

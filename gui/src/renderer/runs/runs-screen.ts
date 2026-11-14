@@ -42,7 +42,7 @@ function word(t: Texts, prefix: string, value: string): string {
   return t.has(id) ? t.format(id) : value;
 }
 
-function revertList(t: Texts, view: RevertView): HTMLElement[] {
+export function revertList(t: Texts, view: RevertView): HTMLElement[] {
   const out: HTMLElement[] = [];
   // U-32 (UXM-14, DR-38): as the CLI's revert says it; the revert is not refused.
   if (view.recordsChanged === true) out.push(el("p", t.format("runs.revertRecordsChanged"), { class: "notice", id: "revert-records-changed" }));
@@ -58,8 +58,10 @@ function revertList(t: Texts, view: RevertView): HTMLElement[] {
   out.push(el("h4", t.format("runs.toSkip", { count: String(view.skipped.length) })));
   if (view.skipped.length > 0) {
     const list = el("ul", undefined, { class: "skip-files" });
-    for (const file of view.skipped) list.append(el("li", `${file.path}: ${word(t, "skip", file.reason)}`, { "data-reason": file.reason }));
+    // U-318 (R-119 L-1): a path not sent (missing_record) is "?", as the CLI's summary shows it, with why.
+    for (const file of view.skipped) list.append(el("li", `${file.path ?? "?"}: ${word(t, "skip", file.reason)}`, { "data-reason": file.reason }));
     out.push(list);
+    if (view.skipped.some((file) => file.path === null)) out.push(el("p", t.format("runs.skipPathHidden"), { class: "notice", id: "revert-path-hidden" }));
   }
   if (view.moveSafetyUnchecked) out.push(el("p", t.format("runs.moveSafety"), { class: "notice" }));
   if (view.revertedBefore !== null) out.push(el("p", t.format("runs.revertedBefore", { time: localDateTime(view.revertedBefore.at) }), { class: "notice" }));

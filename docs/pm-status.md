@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-44, 2026-11-14) — 앱 모델 직접 연결 채택, 초기화 core 준비
+
+- main/origin/main `d3db0d26d2ae95cf126e7c8a5607023567254c83`: U-332 APP-MODELS-DIRECT 채택·푸시. 구현 `8a864de3`, 최종 판 `1575bde19948162612bf1af1d3e49ccc28a04375`, 검증·병합 트리 `b8761df68721d67554ccf34a18445cc80d599077` 일치. 두 파일 +193/-5=198줄이다. app.ts는 모델 core와 canonical hook형을 직접 쓰고 private Promise adapter에서 기존 JSON·가림을 완료한다. CLI/core/writer/계약/기존 시험은 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,294 중 4,283 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u332-final-evidence/`. 전체 결과 후 독립 검증을 열고 최종 보고·트리·staged 검사를 읽은 뒤 별도 병합했다.
+- [V51](reviews/2026-11-14-v51-codex-verify-u332.md) 높음 0/중간 0/낮음 0. 원래 CLI85/541·APP20/157=105사례/698조건 차이0·205+335봉인 불변. 후보32와 같은 assertion OLD10 통과, 소스40비교·strict hook/Promise 타입 통과. 전체 app.ts는 명시한6경계만 다르고 models 본문은 callee 외 동일하다. pretry 요청/env 복사·io 구성·1await/jsonOutcome/catch·가림과 getter/this·지연 Promise를 유지했다. 공개 함수 종류도 유지했다.
+- 초기 OLD의 8통과/1실패/1cancel은 Windows 합성 fixture 경로 비교 오류였고 app.ts 수정 전 path.resolve로 바로잡아 OLD10을 먼저 고정했다. 최초 컴파일/TS5112/EOL 경고 도구 오류도 보존했으며 독립 검증자가 원문 이력을 별도로 보존했다. 후보에 맞춰 기존 oracle·기대값을 고치지 않았다.
+- 모델 core→앱 연결의 두 단위가 끝났다. 앱은 CLI models의 값·형을 직접 가져오지 않으며 CLI는 같은 앱 core와 writer를 쓴다. guard/report/init 의존은 남으므로 전체 app→CLI 0은 아직 선언하지 않는다.
+- 다음 U-333 INIT-CORE는 codex-check가 helper 포함 core 한 벌과 CLI 외피를 맡고 app.ts는 제외한다. 새 app/init-core.ts·app/init-command.ts, CLI init.ts, app/init.ts의 canonical import, 새 공개/경계 시험을 약950~1300줄로 예상한다. 1500줄 초과 전망이면 helper만 먼저 별도 단위로 분리한다. 질문·숫자/언어 해석·표시를 CLI에 남기고 원래 async question/direct ask/lister·finish 순서를 보존한다. init wx 생성과 CAS writer를 통일하지 않는다. 실제 MODELS 뒤 부모 source gate와 CLI40+APP16 원래 기준을 먼저 확인한다. 앱 직접 연결은 그 뒤 별도 U-334다.
+- SEC는 기존 CLI40/APP16을 안전하게 재사용할 provisional 실행 경로를 준비하고 AUDIT는 고정 root를 요구하는 V42 보고서 oracle의 add-only head/출력 격리를 준비한다. 원본 corpus/봉인/기대값/예전 실행 파일은 그대로 두며 안전한 격리를 확인하지 못하면 진행하지 않는다. 그래프 v2와 독립 재검토는 동결됐고 실제 최종 C11 판의 source union/runtime CLI0·unknown0 검사는 아직 남았다. API·키·외부 시험망 금지 및 이전 사용자 질문·한계는 그대로다.
+
 ## 진행 요약 (CP-43, 2026-11-14) — 모델 core 채택, 앱 직접 연결 준비
 
 - main/origin/main `474c26c6cd5e0f878a697990be6e42d31a65f149`: U-331 MODELS-CORE 채택·푸시. 구현 `e69587cc`, 최종 판 `b6f610b88f0b5ff9eb5c9f4462ee8989d3ca290b`, 검증·병합 트리 `19c8f4e91711163ae6b33d31ee68d11843223bf9` 일치. 세 파일 +519/-298=817줄이다. app/models-command.ts가 규칙·내부 포트와 원래5await를 소유하고 CLI는 파서·질문·renderer·카탈로그·최종 가림을 유지한다. app.ts·계약·writer·고정 파일은 바꾸지 않았다.

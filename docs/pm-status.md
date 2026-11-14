@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-38, 2026-11-14) — C10 완료, 공용 정리 분담
+
+- main/origin/main `ae90664b6180c965c3c23aea50e23eed7c0ec674`: U-326 APP-DOCTOR 채택·푸시. 구현 `a70c71cc`, 최종 판 `de99a20d86905ca035559b835db5d60b946af90e`, 검증·병합 트리 `7f35dc0faef78e70491c39eda5c25b08c0a647a6` 일치. app.ts doctor/import와 새 공개 시험 두 파일만 +193/-4다. 요청·io 구성 원문, inner Promise 한 번 await, 동기 completion의 JSON/전체 가림, 기존 결과·예외 변환을 유지했다. C10의 helper→core→앱 연결 세 단위가 모두 채택됐다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,224 중 4,213 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 결과를 읽은 뒤 V45c를 열고 최종 독립 보고를 읽은 뒤 별도 병합했다. 증거 `.worktrees/pm-unit/.codaryn/codex-u326-final-evidence/`.
+- [V45c](reviews/2026-11-14-v45c-codex-verify-u326.md) 높음 0/중간 0/낮음 0. 원래 119+보충 22=141관찰 동일, 후보 88시험·OLD 20시험 통과, 공개 앱 Promise/결과 6쌍 및 CLI 8쌍 차이 0, 입력 101개·봉인 불변. core/types/helper/CLI/args/guard/command-outcome 7파일 바이트 동일. 공개 결과나 IPC에 raw context를 추가하지 않았다. 전체 app→CLI 의존 0은 아직 아니며 C11이 남았다.
+- 이행 계획의 문서 절차에 따라 adapter-contract 3절 현재 구조와 7.2 상태 열만 갱신했다. 옛 main b386166/6ef6e3a의 설계·실측 수치는 이력으로 보존했다. CLI 계약에 migration C10 doctor의 낡은 물리 위치 표기는 없어 변경하지 않았고, U100 설계 공백 C-10을 혼동해 고치지 않았다. 원래 호출 경로의 다른 역사 서술을 이번 문서 정정에 섞지 않았다.
+- 다음 공용 정리는 U-327 A(이미 앱에 있는 포트형·reader/resolver 원천 직접 참조)와 U-328 B(순수 changes 계획 출력 closure 이동)로 나눈다. A는 codex-loop가 기존 adapter worktree에서 app.ts의 타입 주석/import·run-events/runs import만, B는 codex-check가 기존 store worktree에서 새 changes-plan-output·옛 CLI human facade·changes-plan/plan-view import만 소유한다. B는 app.ts를 수정하지 않으며 새 command-ports나 중복 포트 interface는 필요 없다.
+- 이 두 단위는 소유 파일이 겹치지 않으므로 채택된 같은 C10 기준에서 각각 OLD oracle/source gate를 닫은 뒤 구현을 병렬로 열 수 있다. 통합은 A를 먼저 전체 검증·독립 검토·채택하고, B는 A가 채택된 main과 B 단위로 만든 정확한 별도 판에서 다시 전체 검증·독립 검토한다. A 검증자는 codex-audit(기존 V44 원본), B 검증자는 codex-sec(새 순수 출력 기준)이며 구현자와 분리한다. 그 밖의 app.ts 후속은 기존 직렬 순서를 유지한다.
+- B 잠정 기준은 codex-sec가 bb382b04의 공개 helper 24사례×두 legacy 경로=48관찰·같은 기준 차이 0·관련 16통과·34파일 봉인으로 준비했다. A는 실제 채택 parent에서 기존 V44 60사례/604조건과 31+9봉인을 확인한다. 소스 확인 전 구현을 열거나 새 결과로 기대값을 재생성하지 않는다. args/JSON/writer의 잠정 기준은 그대로 보존한다. 실제 API·키 파일·외부 시험 네트워크 금지, 사용자 출력 질문과 기존 위험은 이전 CP 범위 그대로다.
+
 ## 진행 요약 (CP-37, 2026-11-14) — doctor core 채택, 앱 연결 준비
 
 - main/origin/main `4034eb77b6397a6571574c8e5ed33c1175300bdb`: U-325 C10-2 core 이동 채택·푸시. 구현 `3c01d767`, 최종 판 `62cfd5d30cc5377ac64915228ce59e87d9703f4a`, 검증·병합 트리 `27d503322e3d93abf549ac4c53097de50b0e7dc2` 일치. 소유 4파일 +706/-635=1,341줄. 새 checkDoctor가 점검을 맡고 CLI는 파서·동기 completion 안의 원래 표시/가림을 유지한다. app.ts·기존 helper·renderer는 그대로다.

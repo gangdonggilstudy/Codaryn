@@ -50,3 +50,46 @@
 사용자가 optional 탭(w1:t2)의 추가 Claude 세션 사용을 승인했다. 빈 세션 p5, p6, p7을 배정했고 p8은 예비다.
 
 2026-11-12 일시 정지 뒤 사용자가 새 Herdr 세션 w3의 w3:p1에 오케스트레이터(임시 PM)를 맡겼다. 위임 ID, 범위, 회수 규칙은 그대로이며 `pm-control.json`의 담당 pane과 세션만 바꿨다. 세션 배치와 사용자 지시는 [임시 PM 상태](pm-status.md)의 CP-12를 따른다.
+
+## 2026-11-14 Codex로 전수 인계 (임시 PM w3:p1 기록)
+
+사용자가 2026-11-14 오전에 Claude 쪽 토큰이 다했을 것이라며 Codex들에게 전수 인계하라고 지시했다. 임시 PM(w3:p1)은 이 절을 쓰고 푸시한 뒤 새 배정·병합·푸시를 멈춘다. `pm-control.json`은 임시 PM이 바꾸지 않았다: 위의 회수 규칙대로 Codex가 `status`를 `revoked`로(또는 담당을 Codex로) 바꾼다.
+
+### 읽을 것 (이 차례로)
+
+1. [임시 PM 상태](pm-status.md)의 CP-27(인계 시점의 상태), CP-26, CP-25.
+2. [CLI 구조 이행 계획](reviews/2026-11-13-cli-migration-plan.md)과 [단계 4·5 설계와 결정 기록](work-orders/phase-4-5-design.md)의 DR-65~DR-74.
+3. `docs/reviews/2026-11-14-*`: Codex 검증 V-27~V-36, 검토 R-111~R-119.
+4. 각 작업자의 보고서는 그 worktree의 `.codaryn/`(gitignore)에 있다. 다른 worktree의 `.codaryn/`은 읽을 수 있으나 고치지 않는다.
+
+### 지금 상태 한눈에
+
+- main = origin/main = CP-27의 해시 뒤의 이 문서 커밋. 작업 트리는 깨끗하다.
+- 병합 대기 중인 판은 없다. 커밋은 있으나 완료 보고 전인 가지: `unit/U-319-na-core`(C-9b), `unit/U-318-p5u-gui`.
+- Claude 작업자 여덟(w3:p2 na-core, p4 ne-verify, p5 nb-i18n, p6 nc-human, p7 nd-docs, p9 p4g-general, pA p5a-adapter, pB p5u-gui)은 토큰이 다하면 멈춘다. 멈춘 세션의 한도·크레딧 질문에는 답하지 않는다(사용자 몫). 미커밋 변경은 보존한다.
+
+### 바로 이어갈 순서 (권장)
+
+1. `git -C D:\project\Codaryn status -sb`와 `git worktree list`로 main이 원격과 같고 깨끗한지 확인한다.
+2. 기준 수치를 다시 잰다: main에서 `npm ci`, `npm run typecheck`, `npm run test:unit`, `npm run test:integration`(CP-27의 수치와 맞는지), 루트 `npm run build` 뒤 `gui`에서 `npm test`, 그리고 Electron이 있는 곳에서 `npm run test:smoke`(227).
+3. `unit/U-319-na-core`(C-9b)와 `unit/U-318-p5u-gui`가 끝났는지 본다(담당의 보고 또는 가지의 마지막 커밋과 그 worktree의 `.codaryn` 보고서). 끝났으면 아래 "병합 절차"로 판을 만들어 검증한다. C-9b는 파일을 지우는 명령이라 독립 검증을 거친다.
+4. C-7b의 CLI 전환: `src/cli`의 apply가 `src/app/apply-life.ts`(U-313, 아직 부르는 곳 없음)를 부르게 한다. 계획은 na-core의 보고서 `.worktrees/claude-workspace/.codaryn/report-N-A.md` §144와 p5a의 `.worktrees/claude-adapter/.codaryn/c7b-prep-p5a.md`에 있다. 앱의 applyPlan이 이 수명을 부를 때는 관찰자를 두 번 주지 않는다(p5a의 메모).
+5. 앱 쪽 손 셋(app.ts를 차례로): C-8의 report, C-9a의 revert, C-7b 뒤의 applyPlan.
+6. 남은 이행 단계 C-10, C-11과 정리(다시 내보내기). 그 뒤 고정 출력이 바뀌는 항목들은 사용자 승인 뒤에(질문 정리: `.worktrees/claude-general/.codaryn/report-pin-change-questions.md`).
+
+### 병합 절차 (임시 PM이 쓰던 것)
+
+- 판: 관리용 worktree `D:\project\Codaryn\.worktrees\pm-unit`에서 `git checkout -B pm/unit-<이름> main` 뒤 단위 가지를 `--no-ff`로 병합하고(충돌이면 멈추고 담당이 main을 받는다), `npm ci`, typecheck, `test:unit`, `test:integration`, `node scripts/check-secrets.mjs --tracked`, 고정 파일 셋의 diff(`tests/unit/cli/sp0-expected.ts`, `tests/unit/model/anthropic/sp0-golden.ts`, `tests/unit/cli/human/real-catalog.test.ts`)를 본다. 이행 단계는 `node scripts/compare-cli-boards.mjs --base main --head <판>`으로 모든 사례가 same인지 본다. GUI에 닿으면 루트 `npm run build` 뒤 `gui`에서 `npm test`(통과 수만이 아니라 건너뜀·todo 수도 읽는다).
+- **판 결과에서 실패 0을 읽은 뒤, 다른 호출로 병합한다**(한 명령에 묶지 않는다).
+- 병합: 관리용 main에서 `git merge --no-ff --no-commit <판>` → 병합 트리가 검증한 판의 트리와 같은지(`git write-tree` 대 `<판>^{tree}`) → `check-secrets --staged` → 작성자 `gangdonggil <gangdonggilstudy@gmail.com>`로 한 줄 제목만의 커밋(본문·trailer 없음) → `git push origin main`.
+- 임시 PM의 도우미 스크립트 사본: `D:\project\Codaryn\.codaryn\pm-tools\`(gitignore; `v.sh` 판, `mg.sh` 병합, `wait.sh`·`st.sh`는 Herdr 상태 보기). Git Bash용이다.
+- 임시 worktree를 만들지 않는다(`git worktree add`는 관리자 몫, workflow §10). 독립 검증은 `git archive` 사본을 `.worktrees/codex-verify/.codaryn/<이름>/` 아래에 풀어서 한다.
+
+### 지켜 온 규칙 (사용자 지시와 그동안의 교훈)
+
+- 실제 API 호출은 지시가 없어 한 번도 하지 않았다. 키 파일을 읽지 않는다. 외부 네트워크 없이 127.0.0.1만 쓴다.
+- force push·이력 재작성·`--no-verify`·amend 금지. 커밋 메시지의 마지막 줄이 trailer로 읽히지 않게 한다.
+- 보안·정합에 닿는 단위는 독립 검증 뒤에 병합한다. 시험 통과만으로는 결함을 여러 번 놓쳤다(CP-24의 기록).
+- 대기 중인 판이 있으면 같은 파일(특히 `docs/cli-contract.md`, `docs/design/adapter-contract.md`, `scripts/compare-cli/cases.mjs`, 목록 시험 `tests/unit/cli/u280-dist-old-paths.test.ts`)을 건드리는 다른 단위를 먼저 넣지 않는다.
+- 이행에서는 출력과 JSON을 한 글자도 바꾸지 않는다. 고정 출력이 바뀌는 일은 사용자에게 묻는다.
+- 새 지침은 사용자 확인 뒤에만 더한다. 사용자 결정이 필요한 질문은 모아 두었다가 권장과 함께 하나씩 묻는다(목록은 pm-status의 CP-25~CP-27).

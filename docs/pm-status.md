@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-37, 2026-11-14) — doctor core 채택, 앱 연결 준비
+
+- main/origin/main `4034eb77b6397a6571574c8e5ed33c1175300bdb`: U-325 C10-2 core 이동 채택·푸시. 구현 `3c01d767`, 최종 판 `62cfd5d30cc5377ac64915228ce59e87d9703f4a`, 검증·병합 트리 `27d503322e3d93abf549ac4c53097de50b0e7dc2` 일치. 소유 4파일 +706/-635=1,341줄. 새 checkDoctor가 점검을 맡고 CLI는 파서·동기 completion 안의 원래 표시/가림을 유지한다. app.ts·기존 helper·renderer는 그대로다.
+- 최초 미커밋 후보의 await checkDoctor가 I/O 없는 호출에도 새 중단점을 만들었다. PM 재현에서 호출 직후 terminal 옵션을 바꾸면 출력이 1,342→1,744자로 달라져 채택하지 않았다. 동기 completion과 core Promise 직접 반환으로 고쳤다. 정확한 OLD의 고정 scheduling 8시험은 기준 8통과 → 거부 후보 2통과/6실패 → 수정 8통과이며 trace·출력 bytes/hash도 일치했다. 이전 289시험 통과만으로 이 회귀가 없었다고 처리하지 않았다.
+- CLI runDoctor는 Promise<CommandOutcome> 서명·예외 거부·관찰 순서를 유지하는 일반 Promise 반환 함수다. AsyncFunction constructor 종류는 달라진다는 점을 숨기지 않고 PM이 구현 경계로 수용했다. 실제 제품 소비자가 모두 Promise 계약을 사용하고 함수 종류를 검사하지 않음을 독립 검토했다. 광범위 reflection·전역 monkeypatch를 새 공개 계약으로 만들지 않는다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,212 중 4,201 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 실패 0을 읽은 뒤 독립 검증을 열고 최종 보고·정확한 트리·staged 검사를 읽은 뒤 별도 병합했다. 증거 `.worktrees/pm-unit/.codaryn/codex-u325-final-evidence/`.
+- [V45b](reviews/2026-11-14-v45b-codex-verify-u325.md) 높음 0/중간 0/낮음 0. 원래 119관찰 + 새 OLD scheduling 22개 = 141개 동일, 관련 76시험 통과, 동일 고정 scheduling의 OLD/후보 8쌍 동일. 원래 봉인·입력 101개 불변. 보충의 v1은 Symbol 진단 저장 오류로 폐기·보존하고, 손실 없이 기록한 별도 v2만 OLD 재생 차이 0을 확인해 사용했다. 후보로 기대값을 재생성하지 않았다. 12개 await 지점과 renderer/helper/app.ts 바이트가 유지됐고 private currentKey 문맥은 공개 결과·IPC에 추가하지 않았다. core 런타임 폐쇄 79모듈의 CLI 도달 0은 전체 앱 의존 0 선언이 아니다.
+- 다음 U-326 APP-DOCTOR는 어댑터 구현 경험이 있는 codex-loop의 기존 `.worktrees/claude-adapter`에 맡긴다. app.ts doctor/import와 새 공개 경계 시험만 직렬 소유하고 core/CLI/계약은 동결한다. codex-audit의 읽기 전용 준비안대로 request getter는 기존 try 앞, 전체 io/env/default 구성은 parse 앞, parse 거부도 inner Promise 한 번 await, completion의 jsonLine→전체 hideKeys→기존 jsonOutcome 순서를 지킨다. 구현 전 실제 채택 기준에서 공개 getter/완료 순서 시험을 먼저 실행한다. 독립 검증은 codex-probe다.
+- C11 writer 잠정 기준은 codex-loop의 별도 archive에서 원래 공개 함수 26관찰·같은 기준 차이 0·14파일 봉인으로 준비됐다. 그중 25개는 타입 계약 안, 1개는 지원되지 않는 provider 문자열을 넣은 JS 관찰임을 분리했다. 지원 제공자는 anthropic/openai 두 개이며 Gemini 지원을 주장하지 않는다. 보고 문구만 고쳤고 기대값/harness/seal은 보존했다. 그 단위 구현은 다른 담당에게 배정한다. 기존 실제 API·키·외부 시험 네트워크 금지와 출력 질문·남은 위험은 그대로다.
+
 ## 진행 요약 (CP-36, 2026-11-14) — doctor helper 채택
 
 - main/origin/main `cf6868bf0de8dfbcca7bbb71c76939306cbf4532`: U-324 C10-1 helper·점검 포트 이동 채택·푸시. 구현 `fc40e42f`, 최종 판 `68e74aed42c0b28e675db2724c995442050a1b07`, 검증·병합 트리 `6a78f509bdb13ad06f5447c184e5e3d55319c7d8` 일치. 지정 4파일 +436/-346=782줄. 새 doctor-checks/types가 단일 원천이고 옛 CLI 값·형 export는 유지한다. app.ts·CLI renderer·runDoctor 본문·고정 시험은 그대로다.

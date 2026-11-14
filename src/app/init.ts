@@ -16,7 +16,7 @@
 import path from "node:path";
 import { lstat, readFile } from "node:fs/promises";
 import type { CommandRule, InitSuggestedCommand, InitSuggestedProtectedPath } from "../contracts/index.js";
-import { MAX_PACKAGE_JSON_BYTES, SUGGESTED_PROTECTED_PATHS, SUGGESTED_SCRIPTS } from "../cli/init.js";
+import { MAX_PACKAGE_JSON_BYTES, SUGGESTED_PROTECTED_PATHS, SUGGESTED_SCRIPTS } from "./init-core.js";
 import type { CreateSettingsRequest, SettingsSuggestions } from "./types.js";
 
 /** The `codaryn init` arguments for a request, always `--json` (no questions). */

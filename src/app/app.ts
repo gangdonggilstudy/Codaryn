@@ -54,14 +54,14 @@ import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } f
 import { checkDoctor } from "./doctor.js";
 import type { CommandOutcome } from "./command-outcome.js";
 import { runInit } from "../cli/init.js";
-import { runModels } from "../cli/models.js";
+import { runModelsIn, scrub } from "./models-command.js";
 import { applyLife } from "./apply-life.js";
 import type { ApplyLifeEnd } from "./apply-life.js";
-import type { ModelsEnvironment } from "../cli/models.js";
+import type { ModelsCommandEnvironment } from "./models-command.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { renderApplyReport, renderReport } from "../cli/report.js";
 import { jsonLine } from "../cli/guard.js";
-import { parseApplyArgs, parseArgs, parseDoctorArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "./input/args.js";
+import { parseApplyArgs, parseArgs, parseDoctorArgs, parseModelsArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
 import { readReport } from "./report-read.js";
@@ -171,7 +171,7 @@ export interface AppHooks {
   /** The model listing (`listAnthropicModels` when absent). Tests give a fake so nothing is sent. */
   readonly listModels?: ListAnthropicModels;
   /** The config writer of `selectModel` (`writeConfigAtomic` when absent). */
-  readonly writeConfig?: ModelsEnvironment["writeConfig"];
+  readonly writeConfig?: ModelsCommandEnvironment["writeConfig"];
   /** The store's cleanup operations (its removal, its mark writer). Tests give a removal that refuses. */
   readonly cleanupOperations?: CleanupOperations;
   /** U-91: the check's executor file operations, probe removal and lock release. Tests give ones that fail. */
@@ -193,6 +193,24 @@ export function runArguments(request: StartRunRequest): string[] {
   if (request.workflowRef !== null) argv.push("--workflow", request.workflowRef);
   if (request.cancelFile !== null) argv.push("--cancel-file", request.cancelFile);
   return argv;
+}
+
+/** The app's models command: no question, with the existing JSON and whole-text masking. */
+function appModelsCommand(io: ModelsCommandEnvironment & { readonly argv: readonly string[] }): Promise<CommandOutcome> {
+  try {
+    const parsed = parseModelsArgs(io.argv);
+    if (!parsed.ok) return Promise.resolve(argumentsError(parsed));
+    return runModelsIn(io, parsed.args, {
+      ask: () => Promise.resolve(null),
+      choice: () => null,
+      complete(output, _prompted, _places, secrets, currentKey) {
+        const printed = jsonLine(output);
+        return { text: hideKeys(scrub(printed, secrets), currentKey), exitCode: output.exitCode };
+      },
+    });
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 /**
@@ -778,7 +796,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     if (!args.ok) return args;
     const env = copyEnvironment(environment.env, platform);
     try {
-      const outcome = await runModels({
+      const outcome = await appModelsCommand({
         argv: args.argv,
         env,
         cwd: environment.cwd,

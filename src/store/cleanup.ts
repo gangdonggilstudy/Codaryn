@@ -14,9 +14,11 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { constants } from "node:fs";
 import type { BigIntStats } from "node:fs";
-import { appendFile, lstat, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 import {
   CLEANUP_ITEM_FATES,
@@ -58,7 +60,7 @@ import type {
   StateSummary,
   SummarizeState,
 } from "../contracts/index.js";
-import { ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, sha256Hex } from "./common.js";
+import { ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, sameFsPath, sha256Hex } from "./common.js";
 import { acquireLock, inspectLock, releaseLock } from "./lock.js";
 import { recordsChangedMarkIn } from "./marks.js";
 import { isStoredRunId, listRuns, runIdSecond } from "./runs.js";
@@ -68,6 +70,77 @@ const LEFTOVER = new RegExp(CLEANUP_LEFTOVER_PATTERN_SOURCE);
 const LEFTOVER_PREFIX = "cleanup-";
 /** A mark file larger than this is not read (the mark is a few dozen bytes). */
 const MAX_MARK_BYTES = 4096;
+
+/** U-321: metadata guards are local to confirmed cleanup. These observations do not lock paths
+ * against an uncooperative process changing parents or adding a hard link after the last check. */
+function unsafeMetadata(): Error {
+  return new Error("cleanup metadata cannot be verified");
+}
+function knownIdentity(info: BigIntStats): boolean {
+  return info.dev >= 0n && info.ino > 0n;
+}
+function sameIdentity(a: BigIntStats, b: BigIntStats): boolean {
+  return knownIdentity(a) && knownIdentity(b) && a.dev === b.dev && a.ino === b.ino;
+}
+async function metadataDirectory(dir: string): Promise<BigIntStats> {
+  const info = await lstat(dir, { bigint: true });
+  if (!info.isDirectory() || info.isSymbolicLink() || !knownIdentity(info) || !sameFsPath(await realpath(dir), dir)) throw unsafeMetadata();
+  return info;
+}
+async function cleanupParents(workspaceRoot: string): Promise<{ stateDir: string; check: () => Promise<void> }> {
+  const root = resolve(workspaceRoot);
+  const rootInfo = await metadataDirectory(root);
+  const stateDir = join(root, STATE_DIR_NAME);
+  try {
+    await lstat(stateDir, { bigint: true });
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+    if (!sameIdentity(rootInfo, await metadataDirectory(root))) throw unsafeMetadata();
+    try { await mkdir(stateDir); }
+    catch (failure) { if (errorCode(failure) !== "EEXIST") throw failure; }
+  }
+  const stateInfo = await metadataDirectory(stateDir);
+  const check = async (): Promise<void> => {
+    if (!sameIdentity(rootInfo, await metadataDirectory(root)) || !sameIdentity(stateInfo, await metadataDirectory(stateDir))) throw unsafeMetadata();
+  };
+  await check();
+  return { stateDir, check };
+}
+function plainLog(info: BigIntStats): boolean {
+  return info.isFile() && !info.isSymbolicLink() && knownIdentity(info) && info.nlink === 1n;
+}
+async function cleanupLog(stateDir: string, checkParents: () => Promise<void>): Promise<{ handle: FileHandle; check: () => Promise<void> }> {
+  const file = join(stateDir, CLEANUP_LOG_FILE_NAME);
+  await checkParents();
+  let before: BigIntStats | null = null;
+  try { before = await lstat(file, { bigint: true }); }
+  catch (error) { if (errorCode(error) !== "ENOENT") throw error; }
+  if (before !== null && (!plainLog(before) || !sameFsPath(await realpath(file), file))) throw unsafeMetadata();
+  await checkParents();
+  // Never truncate or create through an existing path. NOFOLLOW/NONBLOCK are only supplemental
+  // where supplied by the platform (in particular, Windows may supply neither).
+  const flags = constants.O_WRONLY | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
+    | (before === null ? constants.O_CREAT | constants.O_EXCL : 0);
+  const handle = await open(file, flags, 0o600);
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (!plainLog(opened) || (before !== null && !sameIdentity(before, opened))) throw unsafeMetadata();
+    const check = async (): Promise<void> => {
+      await checkParents();
+      const held = await handle.stat({ bigint: true });
+      const named = await lstat(file, { bigint: true });
+      if (!plainLog(held) || !plainLog(named) || !sameIdentity(opened, held) || !sameIdentity(held, named)
+        || !sameFsPath(await realpath(file), file)) throw unsafeMetadata();
+      await checkParents();
+    };
+    await check();
+    return { handle, check };
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    // Do not unlink by name: it may now name someone else's file. A new empty log may remain.
+    throw error;
+  }
+}
 
 /**
  * R-34b P-2: whether the folder `dir` holds its own mark (CLEANUP_LEFTOVER_MARK_FILE_NAME as a plain
@@ -620,14 +693,21 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     }
     return removeTried(dir);
   };
+  const parents = await cleanupParents(workspaceRoot);
+  await parents.check();
   const stateDir = await ensureStateDir(workspaceRoot);
+  await parents.check();
   const lockId = `cleanup-${randomBytes(4).toString("hex")}`;
   const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: { now: () => Date.now() } });
   if (!lock.ok) return { ok: false, code: "workspace_locked" };
+  let log: Awaited<ReturnType<typeof cleanupLog>> | undefined;
   /** The cleanup itself, under the lock. */
   const underLock = async (): Promise<Awaited<ReturnType<ApplyCleanup>>> => {
+    await parents.check();
     const { plan, prints, facts } = await makePlan(workspaceRoot, selection, now);
     if (plan.digest !== confirmation.digest) return { ok: false, code: "plan_changed" };
+    // A prepared unsafe log must refuse before any selected record is moved or removed.
+    log = await cleanupLog(parents.stateDir, parents.check);
     const removed: (CleanupItemRef & { size: StateSize; warnings: readonly CleanupWarningCode[] })[] = [];
     const kept: (CleanupItemRef & { reason: CleanupKeptReason })[] = [];
     const refOf = (item: CleanupItem): CleanupItemRef =>
@@ -746,7 +826,8 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       ...(totals.leftovers.count > 0 ? { leftovers: totals.leftovers } : {}),
     };
     try {
-      await appendFile(join(stateDir, CLEANUP_LOG_FILE_NAME), `${JSON.stringify(line)}\n`, "utf8");
+      await log.check();
+      await log.handle.appendFile(`${JSON.stringify(line)}\n`, "utf8");
     } catch (error) {
       // The removal happened; a log that cannot be written does not undo it.
       void errorCode(error);
@@ -755,7 +836,11 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
   };
   let outcome: Awaited<ReturnType<ApplyCleanup>>;
   try {
-    outcome = await underLock();
+    try {
+      outcome = await underLock();
+    } finally {
+      await log?.handle.close().catch(() => undefined);
+    }
   } catch (error) {
     await releaseLock({ workspaceRoot, runId: lockId }).catch(() => false);
     throw error;

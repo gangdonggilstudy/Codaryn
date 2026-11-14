@@ -38,6 +38,17 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-31, 2026-11-14) — C-7b 채택, 앱 후속 시작
+
+- main/origin/main `23a41eaf801d20a0ab365b8075936358e44e1688`: U-320 C-7b CLI apply 수명 전환 채택·푸시. 구현 `374103ff`, helper 거부 복구 `89f279bb`. 최종 판 `f930d147fa7374b7db7ffab713040854735fb76f`, main 병합 트리 `05d659f2751f4e439070a9e221fb28f0eb67c658`가 검증 판과 같았다. 최초 write-tree는 샌드박스의 index.lock 쓰기 거부로 실패했고, 허용된 권한으로 다시 산출해 일치를 확인했다.
+- 최종 실측: typecheck/build·tracked/staged 비밀 검사 통과, 유닛 4,166 중 4,157 통과/실패 0/skip 8/TODO 1, 통합 675 중 673 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 고정 출력 파일 변경 없음. `.worktrees/pm-unit/.codaryn/codex-cp28/`의 수정판 로그와 `compare-u320-b.md`, 거부했던 첫 판은 `codex-u320-first-evidence/`에 보존했다.
+- [V-39](reviews/2026-11-14-v39-codex-verify-u320.md)의 낮음 1 helper 거부 차이를 수정했다. [V-39b](reviews/2026-11-14-v39b-codex-verify-u320.md) 0/0/0: 직접 moves 계획 거부의 전체 오류·파일 불변, 정상 changes/run의 load 1→assemble 1, 봉인 기준 26사례/84호출 차이 0, 일반 run 12사례/72호출 차이 0, 관련 104시험 통과. task:run이라는 지원 전제를 보존하며 잘못된 종류에 새 쓰기 권한을 열지 않는다.
+- [V-40](reviews/2026-11-14-v40-codex-verify-u320.md) 새 회귀 0/0/0. 기존 낮음 L1은 미해결 후속 항목: moves 적용의 잠금 획득 뒤 cancelSignal 생성이 예외를 던지면 try/finally 진입 전이라 잠금이 남는다. 합성 주입에서 재현, 기본 CLI 등록 100회 정상·일반 입력으로 실제 등록 실패 미재현. 이행에서는 고치지 않았다.
+- U-321 보안 수정 후보 `399f773121a28c2dd5a7d0bc860dfc02b6f9d917`를 PM이 검토·검사 후 작업 브랜치에 커밋했다. [V-41 분기 검증](reviews/2026-11-14-v41-codex-verify-u321.md): 새 회귀 0/0/0, 준비된 상태 정션/로그 하드 링크 차단과 선택 기록 보존, 관련 42통과/2skip. 정상 CLI 35쌍 동일+상태 정션의 의도된 거부 1쌍, 앱 11쌍과 추가 정상 4쌍 동일. **최종 통합판은 아직 미검증·미병합**.
+- U-321의 보장 범위는 정적으로 준비된 M1와 실행한 교체 경계까지다. 기존 중간 경쟁 경계는 남는다: 최초 `.gitignore` 쓰기 직전 부모 교체로 외부 2바이트 생성, 마지막 검사 뒤 하드 링크 추가로 외부 alias에 로그 137바이트 추가가 기준/후보에서 같이 재현됐다. 모든 경쟁 조건을 닫았다고 보고하지 않는다. 개별 파일 손잡이는 부모 경로와 향후 링크 수를 잠그지 못한다.
+- U-316 APP-REPORT는 codex-loop가 기존 claude-adapter의 `unit/U-316-codex-loop`, 기준 23a41eaf에서 구현한다. app.ts의 report/reportMarkdown 및 필요한 import, 새 `tests/unit/app/u316-report-direct.test.ts`만 소유한다. app readReport를 직접 부르되 기존 검사 순서·JSON/Markdown·두 단계 가림·끝 개행을 유지한다. 렌더러와 파서는 기존 것을 사용하며 앱→CLI 의존 전부가 없어졌다고 주장하지 않는다. codex-audit가 변경 전 공개 앱 결과를 독립 기준으로 고정한다.
+- 다음 앱 작성 순서는 report 채택 → revert → applyPlan. 다른 app.ts 작성자는 없다. codex-probe는 C-11의 남은 의존과 렌더러·파서 경계를 읽기 전용으로 정리 중이고, C-10 준비 보고는 완료됐다. U-321은 별도 보안 후보로 독립 검증과 전체 판 검사를 거쳐 판단한다.
+
 ## 진행 요약 (CP-30, 2026-11-14) — U-318 채택, C-7b 호환성 재확인
 
 - main/origin/main `406d3860cd4f3dd0a2b053ed03ae0ee51cf76246`: U-318 GUI 경로 가림 수정까지 병합·푸시했다. 최초 시험 판 `91d98b64`, 최종 판 `9b589b3f`는 이후 PM 보고서 문서만 달랐다. 제품 차이 없음과 최종 병합 트리 `3043cfb9f46d6fb9d1db1b5ef345156694a580fe` 일치를 확인했다.

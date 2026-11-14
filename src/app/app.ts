@@ -60,12 +60,15 @@ import { runApply } from "../cli/plan-commands.js";
 import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
-import { runReport } from "../cli/report.js";
+import { renderApplyReport, renderReport } from "../cli/report.js";
+import { jsonLine } from "../cli/guard.js";
 import { runRevert } from "../cli/revert.js";
-import { parseArgs, parsePlanArgs, parseReviewArgs } from "../cli/args.js";
+import { parseArgs, parsePlanArgs, parseReportArgs, parseReviewArgs } from "../cli/args.js";
 import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
-import { argumentsError, prepareTask } from "./prepare.js";
+import { argumentsError, cliError, prepareTask } from "./prepare.js";
+import { readReport } from "./report-read.js";
+import { hideKeys, hideKeysInStrings } from "./input/text-safety.js";
 import { recordReview, showPlan } from "./plan-view.js";
 import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
 import { runLife } from "./run-life.js";
@@ -606,15 +609,27 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>> {
     try {
-      // N-7: the CLI's report resolves "latest" with the store's rules (N-18, N-23, N-26).
-      const outcome = await runReport({
+      // U-316: keep parsing and final masking, while the app reader owns the stored-record rules.
+      const io = {
         argv: ["report", "--workspace", request.workspace, "--run", request.runId, "--json"],
         cwd: environment.cwd,
         env: copyEnvironment(environment.env, platform),
         platform,
         listRuns: storeListRuns,
-      });
-      return jsonOutcome<ReportOutput>(outcome, "report");
+      };
+      const parsed = parseReportArgs(io.argv);
+      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
+      const read = await readReport(io, { workspace: parsed.args.workspace, run: parsed.args.runId, planApplyLine: false });
+      if (!read.ok) return { ok: false, error: commandError(read.outcome) };
+      const currentKey = knownKeyValues(io.env);
+      let text: string;
+      try {
+        text = jsonLine(hideKeysInStrings(read.report, currentKey));
+      } catch {
+        return { ok: false, error: fromCliError(cliError("invalid_run_record", "the run's records cannot be shown").output) };
+      }
+      // Preserve the second, whole-text masking pass and JSON parsing failure behavior.
+      return jsonOutcome<ReportOutput>({ text: hideKeys(text, currentKey), exitCode: read.report.exitCode }, "report");
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }
@@ -627,15 +642,27 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return { ok: false, error: appError("invalid_arguments", "the workspace and the run id cannot start with '-'") };
     }
     try {
-      const outcome = await runReport({
+      const io = {
         argv: ["report", "--workspace", request.workspace, "--run", request.runId],
         cwd: environment.cwd,
         env: copyEnvironment(environment.env, platform),
         platform,
         listRuns: storeListRuns,
-      });
-      if ("output" in outcome) return { ok: false, error: outcome.output.kind === "error" ? fromCliError(outcome.output) : INTERNAL_ERROR };
-      return { ok: true, output: { kind: "report_markdown", markdown: outcome.text, exitCode: outcome.exitCode } };
+      };
+      const parsed = parseReportArgs(io.argv);
+      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
+      const read = await readReport(io, { workspace: parsed.args.workspace, run: parsed.args.runId, planApplyLine: true });
+      if (!read.ok) return { ok: false, error: commandError(read.outcome) };
+      const currentKey = knownKeyValues(io.env);
+      let text: string;
+      try {
+        text = "runKind" in read.report
+          ? renderApplyReport(read.report, currentKey)
+          : renderReport(read.report, currentKey, read.failedToolCalls, read.planApply);
+      } catch {
+        return { ok: false, error: fromCliError(cliError("invalid_run_record", "the run's records cannot be shown").output) };
+      }
+      return { ok: true, output: { kind: "report_markdown", markdown: hideKeys(text, currentKey), exitCode: read.report.exitCode } };
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }

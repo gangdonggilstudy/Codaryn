@@ -38,6 +38,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-35, 2026-11-14) — APP-APPLY 채택, 남은 단위 분할
+
+- main/origin/main `00cfa2b6aa98107089b298a13d684aa8222ee180`: U-323 APP-APPLY 채택·푸시. 구현 `9e86d99d`, 최종 판 `dbb849fe14dfbc98df327e307f9e6c31ce736cd3`, 병합 트리 `0a68b54ec5d3daf4060af37d21d3e16debdac860` 일치. app.ts의 applyPlan/import와 새 시험 두 파일만 바뀌었다. 같은 parse/prepare 뒤 앱 applyLife를 직접 한 번 부르며 기존 raw callback 0회·시작 gate·늦은 조회/this·가림·changes만의 lockLeft를 유지한다.
+- 최종 실측: 오프라인 npm ci(빈 user/global npmrc, ignore-scripts)·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,199 중 4,188 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 변경 없음. 전체 결과를 읽은 뒤 V-44를 열고, 독립 결과를 읽은 뒤 별도 호출로 병합했다. 증거는 `.worktrees/pm-unit/.codaryn/codex-u323-final-evidence/`다.
+- 검증자의 최초 preload 경로 오류에서 이전 판 로그 사본이 섞인 것을 발견해 격리했다. 검증 세션의 Windows sandbox에서 끝나지 않은 유닛·통합과 기동 실패한 Electron도 별도 보존하고 통과 수치에서 제외했다. PM 환경에서 같은 환경 격리 명령을 끝까지 실행한 유닛·통합·smoke의 새 로그/종료 JSON이 최종 근거다. 제품 assertion·정규화·ACL은 바꾸지 않았다. 중단한 sandbox 실행의 모든 자손 종료까지 증명하지는 못했으며 광역 process kill도 하지 않았다.
+- [V-44](reviews/2026-11-14-v44-codex-verify-u323.md) 높음 0/중간 0/낮음 0. 독립 공개 앱 60사례·604조건 차이 0, 관련 13파일 57시험 통과, 원래 31개와 보충 9개 봉인 불변. 동시 append의 저장 seq별 boxed 오류는 undefined/null/Error도 자기 Promise에만 대응하며 앱 이벤트 래퍼를 중복하지 않는다. 기존 callback 미전달이나 기존 경쟁 한계를 수정 성과로 세지 않는다.
+- 사용자 지시("작업 단위를 잘 분할해서 잘 분배")에 따라 doctor는 U-324 helper·점검 포트, U-325 core, U-326 공개 앱 직접 연결로 나눈다. 구현은 codex-check의 기존 `.worktrees/claude-store`를 재사용하고, 독립 비교는 codex-probe가 맡는다. U-324/325에는 app.ts 수정권이 없다. 채택 소스의 독립 기준 확인 후 각 단위를 열며, 다음 구현은 앞 단위 독립 검증·병합 뒤 시작한다.
+- C-11 준비는 codex-loop가 공용 포트/계획 출력 → 전체 args → 설정 writer → models → init → JSON → report → 독립 그래프의 기능 경계로 나눴다. models/init이 커지면 규칙 추출과 앱 연결도 나눈다. app.ts 수정권은 한 명씩 직렬로 넘긴다. codex-sec는 기존 TypeScript 7의 unstable/sync·ast를 로컬 확인했고, 소스(타입 포함)와 fresh dist의 전이 그래프를 각각 검사하는 방향을 채택했다. 미해석/계산 로딩은 의존 0으로 숨기지 않는다. 아직 구현·완료 판정은 아니다.
+- 위 분할과 검증 준비 보고서는 각 담당의 `.codaryn/`에 있고 현재 소유권은 PM의 `.codaryn/pm-tools/dispatch-current.md`로 추적한다. 실제 API·키 파일 조회·외부 시험 네트워크는 미수행, 기존 위험과 사용자 출력 질문은 CP-31/32 및 CP-25~27의 범위를 유지한다.
+
 ## 진행 요약 (CP-34, 2026-11-14) — APP-REVERT 채택, APP-APPLY 기준 확인
 
 - main/origin/main `d68ecab9406c61bb0c50d5bd60d039a3143b6e8b`: U-322 APP-REVERT 채택·푸시. 구현 `8cfa7ee4`, 최종 판 `ca00809ca4e474939857cc8a85f954e08de23c25`, 최종 병합 트리 `7c9d0d3f23590afdf943dbc4d225aff79d7b91c4` 일치. app.ts의 revert/import와 새 시험만 바뀌었고 공용 helper·store·CLI·계약·고정 출력은 그대로다.

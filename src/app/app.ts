@@ -61,7 +61,7 @@ import { applyLife } from "./apply-life.js";
 import type { ApplyLifeEnd } from "./apply-life.js";
 import type { ModelsCommandEnvironment } from "./models-command.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
-import { renderApplyReport, renderReport } from "../presentation/report.js";
+import { renderLocalizedApplyReport, renderLocalizedReport } from "../presentation/report-localized.js";
 import { jsonLine } from "../presentation/json.js";
 import { parseApplyArgs, parseArgs, parseDoctorArgs, parseInitArgs, parseModelsArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
@@ -692,8 +692,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       let text: string;
       try {
         text = "runKind" in read.report
-          ? renderApplyReport(read.report, currentKey)
-          : renderReport(read.report, currentKey, read.failedToolCalls, read.planApply);
+          ? renderLocalizedApplyReport(request.language ?? "en", read.report, currentKey)
+          : renderLocalizedReport(request.language ?? "en", read.report, currentKey, read.failedToolCalls, read.planApply);
       } catch {
         return { ok: false, error: fromCliError(cliError("invalid_run_record", "the run's records cannot be shown").output) };
       }

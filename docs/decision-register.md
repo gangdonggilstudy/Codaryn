@@ -7,7 +7,7 @@
 - **목적**: 2026-11-12 하루 동안 여러 문서에 쌓인 결정을 주제별로 모아, "지금 유효한 결정이 무엇인지"를 바로 찾게 한다.
 - **기준은 원천 문서다.** 이 문서는 색인과 요약이다. 뜻이 다르게 읽히면 원천이 맞다. 이 문서는 새 결정을 만들지 않고 기존 결정의 뜻을 바꾸지 않는다.
 - **원천**
-  - 설계 결정 DR-1~DR-76: [단계 4·5 설계 지시](work-orders/phase-4-5-design.md)의 "설계 교차 검토 뒤 결정" 표
+  - 설계 결정 DR-1~DR-77: [단계 4·5 설계 지시](work-orders/phase-4-5-design.md)의 "설계 교차 검토 뒤 결정" 표
   - 사용성 결정 N-1~N-28: [사용성 개선 지시](work-orders/phase-4-usability.md)
   - 사용자 답(Q-1~Q-9), 상시 지시, 체크포인트(CP-12~CP-19), 지침(G-1~G-12): [임시 PM 상태](pm-status.md)
   - 그 이전 단계의 결정(U, M, P, C, R, S, T, V, W, X, Y 계열)과 설계 문서의 결정(AC-D, VX-D, GT-D, GUI-D): [설계 결정](decisions.md). 여기서는 다시 쓰지 않고 가리키기만 한다.
@@ -476,6 +476,7 @@
 | DR-74 | [17](#t17) | 묶음 A·B 검증에서 정한 PM 판단 일곱: k 하한 5, 실행 계획의 목표, 길 위의 링크는 낡음, 복사한 계획 기록, `[masked]`, 표 상한, 읽기 도구 |
 | DR-75 | [18](#t18) | 라이선스 지침·신규 의존성 기준·자체 고지·lock 비차단 보조 목록(사용자, 2026-11-15) |
 | DR-76 | [18](#t18) | `data_checks` 원본·결과 묶음 키 각각 10,000개 상한과 초과 시 `inconclusive` (사용자, 2026-11-15) |
+| DR-77 | [18](#t18) | Markdown 보고서 언어: CLI 기존 언어 선택·GUI 저장 시 창 언어, 기본 영어·JSON/기록/종료 코드 유지(사용자) |
 
 ### N-1 ~ N-28
 
@@ -605,7 +606,7 @@
 ---
 
 <a id="t18"></a>
-## 18. 2026-11-15의 결정 (DR-75~DR-76)
+## 18. 2026-11-15의 결정 (DR-75~DR-77)
 
 원천은 [단계 4·5 설계 지시](work-orders/phase-4-5-design.md)의 결정 표다.
 
@@ -613,3 +614,4 @@
 | --- | --- | --- | --- |
 | DR-75 | 사용자 결정(2026-11-15, 근거 보고서 license-policy-review-sec-01). (1) AGENTS.md와 development-workflow.md에 의존성·외부 자료의 라이선스 확인·고지 갱신 지침을 둔다. (2) 신규 의존성의 기본 허용·반입 전 검토·기본 거부 및 사용자 예외 승인 기준은 [개발 절차의 DR-75 지침](development-workflow.md#라이선스와-외부-자료-dr-75)을 따른다. 기존 Electron에는 소급하지 않고 BUSL과 BSL-1.0(Boost)을 구분한다. (3) README에 Apache License 2.0·LICENSE·NOTICE·제3자 라이선스를 안내하고 자체 고지는 Copyright 2026 gangdonggil로 한다. 루트/GUI package·lock의 license는 Apache-2.0으로 맞추고 루트 files에 NOTICE를 포함한다. LICENSE의 표준 부록은 바꾸지 않는다. (4) 두 lock의 이름·버전·license·dev/optional과 분류를 출력하는 오프라인 비차단 보조 스크립트를 둔다. 새 필수 gate나 배포 승인이 아니며 lock 밖 구성은 별도 확인한다. | license-policy-dr75-loop-01에서 지침·표기·보조 스크립트를 작성. PM 검토·통합 전 후보이며 실제 배포·라이선스 전체 준수를 승인하지 않음 | license-policy-review-sec-01 (보고 SHA256 e3e3f04b9a991c107d91079cf185ff73ae8f66f335e7232a649790a4f130ffbb), 사용자 결정 2026-11-15 |
 | DR-76 | 사용자 결정(2026-11-15): `data_checks` 집계의 원본표·결과표 각각 서로 다른 묶음 키 10,000개 상한. 어느 쪽이든 초과하면 규칙은 `inconclusive`, 넘을 때만 안전 한도 안내를 붙인다. 16 MiB 표 크기 상한은 유지하며 다른 규칙의 `fail` 우선순위와 읽기·파싱 오류 판정도 유지한다. | 코드·시험·사용 안내·결정 기록 반영. 상한 이하 결과의 기존 evidence/limits를 보존하고 기준 reference/U202는 변경하지 않음. PM 검토·통합 전 후보. | 사용자 결정 2026-11-15, e4-datachecks-memory-probe-01 |
+| DR-77 | 사용자 결정(2026-11-15, 근거 e3-report-ko-impact-check-01). (1) 사람용 Markdown 보고서는 ko를 전달할 때만 한국어로 만들고 언어를 생략한 직접 호출은 기존 영어를 유지한다. (2) CLI report는 다른 CLI 출력의 language(null), 곧 CODARYN_LANG → OS 표시 언어 → en을 전달하며 설정 파일 language를 새로 읽지 않는다. (3) GUI는 보고서를 저장할 때의 창 언어를 전달한다. GUI 보고서 화면은 기존 구조화된 결과를 쓰고 Markdown을 HTML로 렌더링하지 않는다. (4) report --json·실행 기록·종료 코드와 모델/검증기/사용자 글·식별자·경로는 바꾸지 않는다. 영어 기본 renderer의 공개 표면도 보존한다. | core는 5b7946cd에 채택됨. e3b-report-ko-wiring-loop-01에서 연결·문서·대상 시험 작성, PM 검토·전체 측정·통합 전 후보. | 사용자 결정 2026-11-15, e3-report-ko-impact-check-01 (보고 SHA256 c4d255cabd163b82fb39e43c422cf282c388e06b83384e68fb051dc67c4c42da) |

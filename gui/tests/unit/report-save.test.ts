@@ -56,7 +56,7 @@ test("report save: the engine host cleans every line of the app layer's Markdown
   });
   assert.equal(await call(1, { workspace: WS, runId: "latest" }), "invalid_args");
   const value = await call(2, { workspace: WS, runId: RUN });
-  assert.deepEqual(asked, [{ workspace: WS, runId: RUN }]);
+  assert.deepEqual(asked, [{ workspace: WS, runId: RUN, language: "en" }]);
   assert.deepEqual(toHostReportMarkdown(value), { ok: true, text: "<# Run>\n<line?two>\n<>" });
   const wrongKind = host(() => ({ ok: true, output: { kind: "report", markdown: "x" } }));
   assert.deepEqual(await wrongKind(1, { workspace: WS, runId: RUN }), { ok: false, code: "host_error" });

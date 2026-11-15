@@ -8,7 +8,9 @@
  * the records.
  */
 
-import { renderApplyReport, renderReport, REPORT_FIXED_LIMITS as reportFixedLimits, APPLY_REPORT_FIXED_LIMITS as applyReportFixedLimits } from "../presentation/report.js";
+import { REPORT_FIXED_LIMITS as reportFixedLimits, APPLY_REPORT_FIXED_LIMITS as applyReportFixedLimits } from "../presentation/report.js";
+import { renderLocalizedApplyReport, renderLocalizedReport } from "../presentation/report-localized.js";
+import type { MessageLanguage } from "../contracts/index.js";
 export { renderReport, renderApplyReport } from "../presentation/report.js";
 export const REPORT_FIXED_LIMITS = reportFixedLimits;
 export const APPLY_REPORT_FIXED_LIMITS = applyReportFixedLimits;
@@ -32,6 +34,8 @@ export interface ReportEnvironment extends ReportReadEnvironment {
   readonly argv: readonly string[];
   /** Read only to keep the current key out of the printed report. */
   readonly env: SettingsEnvironment;
+  /** DR-77: chosen by CLI main; direct callers default to English. Ignored for JSON. */
+  readonly language?: MessageLanguage;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -54,8 +58,8 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     text = json
       ? jsonLine(hideKeysInStrings(report, currentKey))
       : "runKind" in report
-        ? renderApplyReport(report, currentKey)
-        : renderReport(report, currentKey, failedToolCalls, planApply);
+        ? renderLocalizedApplyReport(io.language ?? "en", report, currentKey)
+        : renderLocalizedReport(io.language ?? "en", report, currentKey, failedToolCalls, planApply);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

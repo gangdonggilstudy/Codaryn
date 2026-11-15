@@ -420,7 +420,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (root === null) return { ok: false, code: "unknown_workspace" };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("reportMarkdown", { workspace: root, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    const response = await state.host.call("reportMarkdown", { workspace: root, runId: parsed.runId, language }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     const report = toHostReportMarkdown(response.value);
     if (!report.ok) return report;

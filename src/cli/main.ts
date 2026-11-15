@@ -235,7 +235,7 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
       return plain(outcome);
     }
     case "report":
-      return plain(await runReport({ argv, cwd: process.cwd(), env: process.env, listRuns, announceLatest }));
+      return plain(await runReport({ argv, cwd: process.cwd(), env: process.env, language: language(null), listRuns, announceLatest }));
     case "runs":
       return plain(await runRuns({ argv, cwd: process.cwd(), env: process.env, human: human.output }));
     case "changes":

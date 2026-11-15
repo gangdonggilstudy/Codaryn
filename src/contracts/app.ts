@@ -473,6 +473,8 @@ export interface ReportRequest {
   readonly workspace: string;
   /** A run id or "latest" (N-7). */
   readonly runId: string;
+  /** DR-77: Markdown only; omitted means English. Structured report data is unchanged. */
+  readonly language?: MessageLanguage;
 }
 
 /**

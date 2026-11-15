@@ -78,7 +78,7 @@ export interface HostApp {
   createSettings(request: { readonly configPath: null; readonly workspace: string | null }): Promise<unknown>;
   settingsSuggestions(request: { readonly workspace: string }): Promise<unknown>;
   /** GU-3 (3.7): the report as `codaryn report` prints it (Markdown), for saving. */
-  reportMarkdown(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  reportMarkdown(request: { readonly workspace: string; readonly runId: string; readonly language?: "ko" | "en" }): Promise<unknown>;
   /** GU-4 (3.8), DR-39, DR-44: the state directory summed up, a cleanup preview, and a confirmed cleanup. */
   stateSummary(request: { readonly workspace: string }): Promise<unknown>;
   previewCleanup(request: { readonly workspace: string; readonly selection: CleanupSelectionArg }): Promise<unknown>;
@@ -440,10 +440,11 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       }
       case "reportMarkdown": {
         if (!isObj(args)) throw new ArgsError();
-        const workspace = workspaceArg(args, ["workspace", "runId"]);
+        const workspace = workspaceArg(args, ["workspace", "runId", "language"]);
         const runId = args["runId"];
-        if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
-        return reportMarkdownValue(await deps.app.reportMarkdown({ workspace, runId }), shownText);
+        const chosen = args["language"] === undefined ? "en" : args["language"];
+        if (typeof runId !== "string" || !RUN_ID.test(runId) || (chosen !== "ko" && chosen !== "en")) throw new ArgsError();
+        return reportMarkdownValue(await deps.app.reportMarkdown({ workspace, runId, language: chosen }), shownText);
       }
       case "stateSummary": {
         if (!isObj(args)) throw new ArgsError();

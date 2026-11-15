@@ -47,7 +47,6 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | --- | --- |
 | [전문 페르소나](personas.md) | 설계, 구현, 보안, 검증 역할과 제출 기준 |
 | [개발 절차](development-workflow.md) | worktree 분리, 작업 배분, 커밋, 검토, 통합과 보고 |
-| [작업 인수인계](session-handoff.md) | 완료 상태, 작업 공간, 다음 단계의 확인 사항 |
 | [개발 진행 현황](progress.md) | 작업 배분, 검토 단계와 실제 검증 결과 |
 | [임시 PM 상태](pm-status.md) | PM 체크포인트, 세션 현황, 사용자 확인 대기, 회수 시 인계 방법 |
 | [임시 PM 인수인계](pm-handoff.md), `pm-control.json` | 위임 범위, 작업 상태와 PM 회수 절차 |
@@ -58,7 +57,7 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | [단계 3 작업 지시](work-orders/phase-3-self-development.md) | 자기 개발 준비와 `models`, 결정 U(단계 3), V, W, X, Y |
 | [사용성 개선 지시](work-orders/phase-4-usability.md) | 사용성 결정 N-1~N-28과 구현 배정 |
 | [단계 4·5 설계 지시](work-orders/phase-4-5-design.md) | 설계 배정, 설계 결정(AC, VX, GT, GUI), 교차 검토 뒤 결정(DR-1~DR-9, 앞의 채택보다 우선)과 1차 구현 배정 |
-| `reviews/` | 교차 검토 원문 보관. 단계 4·5 설계 검토는 [R-1 검토 보고](reviews/2026-11-12-r1-review-stage-4-5-designs.md) |
+| `reviews/` | 교차 검토·검증 원문 보관. 2026-11-15 정리에서 다른 파일이 이름이나 묶음 패턴으로 가리키지 않는 원문 126개와 옛 지침 사본 `guidelines.md`, 옛 인계 `session-handoff.md`를 지웠다. 날짜 와일드카드로 언급된 원문을 포함한 전문은 private 저장소 `Codaryn-archive`(main `5b7946cd`)의 같은 경로에 있다. 단계 4·5 설계 검토는 [R-1 검토 보고](reviews/2026-11-12-r1-review-stage-4-5-designs.md) |
 
 ## 문서 적용 원칙
 

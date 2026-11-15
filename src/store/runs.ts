@@ -1,0 +1,628 @@
+/**
+ * Run list (N-7): `listRuns` (ListRuns in src/contracts/commands.ts) for `codaryn runs` and
+ * `--run latest`, and the revert record (`RevertRecord`, REVERT_RECORD_FILE_NAME) that marks a
+ * run as reverted.
+ *
+ * `listRuns` reads only the state directory: per run the first journal record, result.json and
+ * the revert record. It creates, writes and locks nothing, and never opens snapshots. Links are
+ * not followed: a link in place of `.codaryn`, `runs` or a run directory could lead the list to
+ * records of another place. A run whose records fail a check is listed as `damaged` with its id
+ * only (N-16), and is never `latest`.
+ */
+
+import { realpath as realpathCallback } from "node:fs";
+import { lstat, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+import {
+  APPLY_REASONS_BY_STATUS,
+  APPROVAL_CHANNELS,
+  JOURNAL_FILE_NAME,
+  MAX_REPORT_FILE_BYTES,
+  MODEL_PROVIDER_NAMES,
+  PLAN_APPLIED_FILE_NAME,
+  PROFILE_NAME_PATTERN_SOURCE,
+  RESULT_FILE_NAME,
+  REVERT_RECORD_FILE_NAME,
+  CONTENT_HASH_PATTERN_SOURCE,
+  RUN_EXIT_CODES,
+  runPhaseOf,
+  RUN_TIMESTAMP_PATTERN_SOURCE,
+  RUNS_DIR_NAME,
+  STATE_DIR_NAME,
+  TASK_ID_PATTERN_SOURCE,
+  TERMINAL_RUN_STATUSES,
+  WORKFLOW_ID_PATTERN_SOURCE,
+  isReasonOfStatus,
+  toRunId,
+} from "../contracts/index.js";
+import type {
+  ListRuns,
+  RevertRecord,
+  RunListEntry,
+  RunListing,
+  RunReason,
+  RunId,
+  ReviewVerdict,
+  TerminalRunStatus,
+} from "../contracts/index.js";
+import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
+import { recordsChangedMarkIn } from "./marks.js";
+import { reviewRecordIn } from "./review.js";
+import { inspectLock } from "./lock.js";
+
+const realpathNative = promisify(realpathCallback.native);
+
+const TASK_ID = new RegExp(TASK_ID_PATTERN_SOURCE);
+const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
+/** The contract's provider names (every API provider and scripted), not a copy that can fall behind. */
+const PROVIDERS: readonly string[] = MODEL_PROVIDER_NAMES;
+const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
+/** A run id as the CLI makes it (P-3): `<UTC yyyymmddThhmmssZ>-<8 lowercase hex>`. */
+const CLI_RUN_ID = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-[0-9a-f]{8}$/;
+/** The first journal record is read up to this many bytes. A longer first line is unreadable. */
+const FIRST_RECORD_MAX_BYTES = 64 * 1024;
+/** Largest revert record read. It holds a few short fields. */
+const REVERT_RECORD_MAX_BYTES = 4 * 1024;
+
+
+/** The run records directory cannot be listed. The message names no path and no content. */
+export class RunListError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunListError";
+  }
+}
+
+/** A record failed a check: the run is listed as damaged. */
+class Unreadable extends Error {}
+
+function unreadable(): never {
+  throw new Unreadable();
+}
+
+type Obj = Record<string, unknown>;
+
+function isObj(value: unknown): value is Obj {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A run directory name (the contract's RunId rule). */
+export function isStoredRunId(name: string): boolean {
+  return toRunId(name) !== null;
+}
+
+/**
+ * N-24(c): a recorded time in RUN_TIMESTAMP_PATTERN_SOURCE form that names a real UTC instant.
+ * `Date` carries impossible dates over (2026-02-30 becomes 2026-03-02), so the text must equal
+ * `toISOString` of what it parses to, with the milliseconds written out to three digits.
+ */
+export function isRunTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || !RUN_TIMESTAMP.test(value)) return false;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return false;
+  const dot = value.indexOf(".");
+  const full = dot < 0 ? `${value.slice(0, -1)}.000Z` : `${value.slice(0, dot + 1)}${value.slice(dot + 1, -1).padEnd(3, "0")}Z`;
+  return new Date(time).toISOString() === full;
+}
+
+/** A timestamp as recorded, when it is a real one (`isRunTimestamp`). */
+function timestamp(value: unknown): string | null {
+  return isRunTimestamp(value) ? value : null;
+}
+
+
+/** A regular file no larger than `max` bytes; "missing" when there is none. Anything else is unreadable. */
+async function checkedFile(file: string, max: number): Promise<"file" | "missing"> {
+  try {
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > max) unreadable();
+    return "file";
+  } catch (error) {
+    if (error instanceof Unreadable) throw error;
+    const code = errorCode(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return "missing";
+    return unreadable();
+  }
+}
+
+async function readText(file: string, max: number): Promise<string> {
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(file);
+  } catch {
+    return unreadable();
+  }
+  if (bytes.length > max) unreadable();
+  return bytes.toString("utf8");
+}
+
+function parseObject(text: string): Obj {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return unreadable();
+  }
+  return isObj(value) ? value : unreadable();
+}
+
+/**
+ * DR-12: what the journal's first record says. A model run starts with `run_started`, an apply
+ * run (G-A) with `apply_started`, which also names the plan run and the approved digest. U-181
+ * (DR-69 B-3): a model run that carries out an approved `run` plan names them in `run_started` too
+ * (planRunId, planDigest); null for any other model run.
+ */
+type FirstRecord =
+  | {
+      readonly kind: "run";
+      readonly startedAt: string;
+      readonly taskId: string;
+      readonly profile: string | null;
+      readonly workflowRef: string | null;
+      readonly planRunId: string | null;
+      readonly planDigest: string | null;
+    }
+  | { readonly kind: "apply"; readonly startedAt: string; readonly taskId: string; readonly planRunId: string; readonly digest: string };
+
+const APPROVALS: readonly string[] = APPROVAL_CHANNELS;
+const PROFILE_NAME = new RegExp(PROFILE_NAME_PATTERN_SOURCE);
+const WORKFLOW_ID = new RegExp(WORKFLOW_ID_PATTERN_SOURCE);
+
+/** DR-37 (d): a recorded name, null when none (absent or null) is recorded; anything else is damage. */
+function recordedName(value: unknown, pattern: RegExp): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !pattern.test(value)) unreadable();
+  return value;
+}
+
+
+/**
+ * U-181 (journal.ts `run_started`, B-3): the plan a model run carries out, when its first record
+ * names one: the plan run, the approved digest and how the person approved it, all three or none.
+ * One without the others, or one that does not pass apply_started's checks (another run's id, a
+ * SHA-256, an approval channel), makes the run damaged. Null for a run that names none.
+ */
+function carriedPlanOf(record: Obj, runId: string): { readonly planRunId: string; readonly planDigest: string } | null {
+  const { planRunId, planDigest, approval } = record;
+  if (planRunId === undefined && planDigest === undefined && approval === undefined) return null;
+  if (typeof planRunId !== "string" || toRunId(planRunId) === null || planRunId === runId) unreadable();
+  if (typeof planDigest !== "string" || !HASH.test(planDigest)) unreadable();
+  if (typeof approval !== "string" || !APPROVALS.includes(approval)) unreadable();
+  return { planRunId, planDigest };
+}
+
+/**
+ * The journal's first record. A first line that is not complete (still being written) or is not
+ * this run's `run_started` or `apply_started` makes the run damaged.
+ */
+async function firstRecord(file: string, runId: string): Promise<FirstRecord> {
+  if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") unreadable();
+  const handle = await open(file, "r").catch(() => unreadable());
+  let text: string;
+  try {
+    const buffer = Buffer.alloc(FIRST_RECORD_MAX_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    text = buffer.subarray(0, bytesRead).toString("utf8");
+  } catch {
+    return unreadable();
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+  const end = text.indexOf("\n");
+  if (end < 0) unreadable();
+  const record = parseObject(text.slice(0, end));
+  if (record["runId"] !== runId || record["seq"] !== 1 || record["schemaVersion"] !== 1) unreadable();
+  const taskId = record["taskId"];
+  if (typeof taskId !== "string" || !TASK_ID.test(taskId)) unreadable();
+  const startedAt = timestamp(record["at"]);
+  if (startedAt === null) unreadable();
+  if (record["type"] === "run_started") {
+    if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
+    const profile = recordedName(record["profile"], PROFILE_NAME);
+    const workflowRef = recordedName(record["workflowRef"], WORKFLOW_ID);
+    const carried = carriedPlanOf(record, runId);
+    return { kind: "run", startedAt, taskId: taskId as string, profile, workflowRef, planRunId: carried?.planRunId ?? null, planDigest: carried?.planDigest ?? null };
+  }
+  if (record["type"] !== "apply_started") unreadable();
+  const { planRunId, digest, approval, actions, maxDurationMs } = record;
+  if (typeof planRunId !== "string" || toRunId(planRunId) === null || planRunId === runId) unreadable();
+  if (typeof digest !== "string" || !HASH.test(digest)) unreadable();
+  if (typeof approval !== "string" || !APPROVALS.includes(approval)) unreadable();
+  if (typeof actions !== "number" || !Number.isSafeInteger(actions) || actions < 1) unreadable();
+  if (typeof maxDurationMs !== "number" || !Number.isSafeInteger(maxDurationMs) || maxDurationMs < 1) unreadable();
+  return { kind: "apply", startedAt, taskId: taskId as string, planRunId, digest };
+}
+
+/** An AppliedActionRecord as an ApplyResult holds it. */
+function isAppliedRecord(value: unknown): boolean {
+  if (!isObj(value)) return false;
+  const { index, action, stored } = value;
+  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || !isObj(action)) return false;
+  if (typeof action["sha256"] !== "string" || !HASH.test(action["sha256"])) return false;
+  if (action["kind"] === "move") return typeof action["from"] === "string" && typeof action["to"] === "string" && stored === null;
+  if (action["kind"] === "discard") return typeof action["path"] === "string" && typeof stored === "string";
+  return false;
+}
+
+/** Status, reason and change count from result.json, or nulls when the run has none. */
+async function resultOf(
+  file: string,
+  runId: string,
+  first: FirstRecord,
+): Promise<{ status: TerminalRunStatus | null; reason: RunReason | null; changes: number | null }> {
+  if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") return { status: null, reason: null, changes: null };
+  const result = parseObject(await readText(file, MAX_REPORT_FILE_BYTES));
+  if (result["schemaVersion"] !== 1 || result["kind"] !== first.kind || result["runId"] !== runId) unreadable();
+  if (result["taskId"] !== first.taskId) unreadable();
+  const status = result["status"];
+  if (typeof status !== "string" || !(TERMINAL_RUN_STATUSES as readonly string[]).includes(status)) unreadable();
+  const reason = result["reason"];
+  // DR-16: the contract's one table of reasons per status (G-A reasons included).
+  if (typeof reason !== "string" || !isReasonOfStatus(status as TerminalRunStatus, reason)) unreadable();
+  if (result["exitCode"] !== RUN_EXIT_CODES[status as TerminalRunStatus]) unreadable();
+  if (first.kind === "apply") {
+    // DR-12: an ApplyResult of this apply's plan and digest; its changes are the applied actions.
+    // The contract's table of the reasons an apply ends with, by status (APPLY_REASONS_BY_STATUS).
+    if (!(APPLY_REASONS_BY_STATUS[status as TerminalRunStatus] as readonly string[]).includes(reason as string)) unreadable();
+    if (result["planRunId"] !== first.planRunId || result["digest"] !== first.digest) unreadable();
+    const applied = result["applied"];
+    if (!Array.isArray(applied) || !applied.every(isAppliedRecord)) unreadable();
+    return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: applied.length };
+  }
+  if (typeof result["provider"] !== "string" || !PROVIDERS.includes(result["provider"])) unreadable();
+  // U-181 (EngineResult.planRunId, planDigest): present together exactly in a run whose
+  // run_started names a plan, and then the same plan run and digest; absent in every other run.
+  if (first.planRunId !== null) {
+    if (result["planRunId"] !== first.planRunId || result["planDigest"] !== first.planDigest) unreadable();
+  } else if (Object.hasOwn(result, "planRunId") || Object.hasOwn(result, "planDigest")) {
+    unreadable();
+  }
+  const changes = result["changes"];
+  if (!Array.isArray(changes) || !changes.every(isChangeRecord)) unreadable();
+  // N-D 5: files, not change records, as the end-of-run summary counts them (N-23 d).
+  const paths = new Set((changes as Obj[]).map((change) => change["path"]));
+  return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: paths.size };
+}
+
+/** A FileChangeRecord as result.json holds it (report.ts checks the same fields). */
+function isChangeRecord(value: unknown): boolean {
+  if (!isObj(value)) return false;
+  const previous = value["previousHash"];
+  return (
+    typeof value["path"] === "string" &&
+    typeof value["created"] === "boolean" &&
+    typeof value["newHash"] === "string" &&
+    HASH.test(value["newHash"]) &&
+    (previous === null || (typeof previous === "string" && HASH.test(previous)))
+  );
+}
+
+function parseRevertRecord(record: Obj, runId: string): RevertRecord {
+  const count = (value: unknown): number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : unreadable();
+  if (record["schemaVersion"] !== 1 || record["kind"] !== "revert_record" || record["runId"] !== runId) unreadable();
+  const at = timestamp(record["at"]);
+  const status = record["status"];
+  if (at === null || (status !== "complete" && status !== "partial")) unreadable();
+  const reverted = count(record["reverted"]);
+  const parsed: RevertRecord = { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted, skipped: count(record["skipped"]) };
+  // DR-25: the consent to unsafe moves for that revert and how many files were moved back unsafely.
+  // Absent in records written before DR-25. Unsafe moves need a consent and are reverted files.
+  const consent = record["unsafeMoveConsent"];
+  const unsafeMoves = record["unsafeMoves"];
+  if (consent !== undefined && consent !== null && !(APPROVAL_CHANNELS as readonly unknown[]).includes(consent)) unreadable();
+  if (unsafeMoves !== undefined) {
+    const moved = count(unsafeMoves);
+    if (moved > reverted || (moved > 0 && (consent === undefined || consent === null))) unreadable();
+  }
+  return {
+    ...parsed,
+    ...(consent === undefined ? {} : { unsafeMoveConsent: consent as RevertRecord["unsafeMoveConsent"] }),
+    ...(unsafeMoves === undefined ? {} : { unsafeMoves: unsafeMoves as number }),
+  };
+}
+
+async function revertRecordAt(file: string, runId: string): Promise<RevertRecord | null> {
+  if ((await checkedFile(file, REVERT_RECORD_MAX_BYTES)) === "missing") return null;
+  return parseRevertRecord(parseObject(await readText(file, REVERT_RECORD_MAX_BYTES)), runId);
+}
+
+/** applied.json is one short JSON line (markPlanApplied). */
+const PLAN_APPLIED_MAX_BYTES = 4096;
+
+/**
+ * U-16 (UXM-5): the apply run that claimed this plan run's plan and when, from its
+ * PLAN_APPLIED_FILE_NAME as markPlanApplied writes it (exactly schemaVersion, kind, planRunId,
+ * applyRunId, at). null when there is none or it cannot be read: such a record is left out, it
+ * never makes the run damaged (the plan view and apply read it themselves).
+ */
+async function appliedByAt(file: string, runId: string): Promise<{ runId: RunId; at: string } | null> {
+  try {
+    if ((await checkedFile(file, PLAN_APPLIED_MAX_BYTES)) === "missing") return null;
+    const record = parseObject(await readText(file, PLAN_APPLIED_MAX_BYTES));
+    if (Object.keys(record).sort().join(",") !== "applyRunId,at,kind,planRunId,schemaVersion") return null;
+    if (record["schemaVersion"] !== 1 || record["kind"] !== "plan_applied" || record["planRunId"] !== runId) return null;
+    const applyRunId = typeof record["applyRunId"] === "string" ? toRunId(record["applyRunId"]) : null;
+    const at = timestamp(record["at"]);
+    return applyRunId === null || applyRunId === runId || at === null ? null : { runId: applyRunId, at };
+  } catch {
+    return null;
+  }
+}
+
+type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
+
+/** The UTC second a CLI run id names, in milliseconds, or null for any other id or an impossible date. */
+export function runIdSecond(runId: string): number | null {
+  const match = CLI_RUN_ID.exec(runId);
+  if (match === null) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number) as [number, number, number, number, number, number];
+  const time = Date.UTC(year, month - 1, day, hour, minute, second);
+  const date = new Date(time);
+  const same =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute &&
+    date.getUTCSeconds() === second;
+  return same ? time : null;
+}
+
+/**
+ * How long after the run id's second the first record may be written. The CLI reads the clock for
+ * the run id, then sets up the workspace, the lock and the model before the engine writes
+ * `run_started` with a second reading, so the two can fall into different seconds.
+ */
+export const RUN_START_TOLERANCE_MS = 10 * 60 * 1000;
+
+/**
+ * N-23(b): the start time must agree with the run id (not before its second, at most
+ * RUN_START_TOLERANCE_MS after it) and must not lie in the future. A run that fails either was
+ * not written by a run as recorded, so it is damaged and never `latest`.
+ */
+function checkStartTime(runId: string, startedAt: string, now: number): void {
+  const second = runIdSecond(runId);
+  const started = Date.parse(startedAt);
+  if (second === null || started < second || started >= second + RUN_START_TOLERANCE_MS || started > now) unreadable();
+}
+
+async function readEntry(dir: string, runId: RunId, now: number): Promise<CheckedRun> {
+  const first = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
+  const { startedAt, taskId } = first;
+  checkStartTime(runId, startedAt, now);
+  const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, first);
+  // N-23(g): the revert record only marks a reverted run. One that fails its checks takes the
+  // mark away, not the run: the run stays checked (revertRecordDamaged) and can still be
+  // reported and reverted.
+  let revertRecordDamaged = false;
+  const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId).catch(() => {
+    revertRecordDamaged = true;
+    return null;
+  });
+  return {
+    state: "checked",
+    runId,
+    // G-A: a model run or an apply run (DR-12), and the plan run an apply applied. U-181 (B-3): also
+    // the plan run a model run carried out; absent for any other model run, as before.
+    kind: first.kind,
+    ...(first.planRunId !== null ? { planRunId: first.planRunId as RunId } : {}),
+    startedAt,
+    // DR-37 (d): the run's profile and workflow definition; an apply run's plan run has them.
+    profile: first.kind === "run" ? first.profile : null,
+    workflowRef: first.kind === "run" ? first.workflowRef : null,
+    taskId,
+    status,
+    reason,
+    changes,
+    reverted: record === null ? null : { at: record.at, status: record.status },
+    revertRecordDamaged,
+    // DR-38: a records-changed mark (or one that cannot be read). Left out when there is none.
+    ...((await recordsChangedMarkIn(dir)) ? { recordsChanged: true } : {}),
+    // U-16 (UXM-5): a plan run whose plan an apply claimed. Left out otherwise.
+    ...(await appliedByOf(dir, runId, first.kind, reason)),
+    // U-129 (AXM-21): a run that waited for review and has a person's verdict. Left out otherwise.
+    ...(await reviewOf(dir, runId, first.kind, reason)),
+  };
+}
+
+/**
+ * U-129 (AXM-21, PM): `review` for a model run that ended `awaiting_review` and has a person's verdict:
+ * the verdict and its time from review.json, read with the checks report uses (reviewRecordIn). No
+ * record, or one that cannot be read or checked: left out, and the run stays checked (report reads it
+ * itself). The note is not listed.
+ */
+async function reviewOf(dir: string, runId: RunId, kind: "run" | "apply", reason: RunReason | null): Promise<{ review?: { verdict: ReviewVerdict; at: string } }> {
+  if (kind !== "run" || reason !== "awaiting_review") return {};
+  try {
+    const record = await reviewRecordIn(dir, runId);
+    return record === null ? {} : { review: { verdict: record.verdict, at: record.at } };
+  } catch {
+    return {};
+  }
+}
+
+/** U-16: `appliedBy` for a plan run (a model run that ended plan_pending) whose plan was applied. */
+async function appliedByOf(dir: string, runId: RunId, kind: "run" | "apply", reason: RunReason | null): Promise<{ appliedBy?: { runId: RunId; at: string } }> {
+  if (kind !== "run" || reason !== "plan_pending") return {};
+  const appliedBy = await appliedByAt(join(dir, PLAN_APPLIED_FILE_NAME), runId);
+  return appliedBy === null ? {} : { appliedBy };
+}
+
+/** Newest first by start time, then by run id, both descending. */
+function newestFirst(a: CheckedRun, b: CheckedRun): number {
+  const difference = Date.parse(b.startedAt) - Date.parse(a.startedAt);
+  if (difference !== 0) return difference;
+  return a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0;
+}
+
+/**
+ * See ListRuns: checked runs newest first, then damaged runs by run id, descending.
+ * `workspaceRoot` is the real absolute path of the root. A workspace without `.codaryn/runs` has
+ * no runs. Rejects with RunListError when that directory exists but cannot be listed, or when it
+ * (or `.codaryn`) is a link.
+ */
+export const listRuns: ListRuns = (request) => listRunsAt(request, Date.now());
+
+/** `listRuns` with the current time given, in milliseconds (start times after it are damaged). */
+export async function listRunsAt(request: { readonly workspaceRoot: string }, now: number): Promise<RunListing> {
+  const runsDir = join(request.workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
+  let real: string;
+  try {
+    real = await realpathNative(runsDir);
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return { runs: [] };
+    throw new RunListError("the run records directory cannot be read");
+  }
+  if (!sameFsPath(real, runsDir)) {
+    throw new RunListError("the run records directory is a link; only the workspace's own records are listed");
+  }
+  let entries;
+  try {
+    if (!(await lstat(runsDir)).isDirectory()) throw new Error("not a directory");
+    entries = await readdir(runsDir, { withFileTypes: true });
+  } catch {
+    throw new RunListError("the run records directory cannot be read");
+  }
+
+  const checked: CheckedRun[] = [];
+  const damaged: RunId[] = [];
+  for (const entry of entries) {
+    const runId = toRunId(entry.name);
+    if (runId === null) continue;
+    if (!entry.isDirectory()) {
+      damaged.push(runId);
+      continue;
+    }
+    try {
+      checked.push(await readEntry(join(runsDir, entry.name), runId, now));
+    } catch {
+      damaged.push(runId);
+    }
+  }
+  damaged.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  // U-162 (AXM-8, U-158): each checked run's phase by the contract's one rule. Only a run without
+  // result.json can be running, so the lock is read (once, reading only) when there is one. Running
+  // needs the lock to name the run with a holder that still runs (`held`); a lock that cannot be read,
+  // a reclaim left behind, a stale lock or none give no ground to say it runs: no_result (PM).
+  const lockHolder = checked.some((entry) => entry.status === null) ? await lockHolderRunId(request.workspaceRoot) : null;
+  const phased = checked.map((entry): CheckedRun => ({ ...entry, phase: runPhaseOf({ hasResult: entry.status !== null, lockedByThisRun: entry.runId === lockHolder }) }));
+  const listing: RunListing = {
+    runs: [...phased.sort(newestFirst), ...damaged.map((runId) => ({ state: "damaged" as const, runId }))],
+  };
+  return listing;
+}
+
+/** U-162: the run id of the workspace lock's holder when it still runs (`held`), else null. Never rejects. */
+async function lockHolderRunId(workspaceRoot: string): Promise<string | null> {
+  const lock = await inspectLock(workspaceRoot);
+  return lock.state === "held" ? lock.holder.runId : null;
+}
+
+/** N-26: how one run's records stand, as the run list would judge them. */
+export type RunInspection = "checked" | "damaged" | "missing";
+
+/**
+ * N-26: the run list's judgement for one run, for `revert` with an explicit id (and anything else
+ * that acts on a run named by the user). "damaged" is exactly what `listRuns` lists as damaged:
+ * not a run id, a link or junction in place of `.codaryn/runs` or the run directory, no journal,
+ * or records that fail the checks (forged or future start time included). A damaged revert record
+ * alone does not count (N-23(g)). "missing": the workspace has no directory for that run.
+ * Reads only; `now` is the current time in milliseconds.
+ */
+export async function inspectRun(workspaceRoot: string, runId: string, now: number = Date.now()): Promise<RunInspection> {
+  const id = toRunId(runId);
+  if (id === null) return "damaged";
+  const runsDir = join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
+  try {
+    const real = await realpathNative(runsDir);
+    if (!sameFsPath(real, runsDir) || !(await lstat(runsDir)).isDirectory()) return "damaged";
+  } catch (error) {
+    const code = errorCode(error);
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
+  }
+  // N-27 (a): only the entry of exactly this name; a case variant names no run.
+  if (!(await hasExactRunEntry(workspaceRoot, id))) return "missing";
+  const dir = join(runsDir, id);
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) return "damaged";
+  } catch (error) {
+    const code = errorCode(error);
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
+  }
+  if (!(await isPlainDirectory(dir))) return "damaged";
+  try {
+    await readEntry(dir, id, now);
+    return "checked";
+  } catch {
+    return "damaged";
+  }
+}
+
+/** The id `--run latest` stands for (see `latestRun`), or null when there is none. */
+export async function latestRunId(workspaceRoot: string): Promise<RunId | null> {
+  return latestRun((await listRuns({ workspaceRoot })).runs)?.runId ?? null;
+}
+
+/**
+ * The run `--run latest` names in a listing: the first checked run that has a result (N-23(b)).
+ * A run without result.json (running, or stopped without one) is listed but never chosen.
+ */
+export function latestRun(runs: readonly RunListEntry[]): CheckedRun | null {
+  for (const run of runs) {
+    if (run.state === "checked" && run.status !== null) return run;
+  }
+  return null;
+}
+
+/**
+ * The run's revert record, null when it has none. Rejects when one exists but cannot be read or
+ * fails its checks. `revert` reads it before reverting to fill `RevertOutput.revertedBefore`.
+ */
+export async function readRevertRecord(workspaceRoot: string, runId: string): Promise<RevertRecord | null> {
+  assertRunId(runId);
+  const dir = runDir(workspaceRoot, runId);
+  if (!(await isOwnRunDir(workspaceRoot, runId))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
+  try {
+    return await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
+  } catch {
+    throw new RunListError("the run's revert record cannot be read");
+  }
+}
+
+/**
+ * The directory exists and is the workspace's own: not a link or junction (as `listRuns` sees run
+ * directories), so a record is never read from or written to another place.
+ */
+
+/**
+ * Writes `<root>/.codaryn/runs/<runId>/revert.json` atomically, replacing an earlier record.
+ * `revert` calls it after `revertRun` (not a dry run) returned, while it still holds the lock.
+ * The run directory must exist (the run has a journal) and be a plain directory; it is not
+ * created, and a link or junction in its place is refused with RunListError, nothing written.
+ */
+export async function writeRevertRecord(workspaceRoot: string, record: RevertRecord): Promise<void> {
+  assertRunId(record.runId);
+  let checked: RevertRecord;
+  try {
+    checked = parseRevertRecord(record as unknown as Obj, record.runId);
+  } catch {
+    throw new TypeError("writeRevertRecord needs a valid RevertRecord");
+  }
+  const dir = runDir(workspaceRoot, record.runId);
+  if (!(await isOwnRunDir(workspaceRoot, record.runId))) throw new RunListError("the run directory is missing or a link; no revert record was written");
+  const target = join(dir, REVERT_RECORD_FILE_NAME);
+  const temporary = `${target}.${randomBytes(8).toString("hex")}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(checked)}\n`, { encoding: "utf8", flag: "wx" });
+    await rename(temporary, target);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}

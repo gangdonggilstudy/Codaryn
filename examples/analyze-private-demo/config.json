@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "commands": [],
+    "network": "deny",
+    "destructive": "deny",
+    "restorePathTokens": false,
+    "unreadablePaths": [
+      "private"
+    ]
+  }
+}

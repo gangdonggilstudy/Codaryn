@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "delegation_id": "pm-20261115-claude-01",
+  "status": "active",
+  "owner": "claude-temporary-pm",
+  "owner_pane": "w3:pG",
+  "owner_session_id": "9d6ad963-02c1-4d06-848f-f3c59b3a04e9",
+  "scope": "previously-approved-offline-development-verification-docs-and-operations",
+  "recall_phrase": "PM 회수",
+  "on_revoke": "Stop new assignments and mutations, preserve worktrees, report checkpoint.",
+  "handoff": "docs/operations/pm-handoff-2026-11-15.md",
+  "former_pm": "codex-review",
+  "former_pm_role": "ordinary-worker",
+  "implementation_workers": "existing-codex-sessions",
+  "no_git_trailers": true,
+  "excluded": "Real API/key reads/model runs, GU9/DR67 installers/signing/publishing/costs remain unapproved or unexecuted; no new worktrees or history rewriting."
+}

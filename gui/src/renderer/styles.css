@@ -1,0 +1,471 @@
+/* The window (GU-2). Words carry the state; colour only supports it (docs/design/standalone-gui.md 10). */
+
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+#app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+}
+
+#top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid currentColor;
+}
+
+#top h1 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+#screens {
+  display: flex;
+  gap: 0.25rem;
+}
+
+#screens button[aria-current="page"] {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+#body {
+  display: grid;
+  /* U-70: the separator sets --tree-width; without it the panel takes its own width. */
+  grid-template-columns: var(--tree-width, minmax(14rem, 22rem)) 0.4rem 1fr;
+  min-height: 0;
+}
+
+#splitter {
+  cursor: col-resize;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  touch-action: none;
+}
+
+#splitter:hover,
+#splitter:focus-visible {
+  background: color-mix(in srgb, currentColor 30%, transparent);
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+
+#files {
+  border-right: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  padding: 0.5rem 0.75rem;
+  overflow: auto;
+}
+
+#work {
+  padding: 0.75rem 1.25rem;
+  overflow: auto;
+}
+
+#status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+  padding: 0.25rem 1rem;
+  border-top: 1px solid currentColor;
+  font-size: 0.9rem;
+}
+
+h2 {
+  font-size: 1.05rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+h3 {
+  font-size: 1rem;
+}
+
+button {
+  font: inherit;
+  padding: 0.3rem 0.8rem;
+}
+
+button:focus-visible,
+[role="treeitem"]:focus-visible,
+#files:focus-visible,
+#work:focus-visible {
+  outline: 3px solid Highlight;
+  outline-offset: 2px;
+}
+
+.panel-head,
+.screen-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.tree-note,
+.notice {
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree [role="treeitem"] {
+  padding: 0.1rem 0.25rem 0.1rem calc(0.25rem + var(--depth, 0) * 1.1rem);
+  overflow-wrap: anywhere;
+  cursor: default;
+}
+
+.tree .marker {
+  display: inline-block;
+  width: 1.1rem;
+}
+
+.tree [data-masked="true"] .name,
+.tree [data-kind="link"] .name,
+.tree [data-kind="state"] .name,
+.tree [data-kind="other"] .name,
+.tree .tree-status {
+  font-style: italic;
+}
+
+.tree .tree-more {
+  text-decoration: underline;
+}
+
+/* U-65: what the marked run did, and protected entries; words, not colour alone. */
+.tree .tree-marks {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.tree [data-change] .name {
+  font-weight: 600;
+}
+
+.recent {
+  list-style: none;
+  padding: 0;
+}
+
+.recent li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.recent-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.recent-name {
+  font-weight: 600;
+}
+
+.recent-path {
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.recent-missing {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.checks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.checks li {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(10rem, 1fr);
+  gap: 0.15rem 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.checks .status {
+  font-weight: 600;
+}
+
+.checks .detail {
+  grid-column: 2;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+[data-status="fail"] > .status,
+.overall[data-status="fail"] {
+  text-decoration: underline;
+}
+
+.error,
+.message {
+  border: 2px solid currentColor;
+  padding: 0.5rem 1rem;
+}
+
+.code {
+  font-family: ui-monospace, monospace;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* DR-29 (3.4): the line comparison. The +/- mark and the line numbers carry the meaning; colour only helps. */
+.changed-file {
+  margin: 1rem 0;
+}
+.diff {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  border: 1px solid #c8c8c8;
+  overflow-x: auto;
+}
+.diff li {
+  display: grid;
+  grid-template-columns: 3.5rem 3.5rem 1.5rem 1fr;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff .no {
+  color: #555;
+  text-align: right;
+  padding-right: 0.5rem;
+  user-select: none;
+}
+.diff .mark {
+  user-select: none;
+}
+.diff-added {
+  background: #e6f4ea;
+}
+.diff-removed {
+  background: #fdecea;
+}
+.diff li:focus {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+/* U-67 (3.13): the command palette, over the window near its top. */
+#palette {
+  position: fixed;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(36rem, 90vw);
+  background: Canvas;
+  color: CanvasText;
+  border: 1px solid #888;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
+  padding: 0.5rem;
+  z-index: 10;
+}
+#palette input {
+  width: 100%;
+  box-sizing: border-box;
+}
+#palette-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+#palette-list li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.2rem 0.4rem;
+  cursor: default;
+}
+#palette-list li[aria-selected="true"] {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+#palette-list li[aria-disabled="true"] {
+  opacity: 0.6;
+}
+#palette-list .palette-keys,
+#palette-list .palette-note {
+  margin-left: auto;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+/* U-66 (3.4): side by side (before | now), and long lines kept on one line when wrapping is off. */
+.changes-view {
+  display: flex;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+.diff-side {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  border: 1px solid #c8c8c8;
+}
+.diff-side th {
+  text-align: left;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 0.2rem 0.4rem;
+}
+.diff-side td.no {
+  width: 3.5rem;
+  color: #555;
+  text-align: right;
+  padding-right: 0.5rem;
+  user-select: none;
+  vertical-align: top;
+}
+.diff-side td.text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  vertical-align: top;
+}
+.diff-side .mark {
+  user-select: none;
+  display: inline-block;
+  width: 1.2rem;
+}
+.diff-side tr:focus {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+#changes[data-wrap="off"] .diff li,
+#changes[data-wrap="off"] .diff-side td.text {
+  white-space: pre;
+  word-break: normal;
+}
+#changes[data-wrap="off"] .changed-file {
+  overflow-x: auto;
+}
+#changes[data-wrap="off"] .diff-side {
+  table-layout: auto;
+}
+@media (forced-colors: active) {
+  .diff-added,
+  .diff-removed {
+    background: none;
+  }
+}
+/* U-69 (10): the dark theme follows the OS (system colours already do through color-scheme); the
+   fixed colours of the comparison, the line numbers, borders and focus rings get dark values. */
+@media (prefers-color-scheme: dark) {
+  .diff,
+  .diff-side {
+    border-color: #555;
+  }
+  .diff .no,
+  .diff-side td.no {
+    color: #aaa;
+  }
+  .diff-added {
+    background: #1d3b26;
+  }
+  .diff-removed {
+    background: #4a1f22;
+  }
+  .diff li:focus,
+  .diff-side tr:focus,
+  #palette-list li[aria-selected="true"] {
+    outline-color: #8ab4f8;
+  }
+  #palette {
+    border-color: #777;
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.6);
+  }
+}
+/* U-21 (DR-47): the agent's own words, set apart from what was checked; lines and tabs kept. */
+.agent-words {
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 3px solid #888;
+  padding-left: 0.6rem;
+  margin: 0.4rem 0;
+}
+
+/* U-174 (DR-72, 3.14): the read-only text view. Line numbers stand beside the text only with wrapping off. */
+.text-frame {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #c8c8c8;
+  margin: 0.5rem 0;
+}
+.text-lines {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  text-align: right;
+  color: #666;
+  overflow: hidden;
+  user-select: none;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.text-content {
+  flex: 1;
+  min-height: 24rem;
+  border: 0;
+  padding: 0.4rem 0.5rem;
+  resize: vertical;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  tab-size: 4;
+}
+@media (prefers-color-scheme: dark) {
+  .text-frame {
+    border-color: #555;
+  }
+  .text-lines {
+    color: #aaa;
+  }
+}
+/* U-184 (3.14): Save and Back to when opened under the text. */
+.text-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.4rem 0;
+}

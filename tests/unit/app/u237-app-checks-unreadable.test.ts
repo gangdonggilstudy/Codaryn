@@ -1,0 +1,78 @@
+/**
+ * Unit U-237 (p4g's R-108 H-2, after U-210's runGuards): the app's checks before an apply judge with
+ * the gate the apply will have, the run's unreadable paths included.
+ * Beside the run assembly, the app built a gate in two more places, both without the run's list:
+ * - checkApply on a plan of moves (check-apply.ts): the preflight's gate. The CLI's apply of moves
+ *   makes its gate from runGuards, so a move into an unreadable folder is refused there while the
+ *   check said nothing about it.
+ * - checkApply on a run plan (changes-plan.ts, checkChangesPlanFiles): the gate of the run that will
+ *   carry the plan out. That run's gate is runGuards' (approvedPlan.policyFor), so a planned file
+ *   under an unreadable folder is denied there while the check said nothing. The check also now asks
+ *   the engine's own judgement (judgePlannedFile, U-219; Codex V-21) with the same lists
+ *   (approvedPlanWritablePathSets) instead of its own lines.
+ * Each plan is made while no list exists; then the config file gets `unreadablePaths: ["private"]`, in
+ * its own policy or in a profile's the check names (Codex V-24 M-1: both sources were missed; the task
+ * file's and the definition's reached the old gate through the task's policy).
+ * Reproduced first (3718d41, todo until the checks used runGuards). Temporary folders, scripted model, fake values only.
+ */
+
+import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
+import { describe, test } from "node:test";
+import { createCodarynApp } from "../../../src/app/index.js";
+import type { PlanCheck } from "../../../src/app/index.js";
+import { appEnvironment, exists, planSteps, plannedRun, setupRun, taskForm, taskRequest } from "./support.js";
+
+/** A whole policy (a config file's policy is one), with the private folder unreadable. */
+const PRIVATE_POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, unreadablePaths: ["private"] };
+const REWRITE = { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" };
+
+/** Where the list is put after the plan: the config file's own policy, or a profile's (named by the form). */
+type Source = "config" | "profile";
+const listed = (source: Source, more: Record<string, unknown> = {}) =>
+  source === "config" ? { schemaVersion: 1, policy: PRIVATE_POLICY, ...more } : { schemaVersion: 1, profiles: { private: { policy: PRIVATE_POLICY } }, ...more };
+const formOf = (base: string, config: string, source: Source) => taskForm(base, { configPath: config, ...(source === "profile" ? { profile: "private" } : {}) });
+
+function checked(outcome: { ok: boolean }): PlanCheck {
+  assert.ok(outcome.ok, JSON.stringify(outcome));
+  return (outcome as unknown as { output: PlanCheck }).output;
+}
+
+describe("U-237, R-108 H-2: the app's checks and the run's unreadable paths", () => {
+  for (const source of ["config", "profile"] as const) {
+  test(`a plan of moves into an unreadable folder (${source}): the check says so, as the apply refuses it`, async () => {
+    const planned = await plannedRun({ "a.txt": "alpha\n" }, planSteps("a.txt", "private/a.txt"));
+    const config = path.join(planned.base, "config.json");
+    await writeFile(config, JSON.stringify(listed(source)), "utf8");
+    const settings = formOf(planned.base, config, source);
+    const check = checked(await planned.app.checkApply({ settings, planRunId: planned.plan.runId, digest: planned.digest }));
+    assert.equal(check.problems.length, 1, JSON.stringify(check.problems));
+    assert.equal(check.problems[0]?.index, 0);
+    // The apply with the same form moves nothing either.
+    const applied = await planned.app.applyPlan({ settings, planRunId: planned.plan.runId, digest: planned.digest, cancelFile: null, unsafeMoveConsent: null });
+    if (applied.ok) await applied.handle.done;
+    assert.equal(await exists(path.join(planned.base, "work", "private", "a.txt")), false);
+    assert.equal(await exists(path.join(planned.base, "work", "a.txt")), true);
+  });
+
+  test(`a run plan with a file under an unreadable folder (${source}): the check denies that file, as the carried-out run's gate does`, async () => {
+    const propose = { toolCalls: [{ name: "propose_changes", args: { summary: "add the notes", files: [{ path: "NOTES.md", change: "create" }, { path: "private/notes.md", change: "create" }] } }] };
+    const base = await setupRun({}, { workflowRef: "rewrite" }, [propose, { text: "planned" }]);
+    const config = path.join(base, "config.json");
+    await writeFile(config, JSON.stringify({ schemaVersion: 1, workflows: { rewrite: REWRITE } }), "utf8");
+    const app = createCodarynApp(await appEnvironment(base));
+    const started = await app.startRun(taskRequest(base, { configPath: config }));
+    assert.ok(started.ok, JSON.stringify(started));
+    const ended = await started.handle.done;
+    assert.ok(ended.ok, JSON.stringify(ended));
+    const plan = ended.result.plan as { digest: string; kind?: string } | undefined;
+    assert.deepEqual([ended.result.reason, plan?.kind], ["plan_pending", "changes"], JSON.stringify(ended.result));
+    // Afterwards the private folder becomes unreadable.
+    await writeFile(config, JSON.stringify(listed(source, { workflows: { rewrite: REWRITE } })), "utf8");
+    const check = checked(await app.checkApply({ settings: formOf(base, config, source), planRunId: ended.result.runId, digest: plan!.digest }));
+    assert.deepEqual([check.kind, check.planKind], ["plan_check", "changes"]);
+    assert.deepEqual(check.problems, [{ index: 1, problem: "denied" }], "the file under private, not NOTES.md");
+  });
+  }
+});

@@ -1,0 +1,925 @@
+/**
+ * G-B: the apply run (`applyPlan`, GT-E3, contract plan.ts ApplyDeps). No model: the stored
+ * actions are judged, claimed, applied in order and verified (inventory first). The cases follow
+ * the contract's order and its end states, including G-C's report: an executor that sees the
+ * signal abort may answer io_error, and the apply must still end as cancelled.
+ */
+
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+
+import { PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, asRawText, planActionShown } from "../../../src/contracts/index.js";
+import type {
+  ApplyJournalEntryRecord,
+  AppliedPlanAction,
+  ApplyDeps,
+  ApplyJournalEntry,
+  IntegrityChecker,
+  IntegrityManifest,
+  InventoryCheckInput,
+  InventoryChecker,
+  InventoryManifest,
+  MaskedPlanAction,
+  MaskedText,
+  PlanExecutor,
+  PlanItemOutcome,
+  PlanItemProblem,
+  RawVerifierResult,
+  PrivacyGateway,
+  ResolvedPlanAction,
+  StateComparison,
+  StateFingerprint,
+  StateGuard,
+  StateTier,
+  StoredPlanAction,
+  VerifierOutcome,
+} from "../../../src/contracts/index.js";
+import { APPLY_FIXED_TEXTS, applyPlan } from "../../../src/engine/index.js";
+import { createPrivacyGateway } from "../../../src/privacy/index.js";
+import { FAKE_SECRET, FAKE_TOKEN, FakeClock, FakePolicy, FakeVerifiers, HASH_A, HASH_B, fakePrivacy } from "./fakes.js";
+
+const MOVE: ResolvedPlanAction = { kind: "move", from: "a.jpg", to: "2026/a.jpg", sha256: HASH_A };
+const DISCARD: ResolvedPlanAction = { kind: "discard", path: "b.tmp", sha256: HASH_B };
+
+/** DR-28: an action as a plan run stores it, `shown` made with that run's gateway. */
+function stored(action: ResolvedPlanAction, privacy: PrivacyGateway = fakePrivacy()): StoredPlanAction {
+  const mask = (text: string): MaskedText => {
+    const masked = privacy.mask(text);
+    if (!masked.ok) throw new Error("fixture cannot be masked");
+    return masked.text;
+  };
+  const masked: MaskedPlanAction =
+    action.kind === "move"
+      ? { kind: "move", from: mask(action.from), to: mask(action.to), sha256: action.sha256 }
+      : { kind: "discard", path: mask(action.path), sha256: action.sha256 };
+  return { ...action, shown: planActionShown(masked) } as StoredPlanAction;
+}
+
+/** DR-28: a gateway with no secrets registered, as a task form without the plan run's secrets. */
+function plainPrivacy(): PrivacyGateway {
+  return { ...fakePrivacy(), mask: (text) => ({ ok: true, text: text as MaskedText }) };
+}
+
+class FakeApplyJournal {
+  readonly events: ApplyJournalEntry[] = [];
+  closed = false;
+  /** R-9 I-4: a record type whose append fails, as when the process ends right before it. */
+  failOn: string | null = null;
+  async append(event: ApplyJournalEntry): Promise<ApplyJournalEntryRecord> {
+    if (event.type === this.failOn) throw new Error("the process ended");
+    this.events.push(event);
+    return { seq: this.events.length, at: new Date(0).toISOString(), runId: "fake-apply", ...event };
+  }
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+  types(): string[] {
+    return this.events.map((event) => event.type);
+  }
+  ofType<T extends ApplyJournalEntry["type"]>(type: T): Extract<ApplyJournalEntry, { type: T }>[] {
+    return this.events.filter((event): event is Extract<ApplyJournalEntry, { type: T }> => event.type === type);
+  }
+}
+
+class FakeExecutor implements PlanExecutor {
+  readonly checked: number[] = [];
+  readonly applied: number[] = [];
+  /** DR-21: the `allowUnsafeMove` the engine passed for each applied index. */
+  readonly allowUnsafe: { index: number; allow: boolean | undefined }[] = [];
+  constructor(
+    private readonly options: {
+      check?: (action: ResolvedPlanAction) => PlanItemProblem | null;
+      apply?: (action: ResolvedPlanAction, index: number, allowUnsafeMove: boolean | undefined) => PlanItemOutcome;
+    } = {},
+  ) {}
+  async check(action: ResolvedPlanAction): Promise<PlanItemProblem | null> {
+    this.checked.push(this.checked.length);
+    return this.options.check?.(action) ?? null;
+  }
+  async apply(
+    action: ResolvedPlanAction,
+    index: number,
+    _signal: AbortSignal,
+    options?: { readonly allowUnsafeMove: boolean },
+  ): Promise<PlanItemOutcome> {
+    this.applied.push(index);
+    this.allowUnsafe.push({ index, allow: options?.allowUnsafeMove });
+    if (this.options.apply !== undefined) return this.options.apply(action, index, options?.allowUnsafeMove);
+    return { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index) : null } };
+  }
+}
+
+/**
+ * DR-21: an executor on a drive without hard links. The check reports every action as unsafe; the
+ * apply moves only with `allowUnsafeMove` and then marks the outcome unsafe.
+ */
+function noHardLinkExecutor(): FakeExecutor {
+  return new FakeExecutor({
+    check: () => "unsafe_move",
+    apply: (action, index, allow) =>
+      allow === true
+        ? { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index) : null, unsafe: true } }
+        : { ok: false, problem: "unsafe_move" },
+  });
+}
+
+class FakeInventory implements InventoryChecker {
+  captures = 0;
+  readonly inputs: InventoryCheckInput[] = [];
+  constructor(
+    private readonly options: {
+      limitReached?: boolean;
+      outcome?: VerifierOutcome;
+      captureThrows?: boolean;
+      /** R18-M1: runs during a capture, then the capture throws an AbortError (as a listing given the cancel signal does). */
+      abortDuring?: () => void;
+    } = {},
+  ) {}
+  async capture(): Promise<InventoryManifest> {
+    this.captures += 1;
+    if (this.options.abortDuring !== undefined) {
+      this.options.abortDuring();
+      throw new DOMException("This operation was aborted", "AbortError");
+    }
+    if (this.options.captureThrows === true) throw new Error("cannot list");
+    return { entries: [], limitReached: this.options.limitReached === true };
+  }
+  async check(input: InventoryCheckInput): Promise<RawVerifierResult> {
+    this.inputs.push(input);
+    return {
+      id: "inventory",
+      kind: "inventory",
+      outcome: this.options.outcome ?? "pass",
+      evidence: asRawText(`checked ${input.applied.length} actions`),
+      checked: ["the inventory"],
+      limits: ["a file outside the plan that changed but kept its size is not detected"],
+    };
+  }
+}
+
+interface Setup {
+  deps: ApplyDeps;
+  journal: FakeApplyJournal;
+  executor: FakeExecutor;
+  inventory: FakeInventory;
+  verifiers: FakeVerifiers;
+  clock: FakeClock;
+  controller: AbortController;
+  marks: string[];
+}
+
+function setup(parts: Partial<Omit<ApplyDeps, "journal" | "executor" | "inventory" | "verifiers" | "clock" | "signal">> & {
+  executor?: FakeExecutor;
+  inventory?: FakeInventory;
+  verifiers?: FakeVerifiers;
+  alreadyApplied?: boolean;
+} = {}): Setup {
+  const journal = new FakeApplyJournal();
+  const executor = parts.executor ?? new FakeExecutor();
+  const inventory = parts.inventory ?? new FakeInventory();
+  const verifiers = parts.verifiers ?? new FakeVerifiers();
+  const clock = new FakeClock();
+  const controller = new AbortController();
+  const marks: string[] = [];
+  const deps: ApplyDeps = {
+    plan: { schemaVersion: 1, kind: "plan", runId: "20261112T000000Z-0000aaaa", actions: [stored(MOVE), stored(DISCARD)] },
+    planRunId: "20261112T000000Z-0000aaaa",
+    digest: "d".repeat(64),
+    approval: "cli-flag",
+    runId: "20261112T000100Z-0000bbbb",
+    taskId: "tidy",
+    maxDurationMs: 60_000,
+    verifierConfigs: [{ id: "v1", kind: "file_rules", rules: [{ type: "exists", path: "2026/a.jpg" }] }],
+    policy: new FakePolicy(),
+    planActions: ["move", "discard"],
+    discardedRoot: "/work/.codaryn/discarded/20261112T000100Z-0000bbbb",
+    privacy: fakePrivacy(),
+    async markApplied() {
+      marks.push("mark");
+      return parts.alreadyApplied === true ? "already_applied" : "marked";
+    },
+    ...parts,
+    executor,
+    inventory,
+    verifiers,
+    journal,
+    clock,
+    signal: controller.signal,
+  };
+  return { deps, journal, executor, inventory, verifiers, clock, controller, marks };
+}
+
+describe("applyPlan: a plan that fits", () => {
+  test("judges, claims, applies in order, verifies the inventory first and ends done", async () => {
+    const run = setup();
+    const result = await applyPlan(run.deps);
+    assert.deepEqual(run.journal.types(), [
+      "apply_started",
+      "plan_checked",
+      "plan_item_started",
+      "file_moved",
+      "plan_item_started",
+      "file_discarded",
+      "verifier_result",
+      "verifier_result",
+      "run_finished",
+    ]);
+    assert.deepEqual([result.kind, result.status, result.reason, result.exitCode], ["apply", "done", "verified", 0]);
+    assert.deepEqual(result.verifiers.map((verifier) => verifier.id), ["inventory", "v1"]);
+    assert.deepEqual(result.applied.map((record) => [record.index, record.action.kind, record.stored]), [
+      [0, "move", null],
+      [1, "discard", "1"],
+    ]);
+    assert.deepEqual(run.marks, ["mark"]);
+    assert.equal(run.inventory.captures, 2, "before the actions and after them");
+    assert.equal(run.inventory.inputs[0]?.discardedRoot, run.deps.discardedRoot);
+    assert.deepEqual(run.inventory.inputs[0]?.applied.map((one: AppliedPlanAction) => one.index), [0, 1]);
+    assert.deepEqual({ ...result.usage, durationMs: 0 }, { modelTurns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, repairAttempts: 0 });
+    assert.equal(result.planRunId, run.deps.planRunId);
+    assert.equal(result.journalPath, `.codaryn/runs/${run.deps.runId}/journal.jsonl`);
+    assert.ok(run.journal.closed);
+    const [started] = run.journal.ofType("apply_started");
+    assert.deepEqual([started?.approval, started?.actions, started?.digest], ["cli-flag", 2, "d".repeat(64)]);
+  });
+
+  test("paths are masked in the record and the result", async () => {
+    const run = setup({
+      plan: {
+        schemaVersion: 1,
+        kind: "plan",
+        runId: "20261112T000000Z-0000aaaa",
+        actions: [stored({ kind: "move", from: `${FAKE_SECRET}.jpg`, to: "x.jpg", sha256: HASH_A })],
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.equal(JSON.stringify([run.journal.events, result]).includes(FAKE_SECRET), false);
+    const [moved] = run.journal.ofType("file_moved");
+    assert.equal(moved?.from, `${FAKE_TOKEN}.jpg`);
+  });
+
+  test("every fixed text is plain: the real gateway leaves it unchanged and it spells no marker", () => {
+    const privacy = createPrivacyGateway({ secrets: ["fake-secret-VALUE-0009"] });
+    const marker = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
+    for (const text of APPLY_FIXED_TEXTS) {
+      assert.equal(marker.test(text), false, text);
+      const masked = privacy.mask(text);
+      assert.ok(masked.ok && masked.text === text, text);
+    }
+  });
+});
+
+describe("applyPlan: the plan's paths must be masked now as the plan run masked them (DR-28, R-11 M-1)", () => {
+  const SECRET_MOVE: ResolvedPlanAction = { kind: "move", from: `${FAKE_SECRET}/c.jpg`, to: `2026/${FAKE_SECRET}/c.jpg`, sha256: HASH_A };
+  const SECRET_DISCARD: ResolvedPlanAction = { kind: "discard", path: `${FAKE_SECRET}.tmp`, sha256: HASH_B };
+  const planOf = (actions: StoredPlanAction[]) => ({ schemaVersion: 1, kind: "plan", runId: "20261112T000000Z-0000aaaa", actions }) as const;
+
+  /** Nothing ran: no check, no inventory, no claim, no move, and the value appears nowhere. */
+  function assertStoppedBeforeAnything(run: Setup, result: Awaited<ReturnType<typeof applyPlan>>): void {
+    assert.deepEqual([result.status, result.reason], ["failed", "plan_stale"]);
+    assert.ok(result.notices.some((notice) => notice.includes("plan_secrets_differ")), "the notice names the error");
+    assert.deepEqual(run.executor.checked, [], "no action was checked");
+    assert.deepEqual(run.executor.applied, [], "nothing was moved");
+    assert.equal(run.inventory.captures, 0, "the inventory was not taken");
+    assert.deepEqual(run.marks, [], "the plan was not claimed");
+    assert.deepEqual(result.applied, []);
+    assert.deepEqual(run.journal.types(), ["apply_started", "run_finished"]);
+    assert.doesNotMatch(JSON.stringify(run.journal.events), new RegExp(FAKE_SECRET), "no plain value in the record");
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(FAKE_SECRET), "no plain value in the result");
+  }
+
+  test("R-11 M-1 reproduction: a plan made with a secret, applied without it, stops before anything", async () => {
+    const run = setup({ plan: planOf([stored(SECRET_MOVE), stored(SECRET_DISCARD)]), privacy: plainPrivacy() });
+    assertStoppedBeforeAnything(run, await applyPlan(run.deps));
+  });
+
+  test("a plan without shown (stored before DR-28) is treated as masked differently", async () => {
+    const run = setup({ plan: planOf([MOVE, DISCARD] as StoredPlanAction[]) });
+    assertStoppedBeforeAnything(run, await applyPlan(run.deps));
+  });
+
+  test("masking more than the plan run did is a difference too", async () => {
+    const run = setup({ plan: planOf([stored(MOVE, plainPrivacy()), stored(DISCARD, plainPrivacy())]), privacy: fakePrivacy() });
+    const withSecretPath = setup({
+      plan: planOf([stored({ kind: "move", from: `${FAKE_SECRET}/c.jpg`, to: "d.jpg", sha256: HASH_A }, plainPrivacy())]),
+    });
+    assertStoppedBeforeAnything(withSecretPath, await applyPlan(withSecretPath.deps));
+    assert.equal((await applyPlan(run.deps)).reason, "verified", "no secret in these paths: the same parts");
+  });
+
+  test("a shown form of the other kind never matches", async () => {
+    const wrong = { ...MOVE, shown: { path: ["a.jpg"] } } as unknown as StoredPlanAction;
+    const run = setup({ plan: planOf([wrong, stored(DISCARD)]) });
+    assertStoppedBeforeAnything(run, await applyPlan(run.deps));
+  });
+
+  test("the same secrets as the plan run: the apply goes on, and the records stay masked", async () => {
+    const run = setup({ plan: planOf([stored(SECRET_MOVE), stored(SECRET_DISCARD)]) });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.deepEqual(run.executor.applied, [0, 1]);
+    assert.doesNotMatch(JSON.stringify(run.journal.events), new RegExp(FAKE_SECRET));
+    assert.match(JSON.stringify(run.journal.ofType("file_moved")), new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE));
+  });
+});
+
+describe("applyPlan: preflight stops before anything moves", () => {
+  test("an action that no longer fits makes the apply plan_stale; nothing is claimed or applied", async () => {
+    const executor = new FakeExecutor({ check: (action) => (action.kind === "discard" ? "source_changed" : null) });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.exitCode], ["failed", "plan_stale", 1]);
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.problems, [{ index: 1, problem: "source_changed" }]);
+    assert.deepEqual(executor.applied, []);
+    assert.deepEqual(run.marks, []);
+    assert.deepEqual(result.applied, []);
+    assert.deepEqual(result.verifiers, []);
+  });
+
+  test("an action the apply task's policy denies is a problem (DR-5)", async () => {
+    const policy = new FakePolicy({
+      requested: (call) => (call.args["path"] === "b.tmp" ? { allowed: false, permission: "path", code: "protected_path" } : { allowed: true }),
+    });
+    const run = setup({ policy });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "plan_stale");
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.problems, [{ index: 1, problem: "denied" }]);
+  });
+
+  test("a kind missing from the apply task's planActions is denied without asking the gate", async () => {
+    const asked: string[] = [];
+    const policy = new FakePolicy({
+      requested: (call) => {
+        asked.push(call.name);
+        return { allowed: true };
+      },
+    });
+    const run = setup({ policy, planActions: ["move"] });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "plan_stale");
+    assert.deepEqual(asked, ["plan.move"]);
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.problems, [{ index: 1, problem: "denied" }]);
+  });
+
+  test("the inventory limit stops the apply before anything moves (DR-6)", async () => {
+    const run = setup({ inventory: new FakeInventory({ limitReached: true }) });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "plan_stale");
+    assert.equal(run.journal.ofType("plan_checked")[0]?.inventoryLimitReached, true);
+    assert.deepEqual(run.executor.applied, []);
+    assert.ok(result.notices.some((notice) => notice.includes("inventory")));
+  });
+
+  test("R18-M1: the engine ends a cancel during the listing as cancelled; nothing is claimed or moved", async () => {
+    let controller: AbortController | undefined;
+    const run = setup({ inventory: new FakeInventory({ abortDuring: () => controller?.abort() }) });
+    controller = run.controller;
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.exitCode], ["cancelled", "cancelled", 5]);
+    assert.ok(!result.notices.some((notice) => notice.includes("inventory")), "not reported as a failed listing");
+    assert.deepEqual(run.executor.checked, []);
+    assert.deepEqual(run.executor.applied, []);
+    assert.deepEqual(run.marks, [], "the plan is not claimed: it can be applied again");
+  });
+
+  test("R18-M1: the duration limit reached during the listing ends as budget-exhausted, not plan_stale", async () => {
+    let clock: FakeClock | undefined;
+    const run = setup({ inventory: new FakeInventory({ abortDuring: () => { if (clock !== undefined) clock.t += 120_000; } }), maxDurationMs: 60_000 });
+    clock = run.clock;
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["budget-exhausted", "max_duration"]);
+    assert.deepEqual(run.marks, []);
+  });
+
+  test("an inventory that cannot be taken stops the apply too", async () => {
+    const run = setup({ inventory: new FakeInventory({ captureThrows: true }) });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "plan_stale");
+    assert.deepEqual(run.executor.applied, []);
+  });
+
+  test("a plan applied before is not applied again", async () => {
+    const run = setup({ alreadyApplied: true });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "plan_stale");
+    assert.deepEqual(run.marks, ["mark"]);
+    assert.deepEqual(run.executor.applied, []);
+  });
+});
+
+describe("applyPlan: unsafe moves need a person's consent for this apply (DR-21)", () => {
+  test("without consent the apply stops as needs-input/consent_required; nothing is claimed or moved", async () => {
+    const executor = noHardLinkExecutor();
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["needs-input", "consent_required"]);
+    const checked = run.journal.ofType("plan_checked")[0];
+    assert.deepEqual(checked?.problems, []);
+    assert.deepEqual(checked?.unsafeMoves, [0, 1]);
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, null);
+    assert.deepEqual(executor.applied, []);
+    assert.deepEqual(run.marks, []);
+    assert.deepEqual(result.applied, []);
+    assert.deepEqual(result.verifiers, []);
+    assert.deepEqual(run.journal.types(), ["apply_started", "plan_checked", "run_finished"]);
+    assert.ok(result.notices.some((notice) => notice.includes("consent")));
+  });
+
+  test("with consent for this plan the moves are made, passed allowUnsafeMove, and recorded as unsafe", async () => {
+    const executor = noHardLinkExecutor();
+    const run = setup({ executor, unsafeMoveConsent: { channel: "cli-tty", digest: "d".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, "cli-tty");
+    assert.deepEqual(executor.allowUnsafe, [
+      { index: 0, allow: true },
+      { index: 1, allow: true },
+    ]);
+    assert.equal(run.journal.ofType("file_moved")[0]?.unsafe, true);
+    assert.equal(run.journal.ofType("file_discarded")[0]?.unsafe, true);
+    assert.deepEqual(
+      result.applied.map((record) => record.unsafe),
+      [true, true],
+    );
+    assert.ok(result.notices.some((notice) => notice.includes("consent")));
+  });
+
+  test("consent only lets the actions the preflight listed move unsafely", async () => {
+    const executor = new FakeExecutor({ check: (action) => (action.kind === "move" ? "unsafe_move" : null) });
+    const run = setup({ executor, unsafeMoveConsent: { channel: "adapter", digest: "d".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.unsafeMoves, [0]);
+    assert.deepEqual(executor.allowUnsafe, [
+      { index: 0, allow: true },
+      { index: 1, allow: false },
+    ]);
+    assert.equal(run.journal.ofType("file_discarded")[0]?.unsafe, undefined);
+  });
+
+  test("a consent given for another plan counts as none and says so", async () => {
+    const executor = noHardLinkExecutor();
+    const run = setup({ executor, unsafeMoveConsent: { channel: "cli-flag", digest: "e".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "consent_required");
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, null);
+    assert.deepEqual(executor.applied, []);
+    assert.ok(result.notices.some((notice) => notice.includes("another plan")));
+  });
+
+  test("a plan with no unsafe move ignores a consent: nothing is passed or marked unsafe", async () => {
+    const run = setup({ unsafeMoveConsent: { channel: "cli-flag", digest: "d".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, "cli-flag");
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.unsafeMoves, []);
+    assert.ok(run.executor.allowUnsafe.every((entry) => entry.allow === false));
+    assert.ok(result.applied.every((record) => record.unsafe === undefined));
+  });
+
+  test("a problem still wins over unsafe moves: plan_stale, not consent_required", async () => {
+    const executor = new FakeExecutor({ check: (action) => (action.kind === "move" ? "unsafe_move" : "source_changed") });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "plan_stale");
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.problems, [{ index: 1, problem: "source_changed" }]);
+  });
+
+  test("an action the executor finds unsafe only while applying stops the apply; it is not moved", async () => {
+    const executor = new FakeExecutor({
+      apply: (action, index) =>
+        action.kind === "discard"
+          ? { ok: false, problem: "unsafe_move" }
+          : { ok: true, applied: { index, action, stored: null } },
+    });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "apply_incomplete"]);
+    const failed = run.journal.ofType("plan_item_failed")[0];
+    assert.deepEqual([failed?.index, failed?.problem], [1, "unsafe_move"]);
+  });
+});
+
+describe("applyPlan: a start record before each action (R-9 I-4)", () => {
+  test("a stop right after an action, before its record, still leaves a record naming it", async () => {
+    const run = setup();
+    run.journal.failOn = "file_moved";
+    await assert.rejects(applyPlan(run.deps));
+    assert.deepEqual(run.executor.applied, [0], "the move was made");
+    assert.deepEqual(run.journal.ofType("plan_item_started"), [
+      { type: "plan_item_started", index: 0, action: { kind: "move", from: "a.jpg", to: "2026/a.jpg", sha256: HASH_A } },
+    ]);
+  });
+
+  test("each action's start record is written before the executor runs it", async () => {
+    let journal: FakeApplyJournal | undefined;
+    const lastTypes: string[] = [];
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        lastTypes.push(journal?.types().at(-1) ?? "");
+        return { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index) : null } };
+      },
+    });
+    const run = setup({ executor });
+    journal = run.journal;
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.deepEqual(lastTypes, ["plan_item_started", "plan_item_started"]);
+    assert.deepEqual(run.journal.types().slice(0, 6), [
+      "apply_started",
+      "plan_checked",
+      "plan_item_started",
+      "file_moved",
+      "plan_item_started",
+      "file_discarded",
+    ]);
+  });
+
+  test("an action that is not reached has no start record", async () => {
+    let controller: AbortController | undefined;
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        controller?.abort();
+        return { ok: true, applied: { index, action, stored: null } };
+      },
+    });
+    const run = setup({ executor });
+    controller = run.controller;
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "cancelled");
+    assert.deepEqual(
+      run.journal.ofType("plan_item_started").map((event) => event.index),
+      [0],
+    );
+  });
+
+  test("a failed action keeps its start record and then its failure", async () => {
+    const executor = new FakeExecutor({ apply: () => ({ ok: false, problem: "source_changed" }) });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "apply_incomplete");
+    assert.deepEqual(run.journal.types().slice(0, 4), ["apply_started", "plan_checked", "plan_item_started", "plan_item_failed"]);
+  });
+});
+
+describe("applyPlan: stopping while applying", () => {
+  test("a failed action ends as apply_incomplete; the earlier ones stay listed and nothing is verified", async () => {
+    const executor = new FakeExecutor({
+      apply: (action, index) => (index === 1 ? { ok: false, problem: "destination_exists" } : { ok: true, applied: { index, action, stored: null } }),
+    });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "apply_incomplete"]);
+    assert.deepEqual(result.applied.map((record) => record.index), [0]);
+    assert.deepEqual(run.journal.ofType("plan_item_failed"), [{ type: "plan_item_failed", index: 1, problem: "destination_exists" }]);
+    assert.deepEqual(result.verifiers, []);
+    assert.ok(result.notices.some((notice) => notice.includes("codaryn revert")));
+  });
+
+  test("G-C: an executor that reports io_error for a cancelled action still ends the apply as cancelled", async () => {
+    let controller: AbortController | null = null;
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        if (index === 1) {
+          controller?.abort();
+          return { ok: false, problem: "io_error" };
+        }
+        return { ok: true, applied: { index, action, stored: null } };
+      },
+    });
+    const run = setup({ executor });
+    controller = run.controller;
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.exitCode], ["cancelled", "cancelled", 5]);
+    assert.deepEqual(result.applied.map((record) => record.index), [0]);
+    assert.equal(run.journal.ofType("plan_item_failed")[0]?.index, 1, "the cancelled action is recorded as not done");
+  });
+
+  test("a cancel between actions stops before the next one", async () => {
+    let controller: AbortController | null = null;
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        controller?.abort();
+        return { ok: true, applied: { index, action, stored: null } };
+      },
+    });
+    const run = setup({ executor });
+    controller = run.controller;
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "cancelled");
+    assert.deepEqual(executor.applied, [0]);
+    assert.deepEqual(result.applied.map((record) => record.index), [0]);
+  });
+
+  test("the duration limit between actions ends as budget-exhausted/max_duration", async () => {
+    let clock: FakeClock | null = null;
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        if (clock !== null) clock.t = 60_000;
+        return { ok: true, applied: { index, action, stored: null } };
+      },
+    });
+    const run = setup({ executor });
+    clock = run.clock;
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.exitCode], ["budget-exhausted", "max_duration", 4]);
+    assert.deepEqual(executor.applied, [0]);
+  });
+});
+
+describe("applyPlan: verification", () => {
+  test("a failing inventory ends as verifier_failed; no repair", async () => {
+    const run = setup({ inventory: new FakeInventory({ outcome: "fail" }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "verifier_failed"]);
+    assert.equal(result.applied.length, 2, "the actions stay done");
+  });
+
+  test("an inconclusive task verifier ends as needs-input/verifier_inconclusive", async () => {
+    const run = setup({ verifiers: new FakeVerifiers({ v1: "inconclusive" }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["needs-input", "verifier_inconclusive"]);
+  });
+
+  test("protected material changed during the apply makes it protected_changed", async () => {
+    let captures = 0;
+    const manifest = (sha: string): IntegrityManifest => ({ entries: [{ path: asRawText("tests/a.test.ts"), kind: "file", sha256: sha }] });
+    const integrity: IntegrityChecker = {
+      async capture() {
+        captures += 1;
+        return captures === 1 ? manifest(HASH_A) : manifest(HASH_B);
+      },
+      compare(before, after) {
+        return before.entries[0]?.kind === "file" && after.entries[0]?.kind === "file" && before.entries[0].sha256 !== after.entries[0].sha256
+          ? [asRawText("tests/a.test.ts")]
+          : [];
+      },
+    };
+    const run = setup({ integrity });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["needs-input", "protected_changed"]);
+    assert.deepEqual(result.protectedChanged, ["tests/a.test.ts"]);
+    assert.equal(result.applied.length, 2);
+  });
+});
+
+/** DR-38: numbers each capture of a tier and reports a change on the capture `change` names. */
+class FakeApplyStateGuard implements StateGuard {
+  readonly captures: { run: number; state: number } = { run: 0, state: 0 };
+  readonly marked: MaskedText[][] = [];
+  constructor(
+    private readonly options: { change?: { tier: StateTier; at: number; paths: string[] }; failCapture?: boolean; limitedFrom?: number } = {},
+  ) {}
+  async capture(tier: StateTier): Promise<StateFingerprint> {
+    if (this.options.failCapture === true) throw new Error("no fingerprint");
+    this.captures[tier] += 1;
+    return { tier, n: this.captures[tier] } as unknown as StateFingerprint;
+  }
+  compare(before: StateFingerprint, after: StateFingerprint): StateComparison {
+    const { change } = this.options;
+    const to = (after as unknown as { n: number }).n;
+    const from = (before as unknown as { n: number }).n;
+    const limited = after.tier === "state" && this.options.limitedFrom !== undefined && to >= this.options.limitedFrom;
+    return { changed: change !== undefined && change.tier === after.tier && to === change.at && from !== to ? (change.paths as never) : [], limited };
+  }
+  async markRecordsChanged(changed: readonly MaskedText[]): Promise<void> {
+    this.marked.push([...changed]);
+  }
+}
+
+describe("DR-38: the apply run checks the run records with its state guard (ApplyDeps.stateGuard)", () => {
+  const SHOWN = "runs/20261112T000000Z-0000aaaa/snapshots/shown-0.json";
+  const checks = (run: Setup) => run.journal.ofType("state_checked");
+
+  test("nothing changed: recorded at the start and the end; tier run is taken afresh after the actions", async () => {
+    const guard = new FakeApplyStateGuard();
+    const run = setup({ stateGuard: guard });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.deepEqual(checks(run).map((c) => c.phase), ["run_start", "run_end"]);
+    assert.deepEqual(guard.captures, { run: 3, state: 4 }, "start: state; round: run+state twice; end: run+state");
+    assert.deepEqual(result.stateChanged, []);
+  });
+
+  test("a verifier that changed the records ends the apply failed/state_changed; the moves stay", async () => {
+    const guard = new FakeApplyStateGuard({ change: { tier: "run", at: 2, paths: [SHOWN] } });
+    const run = setup({ stateGuard: guard });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
+    assert.deepEqual(checks(run).at(-1), { type: "state_checked", phase: "after_verify", changed: [SHOWN], limited: false });
+    assert.deepEqual(guard.marked, [[SHOWN]]);
+    assert.deepEqual(result.stateChanged, [SHOWN]);
+    assert.deepEqual(run.executor.applied, [0, 1], "the actions made stay (revert undoes them)");
+  });
+
+  test("a change elsewhere in the state directory found before the round: the verifiers do not run", async () => {
+    const guard = new FakeApplyStateGuard({ change: { tier: "state", at: 2, paths: ["runs/20261111T000000Z-0000eeee/result.json"] } });
+    const run = setup({ stateGuard: guard });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
+    assert.equal(checks(run).at(-1)?.phase, "before_verify");
+    assert.deepEqual(run.verifiers.runs, []);
+  });
+
+  test("a capture that cannot be made ends the apply failed/state_changed; no guard changes nothing", async () => {
+    const result = await applyPlan(setup({ stateGuard: new FakeApplyStateGuard({ failCapture: true }) }).deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
+    const plain = setup();
+    const done = await applyPlan(plain.deps);
+    assert.deepEqual([checks(plain).length, Object.hasOwn(done, "stateChanged")], [0, false]);
+  });
+});
+
+describe("U-1 (R-33 R33-L3): a plan run whose records were changed is not applied (ApplyDeps.planRecordsChanged)", () => {
+  test("a mark found under the lock: failed/plan_stale with a notice naming plan_records_changed; nothing checked or moved", async () => {
+    let asked = 0;
+    const run = setup({
+      planRecordsChanged: async () => {
+        asked += 1;
+        return true;
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "plan_stale"]);
+    assert.ok(result.notices.some((notice) => notice.includes("plan_records_changed")), "the notice names the code");
+    assert.equal(asked, 1);
+    assert.deepEqual(run.journal.types(), ["apply_started", "run_finished"]);
+    assert.deepEqual([run.inventory.captures, run.executor.applied, run.marks, result.applied, result.verifiers], [0, [], [], [], []]);
+  });
+
+  test("a check that cannot be made counts as a mark (fail closed)", async () => {
+    const run = setup({
+      planRecordsChanged: async () => {
+        throw new Error("cannot read");
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "plan_stale"]);
+    assert.deepEqual([run.executor.applied, run.marks], [[], []]);
+  });
+
+  test("no mark: the apply goes on as before, asked once right after apply_started", async () => {
+    const order: string[] = [];
+    const run = setup({
+      planRecordsChanged: async () => {
+        order.push(`checked after ${run.journal.types().join(",")}`);
+        return false;
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.deepEqual(order, ["checked after apply_started"]);
+  });
+});
+
+describe("U-29 (R-44 R44-L1): an apply tells what a run before it could not check", () => {
+  const UNCHECKED = "plan_records_unchecked";
+
+  test("Y1: a run between the plan and the apply was limited, the apply's own checks are not: told once, goes on", async () => {
+    const run = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard() });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.noticeKinds], ["done", "verified", [UNCHECKED]]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
+  });
+
+  test("a question that cannot be answered counts as unchecked (fail closed)", async () => {
+    const run = setup({
+      planRecordsUnchecked: async () => {
+        throw new Error("journal unreadable");
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.noticeKinds], ["done", [UNCHECKED]]);
+  });
+
+  test("earlier and own checks both limited: the kind and its notice once", async () => {
+    const run = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual(result.noticeKinds, [UNCHECKED]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
+  });
+
+  test("nothing earlier, or not asked: nothing is added", async () => {
+    for (const run of [setup({ planRecordsUnchecked: async () => false }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+    }
+  });
+});
+
+describe("U-33 (R-56 Q-1 (a)): one notice kind, the text by its cause; the apply's own limited check comes first", () => {
+  const UNCHECKED = "(plan_records_unchecked)";
+  const OWN = "the state directory is too large to check entirely";
+  const EARLIER = "a run since the plan was made could not check the state directory entirely";
+  const told = (notices: readonly string[]) => notices.filter((notice) => notice.includes(UNCHECKED));
+
+  test("R56-L2: an own check limited at any phase, a run since the plan too: the apply's result and records are U-8's (as on main a191a50)", async () => {
+    // A done apply checks tier state four times: run_start, before_verify, after_verify, run_end.
+    for (const limitedFrom of [1, 2, 3, 4]) {
+      const asked = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard({ limitedFrom }) });
+      const before = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom }) });
+      const result = await applyPlan(asked.deps);
+      const u8 = await applyPlan(before.deps);
+      assert.deepEqual(result, u8, `limited from check ${limitedFrom}`);
+      assert.deepEqual(asked.journal.events, before.journal.events, `limited from check ${limitedFrom}`);
+      assert.deepEqual(told(result.notices).map((notice) => notice.includes(OWN)), [true], `limited from check ${limitedFrom}`);
+      assert.equal(Object.hasOwn(result, "planRecordsUncheckedCause"), false);
+    }
+  });
+
+  test("every own check complete, a run since the plan was not: the new text once, after the apply's checks, with the cause", async () => {
+    const run = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard({ limitedFrom: 5 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.noticeKinds], ["done", "verified", ["plan_records_unchecked"]]);
+    assert.equal(result.planRecordsUncheckedCause, "run_since_plan");
+    const [only, ...more] = told(result.notices);
+    assert.deepEqual(more, []);
+    assert.ok(only !== undefined && only.includes(EARLIER) && !only.includes(OWN) && !only.includes("cleanup"), JSON.stringify(result.notices));
+    assert.equal(result.notices.at(-1), only, "told when the apply's own checks are known to be complete");
+  });
+
+  test("no state guard, or a question that cannot be answered: the cause is the run since the plan (fail closed)", async () => {
+    const runs = [
+      setup({ planRecordsUnchecked: async () => true }),
+      setup({
+        planRecordsUnchecked: async () => {
+          throw new Error("journal unreadable");
+        },
+        stateGuard: new FakeApplyStateGuard(),
+      }),
+    ];
+    for (const run of runs) {
+      const result = await applyPlan(run.deps);
+      assert.deepEqual([result.noticeKinds, result.planRecordsUncheckedCause], [["plan_records_unchecked"], "run_since_plan"]);
+      assert.equal(told(result.notices).length, 1);
+    }
+  });
+
+  test("an apply that stops early still tells it: plan_stale before the moves", async () => {
+    const executor = new FakeExecutor({ check: (action) => (action.kind === "discard" ? "source_missing" : null) });
+    const run = setup({ planRecordsUnchecked: async () => true, executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.planRecordsUncheckedCause], ["failed", "plan_stale", "run_since_plan"]);
+    assert.equal(told(result.notices).length, 1);
+  });
+
+  test("nothing told: no cause", async () => {
+    for (const run of [setup({ planRecordsUnchecked: async () => false, stateGuard: new FakeApplyStateGuard() }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "planRecordsUncheckedCause"), false);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+    }
+  });
+});
+
+describe("U-8 (R-39 L-1): an apply whose state checks were limited is not refused but says so", () => {
+  const UNCHECKED = "plan_records_unchecked";
+
+  test("too large to check at the start: done, with the notice kind and its notice", async () => {
+    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.deepEqual(result.noticeKinds, [UNCHECKED]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1, "one notice naming the kind");
+    assert.deepEqual(run.journal.ofType("state_checked")[0], { type: "state_checked", phase: "run_start", changed: [], limited: true });
+  });
+
+  test("limited only later in the apply: told the same way, once", async () => {
+    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 3 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.noticeKinds], ["done", [UNCHECKED]]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
+  });
+
+  test("checked entirely, or no guard: nothing is added", async () => {
+    for (const run of [setup({ stateGuard: new FakeApplyStateGuard() }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+      assert.equal(result.notices.some((notice) => notice.includes(UNCHECKED)), false);
+    }
+  });
+});
+
+describe("U-16 (UXM-15): an apply of a plan made by another task says so and goes on", () => {
+  const DIFFERS = "plan_task_differs";
+
+  test("another task than the plan run's: done, with the notice kind and one notice", async () => {
+    const run = setup({ planTaskId: "organize-demo" });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.noticeKinds], ["done", "verified", [DIFFERS]]);
+    assert.equal(result.notices.filter((notice) => notice.includes(DIFFERS)).length, 1);
+    assert.deepEqual(run.executor.applied, [0, 1], "not refused");
+  });
+
+  test("the same task, or no plan task id given: nothing is added", async () => {
+    for (const run of [setup({ planTaskId: "tidy" }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+    }
+  });
+
+  test("with a limited state check as well: both kinds, in APPLY_NOTICE_KINDS order", async () => {
+    const run = setup({ planTaskId: "organize-demo", stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual(result.noticeKinds, ["plan_records_unchecked", DIFFERS]);
+  });
+});

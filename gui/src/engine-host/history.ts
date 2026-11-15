@@ -1,0 +1,125 @@
+/**
+ * GU-4 (docs/design/standalone-gui.md 3.8): the run list and reverting a run, as the window may
+ * see them. Built from the app layer's `listRuns` and `revert` outputs:
+ * - Run ids go on as they are (the shape of RUN_ID); task ids and every path pass `shown`.
+ * - Damaged runs keep their id only (N-23 (b), N-26): no report, changes or revert for them.
+ * - App errors go on as their code only.
+ * - U-61 (U-16, R-55): a plan run an apply claimed gets `planApply`, judged by the contract's one rule
+ *   (`planApplyStateOf`, the same as the CLI's runs table) over the whole list; without that rule
+ *   (an older engine) no row gets it.
+ */
+
+import { failureOf } from "./settings.js";
+import type { HostFailure, Shown } from "./settings.js";
+
+type Obj = Record<string, unknown>;
+const isObj = (value: unknown): value is Obj => typeof value === "object" && value !== null && !Array.isArray(value);
+const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
+const WORD = /^[a-z][a-z_-]{0,39}$/;
+const MAX_LIST = 1000;
+
+const word = (value: unknown): string | null => (typeof value === "string" && WORD.test(value) ? value : null);
+const count = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
+
+function outputOf(outcome: unknown): Obj | null {
+  if (!isObj(outcome) || outcome["ok"] !== true || !isObj(outcome["output"])) return null;
+  return outcome["output"];
+}
+
+/** The contract's planApplyStateOf(entry, entries) (src/contracts/commands.ts). */
+export type PlanApplyOf = (entry: unknown, entries: readonly unknown[]) => unknown;
+
+const PLAN_APPLY = ["applied", "unfinished", "applying", "reverted", "record_missing"];
+
+/** U-61: the rule's answer for one entry, the three fields only; null when none or not that shape. */
+function planApplyValue(of: PlanApplyOf, entry: Obj, entries: readonly unknown[]): Obj | null {
+  try {
+    const judged = of(entry, entries);
+    if (!isObj(judged) || typeof judged["state"] !== "string" || !PLAN_APPLY.includes(judged["state"])) return null;
+    if (typeof judged["applyRunId"] !== "string" || !RUN_ID.test(judged["applyRunId"])) return null;
+    return { state: judged["state"], applyRunId: judged["applyRunId"], reason: word(judged["reason"]) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * U-226 (U-221): a run plan's plan run, when the entry that took its plan up (the one the rule named)
+ * is a run that carried it out (a run with this plan run's id, not an apply run): its words are the
+ * CLI's carried ones (`carried: true`). A plan of moves' state is as before.
+ */
+function carriedMark(value: Obj | null, entry: Obj, entries: readonly unknown[]): Obj | null {
+  if (value === null) return null;
+  const taker = entries.find((other) => isObj(other) && other["state"] === "checked" && other["runId"] === value["applyRunId"] && other["planRunId"] === entry["runId"]);
+  return isObj(taker) && taker["kind"] !== "apply" ? { ...value, carried: true } : value;
+}
+
+/** `listRuns` → `{ok, runs, omitted}` or a failure. */
+export function runsValue(outcome: unknown, shown: Shown, planApplyOf?: PlanApplyOf): Obj | HostFailure {
+  const output = outputOf(outcome);
+  if (output === null) return failureOf(outcome);
+  const runs: Obj[] = [];
+  const entries: unknown[] = Array.isArray(output["runs"]) ? output["runs"].slice(0, MAX_LIST) : [];
+  for (const entry of entries) {
+    if (!isObj(entry) || typeof entry["runId"] !== "string" || !RUN_ID.test(entry["runId"])) continue;
+    if (entry["state"] === "damaged") {
+      runs.push({ state: "damaged", runId: entry["runId"] });
+      continue;
+    }
+    const reverted = entry["reverted"];
+    runs.push({
+      state: "checked",
+      runId: entry["runId"],
+      kind: entry["kind"] === "apply" ? "apply" : "run",
+      startedAt: typeof entry["startedAt"] === "string" ? entry["startedAt"] : null,
+      taskId: typeof entry["taskId"] === "string" ? shown(entry["taskId"]) : "",
+      status: word(entry["status"]),
+      reason: word(entry["reason"]),
+      changes: count(entry["changes"]),
+      reverted: isObj(reverted) && typeof reverted["at"] === "string" ? { at: reverted["at"], status: reverted["status"] === "partial" ? "partial" : "complete" } : null,
+      revertRecordDamaged: entry["revertRecordDamaged"] === true,
+      // UXM-14, DR-38: a records-changed mark (absent: false).
+      recordsChanged: entry["recordsChanged"] === true,
+      planApply: planApplyOf === undefined ? null : carriedMark(planApplyValue(planApplyOf, entry, entries), entry, entries),
+      // U-271 (C-27, U-155): where a run without a result is (RunListEntry.phase), as the CLI's runs says it.
+      phase: entry["phase"] === "running" || entry["phase"] === "no_result" ? entry["phase"] : null,
+      // U-244 (U-139, U-198): the plan run an apply run applied, or a run carried out (RunListEntry.planRunId).
+      planRunId: typeof entry["planRunId"] === "string" && RUN_ID.test(entry["planRunId"]) ? entry["planRunId"] : null,
+    });
+  }
+  return { ok: true, runs, omitted: count(output["omitted"]) ?? 0 };
+}
+
+/** `revert` (dry run or not) → `{ok, runId, status, dryRun, reverted, skipped, moveSafetyUnchecked, revertedBefore}` or a failure. */
+export function revertValue(outcome: unknown, shown: Shown): Obj | HostFailure {
+  const output = outputOf(outcome);
+  if (output === null) return failureOf(outcome);
+  const reverted: Obj[] = [];
+  for (const file of Array.isArray(output["reverted"]) ? output["reverted"].slice(0, MAX_LIST) : []) {
+    if (!isObj(file) || typeof file["path"] !== "string" || word(file["action"]) === null) continue;
+    reverted.push({ path: shown(file["path"]), action: file["action"], from: typeof file["from"] === "string" ? shown(file["from"]) : null, unsafe: file["unsafe"] === true });
+  }
+  const skipped: Obj[] = [];
+  for (const file of Array.isArray(output["skipped"]) ? output["skipped"].slice(0, MAX_LIST) : []) {
+    if (!isObj(file) || typeof file["path"] !== "string" || word(file["reason"]) === null) continue;
+    // U-318 (R-119 L-1): a missing_record path comes from the snapshot index unmasked (SkippedFile), so it can
+    // hold a registered secret's text, which `shown` does not hide. The CLI's summary prints "?" for every one
+    // (HIDDEN_PATH), by the reason alone; it is not sent here either.
+    skipped.push({ path: file["reason"] === "missing_record" ? null : shown(file["path"]), reason: file["reason"] });
+  }
+  const before = output["revertedBefore"];
+  return {
+    ok: true,
+    runId: typeof output["runId"] === "string" && RUN_ID.test(output["runId"]) ? output["runId"] : null,
+    status: output["status"] === "partial" ? "partial" : "complete",
+    dryRun: output["dryRun"] === true,
+    reverted,
+    skipped,
+    moveSafetyUnchecked: output["moveSafetyUnchecked"] === true,
+    revertedBefore: isObj(before) && typeof before["at"] === "string" ? { at: before["at"], status: before["status"] === "partial" ? "partial" : "complete" } : null,
+    // U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checked every file.
+    ...(output["recordsChanged"] === true ? { recordsChanged: true } : {}),
+    // U-271 (U-229, R-106 L-1): the revert's workspace lock could not be released at its end (RevertCallOutcome.lockLeft).
+    ...(isObj(outcome) && outcome["lockLeft"] === true ? { lockLeft: true } : {}),
+  };
+}

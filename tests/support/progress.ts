@@ -1,0 +1,94 @@
+/**
+ * Progress display (U-8): the CLI writes one masked line per event to stderr while stdout stays
+ * one JSON line. These helpers read those lines and show that no fake secret, no listed variant
+ * of one and no piece of one reaches stderr. The line format is the CLI's; nothing here parses it.
+ */
+
+import assert from "node:assert/strict";
+import type { CliRun } from "./cli.js";
+import { decodedSource, findFragments, findLeaks } from "./leak.js";
+import type { TextSource } from "./leak.js";
+
+/** Non-empty stderr lines, in order. */
+export function progressLines(run: CliRun): string[] {
+  return run.stderr.split(/\r?\n/).filter((line) => line.trim() !== "");
+}
+
+/**
+ * DR-47 (U-21): how the end summary quotes the agent's last message: each row of it after this
+ * prefix (MODEL_TEXT_PREFIX in src/cli/human/format.ts), under a label that says it is the agent's
+ * own words. The rows are in whatever language the model wrote, not in the message language.
+ */
+export const AGENT_WORDS_PREFIX = "  | ";
+
+/**
+ * `text` without the rows of the agent's last message, for checks of the message language.
+ * The quoted rows must form one block (consecutive lines); nothing else is taken out.
+ */
+export function withoutAgentWords(text: string): string {
+  const lines = text.split("\n");
+  const quoted = lines.flatMap((line, index) => (line.startsWith(AGENT_WORDS_PREFIX) ? [index] : []));
+  assert.ok(
+    quoted.every((index, at) => at === 0 || index === (quoted[at - 1] ?? -2) + 1),
+    "the agent's quoted words are one block of rows",
+  );
+  return lines.filter((line) => !line.startsWith(AGENT_WORDS_PREFIX)).join("\n");
+}
+
+/** stderr as written, and with every JSON line (if a line is JSON) decoded. */
+export function progressSources(run: CliRun): TextSource[] {
+  return [{ label: "stderr", text: run.stderr }, decodedSource("stderr", run.stderr, true)];
+}
+
+export interface ProgressCheck {
+  /** Raw values that must not appear, nor their listed variants (extended set). */
+  readonly secrets: readonly string[];
+  /** Secrets whose every piece of `fragmentLength` characters must be absent too. */
+  readonly fragmentSecrets?: readonly string[];
+  /** Defaults to 4, as in the record checks. */
+  readonly fragmentLength?: number;
+}
+
+/** One line per finding; empty when stderr is clean. */
+export function progressLeaks(run: CliRun, check: ProgressCheck): string[] {
+  const sources = progressSources(run);
+  const found = findLeaks(sources, check.secrets, { extended: true });
+  for (const secret of check.fragmentSecrets ?? []) {
+    found.push(...findFragments(sources, secret, check.fragmentLength ?? 4));
+  }
+  return found;
+}
+
+/**
+ * stderr carries progress (at least `minLines` lines, so the check is not vacuous) and none of
+ * it leaks. Use on runs where secrets were read, printed by commands and sent back in repairs.
+ */
+export function assertProgressClean(run: CliRun, check: ProgressCheck, minLines = 1): void {
+  const lines = progressLines(run);
+  assert.ok(lines.length >= minLines, `expected progress on stderr, got ${lines.length} line(s)`);
+  assert.deepEqual(progressLeaks(run, check), [], "progress lines must be masked");
+}
+
+/** `--quiet`: nothing on stderr. */
+export function assertQuiet(run: CliRun): void {
+  assert.equal(run.stderr, "", "--quiet must leave stderr empty");
+}
+
+/**
+ * N-5: a command that stops with a CliErrorOutput explains it on stderr in human text (unless
+ * `--quiet`). Checks the shape, not the wording: the code in parentheses, no stack frame or
+ * exception text, no line repeated, and none of `forbidden` (sandbox paths, values from files).
+ */
+export function assertHumanError(run: CliRun, code: string, forbidden: readonly string[] = []): void {
+  const lines = progressLines(run);
+  assert.ok(lines.length > 0, "a stopped command explains itself on stderr (N-5)");
+  assert.ok(run.stderr.includes(`(${code})`), `stderr names the code ${code}: ${JSON.stringify(run.stderr.slice(0, 300))}`);
+  assert.ok(!/^\s*at\s.+:\d+:\d+\)?\s*$/m.test(run.stderr), "no stack frame on stderr");
+  assert.ok(!/\b[A-Za-z]*Error:/.test(run.stderr), "no exception text on stderr");
+  const seen = new Set<string>();
+  for (const line of lines.map((text) => text.trim())) {
+    assert.ok(!seen.has(line), `a line is repeated on stderr: ${JSON.stringify(line)}`);
+    seen.add(line);
+  }
+  for (const value of forbidden) assert.ok(!run.stderr.includes(value), "stderr must not repeat a path or a value");
+}

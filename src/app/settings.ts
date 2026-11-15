@@ -1,0 +1,176 @@
+/**
+ * Settings read for the GUI's wizard and settings screen (standalone-gui 3.2, 3.6, 5.2): which
+ * config file a run would read, whether it is there, what it says, and the profile and workflow
+ * names a new task can choose.
+ *
+ * The file is chosen and checked exactly as `codaryn run` does (prepareTask's steps 3 to 5,
+ * ./prepare.ts since the CLI migration's C-5), with the same functions in the same order:
+ *   chooseConfigFile (--config → CODARYN_CONFIG → the N-1 default location, S-5)
+ *   → read (a missing file is "no config" only at the default location; a BOM is dropped)
+ *   → rawTextHoldsKey (C-1, S-6) → JSON with a line and column on a syntax error (N-6)
+ *   → findKeyInJson (depth limit) → parseConfig (with the field position, N-6).
+ * Nothing here judges a value itself. Reads only. The settings change (settings-change.ts) uses
+ * the same checks for the text it would write.
+ *
+ * prepareTask keeps this sequence inline (./prepare.ts); a shared config reader there would let this
+ * file call one function instead (A-4 report).
+ */
+
+import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS, MIN_GROUP_SIZE_LIMITS, effectiveMinGroupSize, workflowPolicyNarrowings, workflowVerifierNarrowings } from "../contracts/index.js";
+import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../contracts/index.js";
+import { chooseConfigFile, isMissingFile } from "./input/config-file.js";
+import { parseConfig } from "./input/config.js";
+import { jsonSyntaxError, positionDiagnostic } from "./prepare.js";
+import { MAX_KEY_SCAN_DEPTH, findKeyInJson, inputFileTooLarge, inputFileTooLargeMessage, rawTextHoldsKey } from "./input/security/index.js";
+import type { KnownKeys } from "./input/security/index.js";
+import { envValue, knownKeyValues } from "./input/settings.js";
+import { quickProvider } from "./input/task.js";
+import { appError } from "./errors.js";
+import { workflowDefinitions } from "../workflows/index.js";
+import type { AppCallOutcome, AppError, ReadSettingsRequest, SettingsPrivateData, SettingsView, WorkflowPolicyNarrowing } from "./types.js";
+
+/** SP-2: every API provider's key, as the CLI's `models` says it. */
+const KEY_HINT = `keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`;
+
+type Failure = { readonly ok: false; readonly error: AppError };
+
+function failure(code: "invalid_config" | "key_in_file", message: string, diagnostic?: InputDiagnostic): Failure {
+  return { ok: false, error: diagnostic === undefined ? appError(code, message) : { ...appError(code, message), diagnostic } };
+}
+
+export interface SettingsIo {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly cwd: string;
+  readonly readFile: (file: string) => Promise<string>;
+  readonly defaultConfig: DefaultConfigLocation | null;
+}
+
+export type ChosenFile = { readonly source: "argument" | "environment" | "default"; readonly path: string; readonly display: string };
+
+/**
+ * Key checks, JSON and parseConfig on a config file's text (BOM dropped), in run.ts's order.
+ * SP-2: `currentKey` is every API provider's key value set now (knownKeyValues), as the CLI checks.
+ */
+export function checkConfigText(text: string, currentKey: KnownKeys): { readonly ok: true; readonly config: CodarynConfig } | Failure {
+  // DR-42 (d), DR-40 (b): the CLI's cap, before any check reads the text (run.ts does the same after
+  // dropping the BOM). Here it also keeps a settings change from writing a file the CLI refuses.
+  if (inputFileTooLarge(text)) return failure("invalid_config", inputFileTooLargeMessage("config file"));
+  if (rawTextHoldsKey(text, currentKey)) return failure("key_in_file", `the config file contains a key value; ${KEY_HINT}`);
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    const syntax = jsonSyntaxError("config file", "config", text);
+    return failure("invalid_config", syntax.message, syntax.diagnostic);
+  }
+  const found = findKeyInJson(value, currentKey);
+  if (found.kind === "key") return failure("key_in_file", `the config file has a key field or key value at ${found.location}; ${KEY_HINT}`);
+  if (found.kind === "too_deep") {
+    return failure("invalid_config", `the config file is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`, {
+      code: "too_deep",
+      file: "config",
+      field: null,
+      line: null,
+      column: null,
+    });
+  }
+  const parsed = parseConfig(value);
+  if (!parsed.ok) return failure("invalid_config", parsed.message, positionDiagnostic("config", parsed.position));
+  return { ok: true, config: parsed.config };
+}
+
+/**
+ * The chosen config file with its raw text (as read, BOM included) and its parsed config.
+ * `file` null: none chosen. `raw` null: the default location has no file yet.
+ */
+export async function loadSettingsFile(
+  io: SettingsIo,
+  configPath: string | null,
+): Promise<
+  | { readonly ok: true; readonly currentKey: readonly string[]; readonly file: ChosenFile | null; readonly raw: string | null; readonly config: CodarynConfig | null }
+  | Failure
+> {
+  // SP-2: every API provider's key, so a file holding any of them is refused, as the CLI refuses it.
+  const currentKey = knownKeyValues(io.env);
+  const chosen = chooseConfigFile({ argument: configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig });
+  if (!chosen.ok) return failure("invalid_config", chosen.message);
+  const candidate = chosen.candidate;
+  if (candidate === null) return { ok: true, currentKey, file: null, raw: null, config: null };
+  const file: ChosenFile = { source: candidate.source, path: candidate.path, display: candidate.display };
+  let raw: string;
+  try {
+    raw = await io.readFile(candidate.path);
+  } catch (error) {
+    if (candidate.optional && isMissingFile(error)) return { ok: true, currentKey, file, raw: null, config: null };
+    return failure(
+      "invalid_config",
+      candidate.source === "default" ? `the config file at the default location ${candidate.display} cannot be read` : "the config file cannot be read as JSON",
+    );
+  }
+  const checked = checkConfigText(raw.replace(/^﻿/, ""), currentKey);
+  if (!checked.ok) return checked;
+  return { ok: true, currentKey, file, raw, config: checked.config };
+}
+
+/**
+ * DR-41, DR-43 (a): for each workflow (built-in, then the config's), what its own rules leave out of
+ * the config's policy and verifiers in its quick runs (workflowPolicyNarrowings, then
+ * workflowVerifierNarrowings: a config verifier whose id is one of the workflow's). Kinds and
+ * counts only. Pure. A profile's own policy and verifiers are not looked at here.
+ */
+export function policyNarrowingsOf(config: CodarynConfig | null): WorkflowPolicyNarrowing[] {
+  if (config === null) return [];
+  return Object.entries(workflowDefinitions(config.workflows)).flatMap(([workflow, definition]) =>
+    [...workflowPolicyNarrowings(definition.policy, config.policy), ...workflowVerifierNarrowings(definition.verifiers, config.verifiers)].map((narrowing) => ({
+      workflow,
+      kind: narrowing.kind,
+      count: narrowing.count,
+    })),
+  );
+}
+
+/**
+ * U-215 (DR-69 bundle A): the config's unreadable paths and group size k for the settings screen
+ * (SettingsPrivateData). No config: none and k from no value. Pure.
+ */
+export function privateDataOf(config: CodarynConfig | null): SettingsPrivateData {
+  const policy = config?.policy;
+  const configured = policy?.minGroupSize ?? null;
+  return {
+    unreadablePaths: [...(policy?.unreadablePaths ?? [])],
+    minGroupSize: {
+      configured,
+      effective: effectiveMinGroupSize(configured ?? undefined, []),
+      min: MIN_GROUP_SIZE_LIMITS.min,
+      max: MIN_GROUP_SIZE_LIMITS.max,
+    },
+  };
+}
+
+/** Each profile with the workflow it uses when the task names none, in the file's order. Pure. */
+export function profileWorkflowsOf(config: CodarynConfig | null): { readonly profile: string; readonly workflowRef: string | null }[] {
+  return Object.entries(config?.profiles ?? {}).map(([profile, entry]) => ({ profile, workflowRef: entry.workflowRef ?? null }));
+}
+
+export async function readSettingsIn(io: SettingsIo, request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>> {
+  const loaded = await loadSettingsFile(io, request.configPath);
+  if (!loaded.ok) return loaded;
+  const config = loaded.config;
+  return {
+    ok: true,
+    output: {
+      kind: "settings",
+      file: loaded.file === null ? null : { ...loaded.file, exists: loaded.raw !== null },
+      config,
+      profiles: Object.keys(config?.profiles ?? {}),
+      workflows: Object.keys(config?.workflows ?? {}),
+      builtinWorkflows: [...BUILTIN_WORKFLOW_IDS],
+      profileWorkflows: profileWorkflowsOf(config),
+      // SP-6: the key of the provider a quick run would use (the config's `provider`, else anthropic).
+      keyAvailable: envValue(io.env, API_PROVIDERS[quickProvider(config)].keyEnv) !== null,
+      policyNarrowings: policyNarrowingsOf(config),
+      // U-215 (bundle A): what the settings screen shows of unreadable paths and k.
+      privateData: privateDataOf(config),
+    },
+  };
+}

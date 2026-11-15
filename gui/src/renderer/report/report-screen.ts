@@ -1,0 +1,374 @@
+/**
+ * GU-3: the result screen of a run or an apply (docs/design/standalone-gui.md 3.7), from the app
+ * layer's structured `report` (never Markdown turned into HTML). Tabs: summary, checks (by number,
+ * with their evidence), changes (a run) or actions (an apply), protected items ("found after the
+ * fact"), usage, the masking counts (U-40) and records, and the person's verdict. Every text came masked and cleaned.
+ * U-118 (3.7): the records tab (run-log.ts), and, when the report is refused as a damaged record,
+ * the records that can still be read, with the damage said first.
+ */
+
+import type { Texts } from "../i18n/catalog.js";
+import { errorText } from "../i18n/catalog.js";
+import { asReport, asSaveReport } from "../api.js";
+import type { CodarynApi, Workspace } from "../api.js";
+import { button, el } from "../shell/dom.js";
+import { copyControl } from "../shell/copy.js";
+import { reviewPanel } from "../run/review-panel.js";
+import { runLog } from "./run-log.js";
+import type { Screen } from "../shell/shell.js";
+import type { MaskingView, ReportView } from "../../shared/ipc.js";
+import { FINAL_MESSAGE_LIMIT, clock, localDateTime } from "../run/run-model.js";
+import type { RunFilter } from "../run/run-model.js";
+
+/**
+ * U-40 (DR-52, AXM-17): the masking line of the run's end and of the report, the same words as the
+ * CLI's `summary.masking`: two counts, never a value, a place or a length. Null (no line) when the
+ * result has none, or when either is not a count (the main process dropped such a field already).
+ */
+export function maskingLine(t: Texts, masking: MaskingView | null | undefined): string | null {
+  if (masking === undefined || masking === null) return null;
+  const { registeredValues, maskedPlaces } = masking;
+  const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  if (!isCount(registeredValues) || !isCount(maskedPlaces)) return null;
+  return t.format("run.masking", { registered: String(registeredValues), masked: String(maskedPlaces) });
+}
+
+export interface ReportDeps {
+  readonly texts: Texts;
+  readonly api: CodarynApi;
+  readonly current: () => Workspace | null;
+  /** The changes screen for a run (DR-29), with the run's form when known. */
+  readonly openChanges: (runId: string, form: RunForm | null) => void;
+  /** U-271 (3.7): the settings screen, where the permission rules are (3.10). */
+  readonly openSettings?: () => void;
+}
+
+/**
+ * U-294 (R-113 L-2): the reasons a call is denied for, in the order the summary says what to do about them:
+ * a command (allowed commands, the task file's policy.commands), a write outside the files the task may
+ * write (writablePaths, or a new plan for a run that carried one out), a path kept from the agent
+ * (unreadablePaths, on purpose), a protected path (protectedPaths, on purpose), and paths no rule opens.
+ */
+const DENIAL_KINDS = ["command", "notWritable", "unreadable", "protected", "fixed"] as const;
+
+/** U-271 (3.7): what the summary tab may do with the other tabs (set once they are drawn). */
+type TabMoves = { goTab: (id: string) => void; logFilter: RunFilter };
+
+type RunForm = { readonly profile: string | null; readonly workflow: string | null };
+
+export interface ReportScreen extends Screen {
+  /** The run to show, and its form (R21b-L-1: the run's own, never another run's); U-61: the tab to open first (the summary when absent or unknown). */
+  choose(runId: string, form?: RunForm | null, tab?: string | null): void;
+}
+
+function word(t: Texts, prefix: string, value: string): string {
+  const id = `${prefix}.${value}`;
+  return t.has(id) ? t.format(id) : value;
+}
+
+function list(items: readonly string[], attrs: Readonly<Record<string, string>> = {}): HTMLElement {
+  const out = el("ul", undefined, attrs);
+  for (const item of items) out.append(el("li", item));
+  return out;
+}
+
+type Tab = { readonly id: string; readonly label: string; readonly build: () => HTMLElement[] };
+
+function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly status: string; readonly reason: string } | null, form: RunForm | null, moves: TabMoves): Tab[] {
+  const tabs: Tab[] = [];
+  tabs.push({
+    id: "summary",
+    label: t.format("report.tab.summary"),
+    build: () => {
+      const parts = [
+        el("p", view.finished === null ? t.format("report.notFinished") : t.format("run.statusLine", { status: labels?.status ?? word(t, "runstatus", view.finished.status), reason: labels?.reason ?? view.finished.reason }), { id: "report-status", "data-status": view.finished?.status ?? "none", "data-reason": view.finished?.reason ?? "none" }),
+        el("p", t.format("report.runId", { runId: view.runId }), { lang: "en" }),
+        copyControl(t, t.format("copy.runId"), () => deps.api.copyText(view.runId), { id: "report-copy-id" }),
+        el("p", t.format("report.task", { task: view.taskId })),
+      ];
+      if (view.run !== null) parts.push(el("p", t.format("report.workflow", { workflow: view.run.workflow, provider: view.run.provider ?? "-" })));
+      if (view.status === "incomplete") parts.push(el("p", t.format("report.incomplete"), { class: "notice" }));
+      // U-271 (3.7): the run's denials, where to see them (the records, denials only) and how to allow them.
+      const denied = view.run?.deniedToolCalls ?? null;
+      if (denied !== null && denied > 0) {
+        const box = el("section", undefined, { id: "report-denied", "aria-labelledby": "report-denied-title" });
+        box.append(el("h4", t.format("report.denied", { count: String(denied) }), { id: "report-denied-title" }));
+        if (deps.current() !== null) {
+          box.append(
+            button(t.format("report.deniedShow"), () => {
+              moves.logFilter = "denied";
+              moves.goTab("log");
+            }, { id: "report-denied-show" }),
+          );
+        }
+        box.append(el("p", t.format("report.deniedHow"), { class: "notice" }));
+        // U-294 (R-113 L-2): what to do differs by the reason, as the CLI's end summary says it (summary.denied_hint,
+        // denied_not_writable_hint, denied_unreadable_hint). The report gives no count by reason, so each line
+        // starts with the reason the records' line names; the records list each denial with its reason.
+        const kinds = el("ul", undefined, { id: "report-denied-kinds" });
+        for (const kind of DENIAL_KINDS) kinds.append(el("li", t.format(`report.deniedKind.${kind}`), { "data-denial": kind }));
+        box.append(kinds);
+        const openSettings = deps.openSettings;
+        if (openSettings !== undefined) box.append(button(t.format("report.deniedSettings"), () => openSettings(), { id: "report-denied-settings" }));
+        parts.push(box);
+      }
+      // U-21 (DR-47, AXM-1): the agent's last message under the report's label (its own words, not a verified fact).
+      if (view.finalMessage !== undefined && view.finalMessage !== null) {
+        const words = el("div", undefined, { id: "report-final-message" });
+        words.append(el("p", t.format("report.finalMessage"), { class: "notice" }), el("div", view.finalMessage.text, { class: "agent-words", id: "report-final-message-text" }));
+        if (view.finalMessage.truncated) words.append(el("p", t.format("run.finalMessageTruncated", { count: String(FINAL_MESSAGE_LIMIT) }), { class: "notice" }));
+        parts.push(words);
+      }
+      return parts;
+    },
+  });
+  tabs.push({
+    id: "checks",
+    label: t.format("report.tab.checks"),
+    build: () => {
+      if (view.verifiers.length === 0) return [el("p", t.format("run.noChecks"))];
+      return view.verifiers.map((verifier) => {
+        const box = el("section", undefined, { class: "check", "data-outcome": verifier.outcome });
+        box.append(el("h4", t.format("run.check", { number: String(verifier.number), outcome: word(t, "outcome", verifier.outcome) })));
+        box.append(el("pre", verifier.evidence, { class: "evidence" }));
+        if (verifier.evidenceCut) box.append(el("p", t.format("report.evidenceCut"), { class: "notice" }));
+        if (verifier.checked.length > 0) box.append(el("h5", t.format("report.checked")), list(verifier.checked));
+        if (verifier.limits.length > 0) box.append(el("h5", t.format("report.limits")), list(verifier.limits));
+        return box;
+      });
+    },
+  });
+  if (view.run !== null) {
+    const run = view.run;
+    tabs.push({
+      id: "changes",
+      label: t.format("report.tab.changes"),
+      build: () => {
+        const parts: HTMLElement[] = [el("p", t.format("run.changes", { count: String(run.changes.length) }))];
+        if (run.changes.length > 0) {
+          parts.push(list(run.changes.map((change) => (change.created ? t.format("run.created", { path: change.path }) : change.path)), { id: "report-changes" }));
+          parts.push(button(t.format("run.viewChanges"), () => deps.openChanges(view.runId, form), { id: "report-view-changes" }));
+        }
+        return parts;
+      },
+    });
+  }
+  if (view.apply !== null) {
+    const apply = view.apply;
+    tabs.push({
+      id: "actions",
+      label: t.format("report.tab.actions"),
+      build: () => {
+        const parts: HTMLElement[] = [
+          el("p", t.format("report.plan", { runId: apply.planRunId ?? "-", digest: apply.digest?.slice(0, 12) ?? "-" })),
+          el("p", t.format("report.approval", { channel: apply.approval ?? "-" })),
+        ];
+        if (apply.unsafeMoveConsent !== null) parts.push(el("p", t.format("report.unsafeConsent", { channel: apply.unsafeMoveConsent }), { class: "notice" }));
+        if (apply.inventoryLimitReached) parts.push(el("p", t.format("plan.inventoryLimit"), { class: "notice" }));
+        parts.push(el("h4", t.format("report.moved", { count: String(apply.moved.length) })));
+        parts.push(list(apply.moved.map((item) => `${t.format("plan.move", { from: item.from, to: item.to })}${item.unsafe ? ` ${t.format("runs.unsafe")}` : ""}`)));
+        parts.push(el("h4", t.format("report.discarded", { count: String(apply.discarded.length) })));
+        parts.push(list(apply.discarded.map((item) => t.format("plan.discard", { path: item.path }))));
+        if (apply.failed.length > 0) {
+          parts.push(el("h4", t.format("report.failed", { count: String(apply.failed.length) })));
+          parts.push(list(apply.failed.map((item) => t.format("report.failedItem", { number: String(item.number), problem: item.problem }))));
+        }
+        return parts;
+      },
+    });
+  }
+  tabs.push({
+    id: "protected",
+    label: t.format("report.tab.protected"),
+    build: () => {
+      if (view.integrity.length === 0) return [el("p", t.format("report.noProtected"))];
+      const parts: HTMLElement[] = [el("p", t.format("report.afterTheFact"), { class: "notice" })];
+      for (const check of view.integrity) {
+        parts.push(el("h4", word(t, "phase", check.phase)));
+        parts.push(check.changed.length === 0 ? el("p", t.format("report.unchanged")) : list(check.changed));
+      }
+      return parts;
+    },
+  });
+  tabs.push({
+    id: "usage",
+    label: t.format("report.tab.usage"),
+    build: () => {
+      const usage = view.usage;
+      const seconds = usage?.durationMs === null || usage === null ? null : Math.round((usage.durationMs ?? 0) / 1000);
+      const parts = [
+        el(
+          "p",
+          usage === null
+            ? t.format("report.noUsage")
+            : t.format("run.usage", {
+                turns: String(usage.turns ?? "-"),
+                tools: String(usage.tools ?? "-"),
+                tokens: usage.inputTokens === null && usage.outputTokens === null ? "-" : String((usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)),
+                time: seconds === null ? "-" : clock(seconds),
+              }),
+        ),
+        el("p", t.format("report.records", { count: String(view.records ?? "-") })),
+      ];
+      // U-40 (DR-52): the run's masking counts after its usage, as the run's end shows them.
+      const masking = maskingLine(t, view.masking);
+      if (masking !== null) parts.splice(1, 0, el("p", masking, { id: "report-masking" }));
+      if (view.run !== null) {
+        parts.push(el("p", t.format("report.runCounts", { requests: String(view.run.modelRequests ?? "-"), denied: String(view.run.deniedToolCalls ?? "-"), repairs: String(view.run.repairs ?? "-") })));
+      }
+      return parts;
+    },
+  });
+  if (view.run !== null) {
+    const verdict = view.run.verdict;
+    tabs.push({
+      id: "review",
+      label: t.format("report.tab.review"),
+      build: () =>
+        verdict === null
+          ? reviewLater(t, deps, view, form)
+          : [
+              el("p", t.format(verdict.verdict === "accepted" ? "review.accepted" : "review.rejected"), { id: "report-verdict", "data-verdict": verdict.verdict }),
+              el("p", t.format("report.verdictAt", { time: localDateTime(verdict.at) })),
+              ...(verdict.note === null ? [] : [el("p", t.format("report.note", { note: verdict.note }))]),
+            ],
+    });
+  }
+  // U-118 (3.7): the run's records as the progress list's lines, page by page, with its filter (the last tab, as 3.7 lists them).
+  const workspace = deps.current();
+  if (workspace !== null) {
+    tabs.push({
+      id: "log",
+      label: t.format("report.tab.log"),
+      build: () => {
+        const filter = moves.logFilter;
+        moves.logFilter = "all";
+        return runLog(t, deps.api, { workspace, runId: view.runId, profile: form?.profile ?? null, workflow: form?.workflow ?? null }, filter);
+      },
+    });
+  }
+  return tabs;
+}
+
+/**
+ * U-79 (3.7, 3.8): a run waiting for its review, reviewed later: the workflow's checklist and the
+ * review panel, with the run's own form. A run this app did not start (form unknown) is reviewed with
+ * the CLI, which takes the task part the run was started with.
+ */
+function reviewLater(t: Texts, deps: ReportDeps, view: ReportView, form: RunForm | null): HTMLElement[] {
+  const workspace = deps.current();
+  if (view.review === undefined || view.review === null || workspace === null) return [el("p", t.format("report.noVerdict"))];
+  const parts: HTMLElement[] = [el("h4", t.format("run.review")), list(view.review.checklist, { id: "report-review-checklist" })];
+  if (form === null) {
+    parts.push(el("p", t.format("report.reviewCli"), { class: "notice", id: "report-review-cli" }));
+    return parts;
+  }
+  parts.push(reviewPanel({ texts: t, api: deps.api, workspace, runId: view.runId, profile: form.profile, workflow: form.workflow }, { panel: "report-review-panel", title: "report-review-title" }));
+  return parts;
+}
+
+export function reportScreen(deps: ReportDeps): ReportScreen {
+  const { texts: t, api } = deps;
+  let chosen: string | null = null;
+  let chosenForm: RunForm | null = null;
+  let chosenTab: string | null = null;
+  return {
+    id: "report",
+    title: "nav.report",
+    choose(runId, form = null, tab = null) {
+      chosen = runId;
+      chosenForm = form;
+      chosenTab = tab;
+    },
+    show(root) {
+      const workspace = deps.current();
+      const body = el("div", undefined, { id: "report" });
+      root.replaceChildren(el("h2", t.format("report.title")), body);
+      if (workspace === null || chosen === null) {
+        body.append(el("p", t.format("report.none")));
+        body.setAttribute("data-report-ready", "none");
+        return;
+      }
+      const runId = chosen;
+      const form = chosenForm;
+      const firstTab = chosenTab;
+      void (async () => {
+        body.replaceChildren(el("p", t.format("runs.loading")));
+        const reply = asReport(await api.report(workspace.handle, runId));
+        if (!reply.ok) {
+          body.replaceChildren(el("div", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { role: "alert", class: "error", "data-error": reply.code }));
+          // U-118 (3.7): a damaged record refuses the report; the records that can be read are offered, damage first.
+          if (reply.code === "invalid_run_record") {
+            const box = el("section", undefined, { id: "report-log-box" });
+            const open = button(t.format("report.log.open"), () => box.replaceChildren(...runLog(t, api, { workspace, runId, profile: form?.profile ?? null, workflow: form?.workflow ?? null })), { id: "report-log-open" });
+            body.append(open, box);
+          }
+          body.setAttribute("data-report-ready", "error");
+          return;
+        }
+        const moves: TabMoves = { goTab: () => undefined, logFilter: "all" };
+        const tabs = tabsOf(t, deps, reply.view, reply.labels ?? null, form, moves);
+        const bar = el("div", undefined, { role: "tablist", "aria-label": t.format("report.title") });
+        const panel = el("section", undefined, { role: "tabpanel", id: "report-panel", tabindex: "0" });
+        const buttons: HTMLButtonElement[] = [];
+        const select = (index: number): void => {
+          const tab = tabs[index];
+          if (tab === undefined) return;
+          buttons.forEach((b, i) => {
+            b.setAttribute("aria-selected", String(i === index));
+            b.setAttribute("tabindex", i === index ? "0" : "-1");
+          });
+          panel.setAttribute("aria-labelledby", `report-tab-${tab.id}`);
+          panel.setAttribute("data-tab", tab.id);
+          panel.replaceChildren(...tab.build());
+        };
+        tabs.forEach((tab, index) => {
+          const b = button(tab.label, () => select(index), { role: "tab", id: `report-tab-${tab.id}`, "aria-controls": "report-panel", "data-tab": tab.id });
+          b.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+            event.preventDefault();
+            const next = (index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+            select(next);
+            buttons[next]?.focus();
+          });
+          buttons.push(b);
+          bar.append(b);
+        });
+        // UXM-14, DR-38: as the CLI's report warns; U-32: above the tabs, as every tab is the records' content.
+        const warning = reply.view.recordsChanged === true ? [el("p", t.format("report.recordsChanged"), { class: "notice", id: "report-records-changed" })] : [];
+        body.replaceChildren(...warning, bar, panel, ...saveReportButton(t, api, workspace, runId, "report-save"));
+        moves.goTab = (id) => {
+          const index = tabs.findIndex((tab) => tab.id === id);
+          if (index < 0) return;
+          select(index);
+          buttons[index]?.focus();
+        };
+        select(Math.max(0, tabs.findIndex((tab) => tab.id === firstTab)));
+        body.setAttribute("data-report-ready", reply.view.kind);
+      })();
+    },
+  };
+}
+
+/**
+ * GU-3 (3.7): "Save the report": the main process asks the report as Markdown (the same masked
+ * report) and the OS save dialog chooses the file. The status line names the file, never a folder.
+ */
+export function saveReportButton(t: Texts, api: CodarynApi, workspace: Workspace, runId: string, id: string): HTMLElement[] {
+  const status = el("p", undefined, { id: `${id}-status`, role: "status" });
+  const save = button(
+    t.format("report.save"),
+    () => {
+      save.setAttribute("disabled", "");
+      void (async () => {
+        const reply = asSaveReport(await api.saveReport(workspace.handle, runId));
+        save.removeAttribute("disabled");
+        if (reply.ok) status.textContent = t.format("report.saved", { name: reply.name });
+        else status.textContent = reply.code === "not_saved" ? t.format("report.notSaved") : `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`;
+        status.setAttribute("data-saved", reply.ok ? "ok" : reply.code);
+      })();
+    },
+    { id },
+  );
+  return [save, status];
+}

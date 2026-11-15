@@ -1,0 +1,7 @@
+region,product,amount
+north,notebook,120
+north,pen,30
+south,notebook,80
+south,pen,45
+east,notebook,60
+east,pen,25

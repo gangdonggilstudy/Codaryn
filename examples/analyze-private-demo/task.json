@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "analyze-private-demo",
+  "workflow": "analyze-private",
+  "workflowRef": "analyze-private",
+  "goal": "private/members.csv의 amount를 region별로 더해 summary.csv(열: region,total)로 쓰고, 결과를 report.md에 표로 정리한다. 한 사람을 알아볼 수 있는 값은 쓰지 않는다.",
+  "workspaceRoot": "workspace",
+  "model": {
+    "provider": "scripted",
+    "scriptPath": "script.json"
+  },
+  "policy": {
+    "commands": [],
+    "network": "deny",
+    "destructive": "deny",
+    "restorePathTokens": false
+  },
+  "privacy": {
+    "secretEnv": []
+  },
+  "limits": {
+    "maxModelTurns": 10,
+    "maxToolCalls": 10,
+    "maxTotalTokens": 1000,
+    "maxDurationMs": 60000,
+    "maxRepairAttempts": 1,
+    "maxSameFailures": 2
+  },
+  "verifiers": [
+    {
+      "id": "summary-table",
+      "kind": "data_checks",
+      "rules": [
+        {
+          "type": "table_shape",
+          "table": {
+            "path": "summary.csv",
+            "format": "csv"
+          },
+          "columns": [
+            "region",
+            "total"
+          ],
+          "rows": {
+            "equals": 3
+          }
+        },
+        {
+          "type": "aggregate_match",
+          "source": {
+            "path": "private/members.csv",
+            "format": "csv"
+          },
+          "column": "amount",
+          "op": "sum",
+          "groupBy": "region",
+          "target": {
+            "path": "summary.csv",
+            "format": "csv"
+          },
+          "targetColumn": "total",
+          "targetKeyColumn": "region"
+        }
+      ]
+    },
+    {
+      "id": "report",
+      "kind": "file_rules",
+      "rules": [
+        {
+          "type": "exists",
+          "path": "report.md"
+        },
+        {
+          "type": "contains",
+          "path": "report.md",
+          "text": "# 지역별 금액 합계"
+        }
+      ]
+    }
+  ]
+}

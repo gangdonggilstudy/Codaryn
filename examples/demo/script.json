@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "steps": [
+    {
+      "toolCalls": [{ "name": "read_file", "args": { "path": "notes.md" } }],
+      "usage": { "inputTokens": 0, "outputTokens": 0 }
+    },
+    {
+      "toolCalls": [{ "name": "run_command", "args": { "executable": "node", "args": ["--version"] } }],
+      "usage": { "inputTokens": 0, "outputTokens": 0 }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "summary.md",
+            "expectedHash": null,
+            "change": {
+              "kind": "replace_all",
+              "content": "# 회의 요약\n\n## 결정 사항\n\n- 문서 사이트 개편은 다음 주에 시작한다.\n- 체험 예시는 API 키 없이 실행되게 한다.\n"
+            }
+          }
+        }
+      ],
+      "usage": { "inputTokens": 0, "outputTokens": 0 }
+    },
+    { "text": "요약을 만들었다.", "usage": { "inputTokens": 0, "outputTokens": 0 } },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "summary.md",
+            "expectedHash": "c272dd80b85b42c99516a1474975526352da4093644e1096a26f42d2dca7878a",
+            "change": {
+              "kind": "replace_text",
+              "oldText": "- 체험 예시는 API 키 없이 실행되게 한다.\n",
+              "newText": "- 체험 예시는 API 키 없이 실행되게 한다.\n\n## 할 일\n\n- 문서 담당: 사용 안내 초안(금요일까지)\n- 개발 담당: 오류 문구 목록 정리\n"
+            }
+          }
+        }
+      ],
+      "usage": { "inputTokens": 0, "outputTokens": 0 }
+    },
+    { "text": "빠진 '## 할 일' 절을 더했다.", "usage": { "inputTokens": 0, "outputTokens": 0 } }
+  ]
+}

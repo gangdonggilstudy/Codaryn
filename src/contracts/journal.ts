@@ -1,0 +1,221 @@
+/**
+ * Run journal: append-only, masked records under `<workspaceRoot>/.codaryn/`.
+ * Free text fields are MaskedText, so raw text cannot be recorded by construction.
+ * AC-D15: tool names and call ids (`tool`, `callId`, `MaskedToolCall.name` and `id`) are plain
+ * strings, but the engine records only a tool name from a tool list or UNKNOWN_TOOL_RECORD_NAME, and
+ * only an id that passes CALL_ID_PATTERN_SOURCE and masking (else a replacement), see `ToolCall`.
+ * File originals kept for revert (`SNAPSHOTS_DIR_NAME`) are never part of the journal.
+ */
+
+import type { IntegrityPhase } from "./integrity.js";
+import type { StateCheckPhase } from "./state.js";
+import type { Limits, ModelProviderName } from "./task.js";
+import type { ContentHash, MaskedText } from "./text.js";
+import type { ModelMessage, ModelStop, ModelUsage, MaskedToolCall } from "./model.js";
+import type { ConfirmationBy, ConfirmationDecision, PermissionKind, PolicyDenialCode } from "./policy.js";
+import type { ToolErrorCode, ToolResult } from "./tool.js";
+import type { VerifierResult } from "./verify.js";
+import type { RunReason, RunUsage, TerminalRunStatus } from "./engine.js";
+import type { ApprovalChannel, PlanMode } from "./plan.js";
+import type { AnyToolName } from "./tool.js";
+import type { CompletionMode, PolicyNarrowing } from "./workflow.js";
+
+/** State directory inside the workspace root. No tool may read, list, write or run in it. */
+export const STATE_DIR_NAME = ".codaryn";
+export const RUNS_DIR_NAME = "runs";
+/** `<root>/.codaryn/runs/<runId>/journal.jsonl`: one JSON record per line, UTF-8, LF. */
+export const JOURNAL_FILE_NAME = "journal.jsonl";
+/** `<root>/.codaryn/runs/<runId>/result.json`: the same object the CLI prints on stdout. */
+export const RESULT_FILE_NAME = "result.json";
+/** `<root>/.codaryn/lock.json`: held while a run is active in this workspace. */
+export const LOCK_FILE_NAME = "lock.json";
+
+export const JOURNAL_SCHEMA_VERSION = 1;
+
+/** Stage at which a tool call was stopped or allowed. */
+export type ToolDecisionStage = "validate" | "policy_requested" | "restore" | "policy_effective";
+
+export type JournalEvent =
+  | {
+      readonly type: "run_started";
+      readonly schemaVersion: 1;
+      readonly taskId: string;
+      readonly workflow: MaskedText;
+      readonly provider: ModelProviderName;
+      /** The resolved limits. Phase 2 records all six fields; earlier journals have four. */
+      readonly limits: Limits;
+      /**
+       * G-A: present only when the task has task type settings (a `workflowRef` or any of its
+       * task type fields): the definition used (or null) and the resolved settings, `instructions`
+       * excepted (the first `model_request.system` holds them). Absent: the legacy settings.
+       */
+      readonly workflowRef?: string | null;
+      /**
+       * DR-37 (d): ResolvedTaskSpec.profile, when a profile was applied and its name passes
+       * PROFILE_NAME_PATTERN_SOURCE. Absent: none (and every journal written before DR-37).
+       */
+      readonly profile?: string;
+      /** DR-41: ResolvedTaskSpec.policyNarrowings, when something was left out. Kinds and counts only. */
+      readonly policyNarrowings?: readonly PolicyNarrowing[];
+      readonly tools?: readonly AnyToolName[];
+      readonly plan?: PlanMode;
+      readonly completion?: CompletionMode;
+      /**
+       * P1 (DR-69, B-3): in a run that carries out an approved `run` plan, all three: the plan run,
+       * the approved digest and how the person approved it (as `apply_started.approval`). Absent in
+       * every other run and in every journal written before.
+       */
+      readonly planRunId?: string;
+      readonly planDigest?: ContentHash;
+      readonly approval?: ApprovalChannel;
+    }
+  | {
+      readonly type: "model_request";
+      readonly turn: number;
+      /** Present on the first turn only. */
+      readonly system: MaskedText | null;
+      /** Messages added since the previous request. */
+      readonly newMessages: readonly ModelMessage[];
+    }
+  | {
+      readonly type: "model_response";
+      readonly turn: number;
+      readonly stop: ModelStop;
+      readonly text: MaskedText;
+      readonly toolCalls: readonly MaskedToolCall[];
+      readonly usage: ModelUsage | null;
+      /** SP-5, DR-31 (c): the count of reasoning items the provider returned (ModelResponse.reasoningItems); never their content. Absent when none were reported. */
+      readonly reasoningItems?: number;
+    }
+  | {
+      readonly type: "model_error";
+      readonly turn: number;
+      readonly kind: string;
+      readonly message: MaskedText;
+    }
+  | {
+      readonly type: "tool_decision";
+      readonly callId: string;
+      readonly tool: string;
+      readonly stage: ToolDecisionStage;
+      readonly allowed: boolean;
+      readonly permission: PermissionKind | null;
+      readonly code: PolicyDenialCode | ToolErrorCode | null;
+    }
+  | { readonly type: "tool_result"; readonly result: ToolResult }
+  /**
+   * U-74 (DR-3): a permission question, recorded before it is asked, also when nobody can be asked
+   * (DR-10). The fields of ConfirmRequest: fixed values, the masked executable (key shapes hidden,
+   * U-106) and a count; no argument text. Then `confirmation_answered` with the same id, then the call's `tool_decision`.
+   * U-137 (R88b-L1): always, also when the run ends at the question (cancelled, or its time limit):
+   * the answer `deny`, then the call's denial (`policy_effective`, its permission, code
+   * `confirmation_required`), then no `tool_result` (nothing goes back to the model) and the run's
+   * end. So every `deny` answer has its denied `tool_decision`, and readers that count denied calls
+   * by `tool_decision` (run's end summary, report, the app layer's events) count it.
+   */
+  | {
+      readonly type: "confirmation_requested";
+      readonly id: string;
+      readonly kind: "permission";
+      readonly callId: string;
+      readonly tool: string;
+      readonly permission: PermissionKind;
+      readonly subject: MaskedText;
+      readonly argumentCount: number;
+    }
+  /** U-74: the answer. `dismissed` is recorded as `deny` by `default` (ConfirmationBy). */
+  | { readonly type: "confirmation_answered"; readonly id: string; readonly decision: ConfirmationDecision; readonly by: ConfirmationBy }
+  | {
+      readonly type: "file_changed";
+      readonly callId: string;
+      readonly path: MaskedText;
+      readonly previousHash: ContentHash | null;
+      readonly newHash: ContentHash;
+      readonly created: boolean;
+    }
+  | { readonly type: "verifier_result"; readonly result: VerifierResult }
+  | {
+      /**
+       * A failed verification is sent back to the model (R-1). Recorded before the repair
+       * message is sent. The message itself is recorded by the next `model_request`.
+       */
+      readonly type: "repair_started";
+      /** 1 for the first repair of the run, then 2, 3, ... */
+      readonly attempt: number;
+      /** Ids of the verifiers that failed, in task order. */
+      readonly failedVerifiers: readonly string[];
+      /** True when evidence in the repair message was cut at its share of MAX_FEEDBACK_BYTES. */
+      readonly feedbackTruncated: boolean;
+    }
+  | {
+      /** U-1: one integrity check, recorded only when `EngineDeps.integrity` is present. */
+      readonly type: "integrity_checked";
+      readonly phase: IntegrityPhase;
+      /** `IntegrityChecker.compare` for this check, masked, in its order. Empty: nothing changed. */
+      readonly changed: readonly MaskedText[];
+    }
+  | {
+      /** DR-38: one check of the state directory, see EngineDeps.stateGuard. */
+      readonly type: "state_checked";
+      readonly phase: StateCheckPhase;
+      /** before_command, after_command: the recorded id of the `run_command` call checked around. */
+      readonly callId?: string;
+      /** StateGuard.compare for this check (both tiers), masked, sorted. Empty: nothing changed. */
+      readonly changed: readonly MaskedText[];
+      /** Part of tier "state" could not be fingerprinted; not a change (StateComparison.limited). */
+      readonly limited: boolean;
+    }
+  | {
+      readonly type: "run_finished";
+      readonly status: TerminalRunStatus;
+      readonly reason: RunReason;
+      readonly usage: RunUsage;
+    };
+
+export type JournalEventType = JournalEvent["type"];
+
+/**
+ * U-105 (app layer U-90): every JournalEventType at run time, for readers of stored lines that must
+ * tell a known record type from another string (the app layer's run event list). The table names
+ * each type once; `satisfies` makes a type added to JournalEvent fail to compile until it is listed
+ * here, and a name that is not a type fail as well. Order: as in JournalEvent.
+ */
+const JOURNAL_EVENT_TYPE_TABLE = {
+  run_started: true,
+  model_request: true,
+  model_response: true,
+  model_error: true,
+  tool_decision: true,
+  tool_result: true,
+  confirmation_requested: true,
+  confirmation_answered: true,
+  file_changed: true,
+  verifier_result: true,
+  repair_started: true,
+  integrity_checked: true,
+  state_checked: true,
+  run_finished: true,
+} as const satisfies Record<JournalEventType, true>;
+
+/** U-105: the record types of a run journal (JournalEventType), in JournalEvent's order. */
+export const JOURNAL_EVENT_TYPES: readonly JournalEventType[] = Object.keys(JOURNAL_EVENT_TYPE_TABLE) as JournalEventType[];
+
+/** A stored line: the event plus fields the journal adds. */
+export type JournalRecord = JournalEvent & {
+  /** 1-based, increasing by one per record within a run. */
+  readonly seq: number;
+  /** ISO 8601 UTC time. */
+  readonly at: string;
+  readonly runId: string;
+};
+
+export interface Journal {
+  /**
+   * Appends one record and resolves after it was handed to the operating system. AC-D3 (the CLI
+   * migration's C-2, U-262): resolves with the record as it was stored (`seq` and `at` as written,
+   * `runId`), so a wrapper that tells of records (the app's run events) gives the stored values and
+   * never counts or reads the clock itself. A wrapper passes on what it is given.
+   */
+  append(event: JournalEvent): Promise<JournalRecord>;
+  close(): Promise<void>;
+}

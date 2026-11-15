@@ -1,0 +1,98 @@
+/** Shared samples for the i18n tests. All values are fake. */
+
+import { API_BASE_URL_ENVS, API_KEY_ENVS, API_MODEL_ENVS, DEFAULT_CONFIG_DISPLAY, MESSAGE_IDS, messageParams } from "../../../src/contracts/index.js";
+import type { MessageCatalog, MessageId, MessageLanguage, MessageParamKind } from "../../../src/contracts/index.js";
+
+export const LANGS: readonly MessageLanguage[] = ["ko", "en"];
+export const IDS: readonly MessageId[] = MESSAGE_IDS;
+
+export function specOf(id: MessageId): Readonly<Record<string, MessageParamKind>> {
+  return messageParams(id);
+}
+
+/** `format` without the per-id types, for tests that pass wrong values on purpose. */
+export function loose(catalog: MessageCatalog): (id: MessageId, params?: Readonly<Record<string, unknown>>) => string {
+  return catalog.format as unknown as (id: MessageId, params?: Readonly<Record<string, unknown>>) => string;
+}
+
+/** Two different valid values of a kind; the first is the default sample. `text` is made with the same catalog. */
+export function samples(kind: MessageParamKind, catalog: MessageCatalog): readonly [unknown, unknown] {
+  switch (kind) {
+    case "count":
+      return [11, 12];
+    case "seconds":
+      return [4.2, 12];
+    case "language":
+      return ["ko", "en"];
+    case "status":
+      return ["done", "failed"];
+    case "reason":
+      return ["verified", "model_error"];
+    case "permission":
+      return ["command", "path"];
+    case "denial":
+      return ["command_not_allowed", "protected_path"];
+    case "modelError":
+      return ["auth_failed", "timeout"];
+    case "phase":
+      return ["run_start", "after_verify"];
+    case "provider":
+      return ["scripted", "anthropic"];
+    case "field":
+      return ["policy.commands[2]", "limits.maxModelTurns"];
+    case "runId":
+      return ["20261112T010203Z-0123abcd", "20261112T010204Z-89abcdef"];
+    case "text":
+      return [catalog.format("status.done"), catalog.format("status.failed")];
+    case "location":
+      return [DEFAULT_CONFIG_DISPLAY.windows, "--config"];
+    case "suggestedCommand":
+      return ["npm test", "npm run build"];
+    case "suggestedPath":
+      return ["tests", "package.json"];
+    case "keyEnv":
+      return [API_KEY_ENVS[0], API_KEY_ENVS[1]];
+    case "settingEnv":
+      return [API_MODEL_ENVS[1], API_BASE_URL_ENVS[0]];
+    case "apiOrigin":
+      return ["https://api.example.test", "http://127.0.0.1:8080"];
+    case "workspace":
+      // DR-51 (U-38): typed workspace paths as toShownWorkspace makes them (quoted, nothing escaped).
+      return ['"D:\\work\\site"', '"../notes"'];
+    default:
+      // A kind the contract added after these samples: the tests that use it fail here, by name,
+      // instead of the whole build stopping on a switch that is no longer exhaustive.
+      throw new Error(`no sample for the parameter kind ${String(kind)}`);
+  }
+}
+
+/** Valid parameters for a message, with one parameter replaced if asked. */
+export function paramsFor(
+  catalog: MessageCatalog,
+  id: MessageId,
+  replace?: { readonly name: string; readonly value: unknown },
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  for (const [name, kind] of Object.entries(specOf(id))) params[name] = samples(kind, catalog)[0];
+  if (replace !== undefined) params[replace.name] = replace.value;
+  return params;
+}
+
+/** A fake value with the shape of an Anthropic key, built at run time so no source line has that shape. */
+export const KEY_SHAPED = ["sk", "ant", "Q".repeat(24)].join("-");
+/**
+ * Fake OpenAI key shapes, built the same way. DR-33: the narrow shapes are a distinct prefix
+ * (`sk-proj-` and the like) and a long older key with a digit and both cases; the loose shape
+ * (output hiding only, DR-32 (a)) also takes the last one.
+ */
+export const OPENAI_KEY_SHAPED = ["sk", "proj", "Q7q".repeat(8)].join("-");
+export const OPENAI_LEGACY_SHAPED = ["sk", "Q7q".repeat(14)].join("-");
+export const OPENAI_LOOSE_SHAPED = ["sk", "q".repeat(36)].join("-");
+/** Every fake key shape above. */
+export const KEY_SHAPES: readonly string[] = [KEY_SHAPED, OPENAI_KEY_SHAPED, OPENAI_LEGACY_SHAPED, OPENAI_LOOSE_SHAPED];
+
+/**
+ * C0, C1, line and paragraph separators, bidirectional controls. Built from a string: the
+ * compiler writes U+2028 (written as an escape) in a regular expression literal as the raw character, which ends the line.
+ */
+export const CONTROL = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]", "u");

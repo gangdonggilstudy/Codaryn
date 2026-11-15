@@ -1,0 +1,681 @@
+# PM 상태
+
+현재 운영자: 2026-11-15 사용자 재위임(CP55)의 Claude w3:pG. canonical main pm-control.json의 pm-20261115-claude-01 active를 기준으로 하며 codex-review는 인계 후 일반 작업자다. 아래 이전 위임 표와 CP54까지의 Codex PM 표기는 당시 이력이다.
+
+PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로 codex-review(w3:p3)가 PM과 통합을 회수했다. 아래 임시 위임 기록과 active 조건은 Claude 임시 PM에게 적용되며, 회수 후 Codex의 원래 관리 권한을 중단시키지 않는다. 작업별 상세는 [개발 진행 현황](progress.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 둔다.
+
+## 위임
+
+- 위임 ID: pm-20261112-01. 기준 파일은 main의 `docs/pm-control.json`이다.
+- 임시 PM: w3:p1 (session 35d190ab-f250-4f81-bf71-df394b34110a), 페르소나는 개발 PM 겸 수석 소프트웨어 아키텍트. Herdr 사용자 화면에서는 "오케스트레이터"라고 부른다.
+- 인수: 2026-11-12 완료(`789733f`, 당시 w1:p3). 같은 날 사용자가 새 Herdr 세션(w3)의 w3:p1에 오케스트레이터를 맡겼다(CP-12). 위임 ID와 범위는 그대로다.
+- 작업 배분, 변경 묶음, 커밋, 병합, 푸시 전에 status와 ID를 확인한다. active가 아니거나 ID가 다르면 새 배분과 변경을 멈추고 이 문서의 마지막 체크포인트를 보고한다.
+- 실제 API 호출, 키 파일 조회, 모델 변경, force push, 기존 이력 재작성은 하지 않는다.
+
+## 체크포인트 기록
+
+| 번호 | 시점 | 내용 | main 커밋 | push |
+| --- | --- | --- | --- | --- |
+| CP-1 | 인수 | 위임 확인, 이 문서 생성 | `789733f` | 완료 |
+| CP-2 | G2 | 기반 커밋 `cba57fa` 검토·병합, 작업자 worktree와 브랜치 준비, 배분 문서 작성 | `cc29b50`, `35b5102` | 완료 |
+| CP-3 | 배분 | 여섯 작업(B1, B2, B3, C1, C2, D)을 Herdr로 전달. 검증 체계와 비밀 검사 스크립트·커밋 전 훅 추가 | 이 문서를 담은 커밋 | 완료 |
+| CP-4 | G3a | B2 `9496d14`, B3 `d3e6350` `6d35746`, C1 `ec4aa5f`, C2 `ae27dc1` `063605d` `bca12d3`을 검토·병합. main 유닛 108건 통과. D의 통합 테스트 `8b40f46` `7942bfd` 병합(아직 실행 전). B1 조립과 교차 검토 지시 | `7b39c96`과 이 문서를 담은 커밋 | 완료 |
+| CP-5 | G3b와 교차 검토 | B1 조립 `e8b5bd2` 병합(`58dcfde`). 첫 통합 실행에서 13건 실패, 원인은 거부된 호출의 `tool_result` 미기록. 엔진 수정 `5333feb` 병합(`3982a6c`) 뒤 유닛 157건, 통합 63건 통과. 교차 검토 보고 3건을 `docs/reviews/`에 기록(`e70b827`)하고 결함 수정과 회귀 테스트를 배정 | `3982a6c`, `e70b827`과 이 문서를 담은 커밋 | 완료 |
+| CP-6 | G4 | 교차 검토 수정 `7a74c2c`(privacy), `df1ceff`(tools), `7eca0c0`(workspace), `54e59fd` `2323ad6` `2b5167c`(engine, 계약 문서), 회귀 통합 테스트 `db1e043` 병합. main `db1c55c`에서 유닛 189건, 통합 76건 통과. 수용 기준 A1~A12 대조 후 1a 오프라인 검증을 채택 | `db1c55c`와 이 문서를 담은 커밋 | 완료 |
+| CP-7 | 설정과 제공자 | 사용자 직접 지시("설정 가능하게 해")에 따라 설정 계약 `86f3d62`, CLI 설정 처리 `7a2d02d`, Anthropic 제공자 `a5f62e7`, 조립 `7359cef`, 가짜 서버 통합 테스트와 실제 호출 점검 스크립트 `e8dbdb9`를 병합. main `dd930e2`에서 유닛 234건, 통합 130건 통과. 실제 API 미실행 | `dd930e2`와 이 문서를 담은 커밋 | 완료 |
+| CP-8 | 단계 2 착수 | 사용자 직접 지시("단계 2 재수정 반복도 이어서 진행해", "세션들 최대한 활용해서 진행해줘 투입 가능하게")에 따라 작업 지시서 `docs/work-orders/phase-2-repair-loop.md` 작성. F1(p1), F5 준비(p4), G1(p6), G2(p5), H1(p7), H2(p8) 배정. 작업자 브랜치를 main `0164b10`에 맞춤 | `0164b10`과 이 문서를 담은 커밋 | 완료 |
+| CP-9 | 단계 2 구현과 검토 | 재수정 반복 엔진, 보호 경로, 스냅샷·되돌리기, `.cmd` 실행, 제공자 수정, CLI 보안 모듈, 사용 문서를 main에 병합(`5989d79`까지). 교차 검토 H1·H2·F6와 결정 S-1~S-12, T-1~T-15를 기록(`1037593`). p1의 연결 커밋 `3f3756d`는 통합 8건 실패가 남아 main 미병합. p1이 주간 사용 한도로 멈춰 PM이 p1의 계약 변경을 검증 후 `f45959a`로 커밋하고 나머지를 p5~p8에 재배정 | `1037593`과 이 문서를 담은 커밋 | 완료 |
+| CP-10 | 단계 2 병합 | 수정 묶음 T(p5 `b807001`, p6 `a51002c`, p7 `c3d9865`, p8 `2f014a4` `c748821` `1677b1c`, 계약 `f45959a`)와 p4의 통합 테스트 `52a634d` `2410686`를 합친 뒤 PM이 병합 전에 전체를 실행해 통과를 확인하고 main `4074d5c`로 병합 | `4074d5c`와 이 문서를 담은 커밋 | 완료 |
+| CP-11 | 일시 정지 | 사용자 지시로 전체 작업을 멈췄다. 단계 3 구현(무결성 확인, 설치 위치 거부, report, doctor, 후보 스크립트), 수정 V·W·X, `models` 명령, 사용성·UX 설계, 문서화 누락 보완을 main `39219c8`까지 병합. 작업 브랜치를 원격에 올림 | `39219c8`과 이 문서를 담은 커밋 | 완료 |
+| CP-12 | 재개 | 새 Herdr 세션 w3에서 w3:p1이 오케스트레이터를 맡았다. 새로 받은 저장소에 worktree 8개를 원격 브랜치와 main에서 다시 만들고 저장소 작성자를 설정했다. main `34393bd` 기준 검증 통과. 사용성 개선(N-A~N-E)과 단계 4·5 설계(P4-G, P5-A, P5-U)를 배정 | 이 문서를 담은 커밋 | 완료 |
+
+## 사용자 상시 지시 (2026-11-12)
+
+사용자가 임시 PM에게 직접 지시했다: "GUI 등 최종 모든 설계를 중간에 멈추지 말고 내 지시가 없으면 끝까지 연속 진행하고 있어." PM은 이를 다음과 같이 적용한다.
+
+- roadmap의 남은 단계(단계 3 마무리, 단계 4 범용 작업 확장, 단계 5 GUI·IDE)를 사용자의 추가 지시 없이 차례로 설계·구현·검증한다. 미정 항목은 PM이 정하고 근거를 작업 지시서에 남긴다.
+- 그대로 지키는 한계: PM과 작업자는 실제 Anthropic API를 호출하지 않고 키 파일을 읽지 않는다. 과금이 걸린 선택(세션 사용 한도 창 등)과 force push, 이력 재작성은 하지 않는다. `docs/pm-control.json`이 active가 아니면 멈춘다.
+- 실제 API 검증이 필요한 완료 판단(1b, 단계 2·3의 실 API 기준)은 "미수행"으로 적고 다음 단계의 오프라인 작업을 계속한다.
+
+- 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
+- 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
+
+## 진행 요약 (CP-56, 2026-11-15) — 고도화 검토, E-1 문서 현행화, 라이선스 결정 DR-75 채택
+
+- Claude PM(w3:pG)이 활성화 뒤 기존 Codex 다섯에게 새 PM·STOP 유지·PM 전용 push·무trailer를 직접 통지했고 다섯 모두 확인 응답했다. 키 없는 수동 패킷 4파일 해시가 seal과 일치함을 확인하고 원 점검표 12항목 본문을 읽었다. 패킷의 editor 폴더에 M-3.17 4단계용 `masked.txt`와 가릴 값 설정이 없어 그 단계는 이 패킷으로 실행할 수 없다(NOT_RUN 유지, 보완은 별도 결정).
+- 사용자 요청 "고도화 작업 검토"로 enhancement-review-check-01(codex-check)을 등록·회수·ACK했다. 후보 7개: E-1 개인정보 집계 안내 문서 불일치(O/P1), E-2 GUI 프로세스 시험 도우미의 호스트 환경 전달 축소(O/P2), E-3 Markdown 보고서 한국어화(U, 사람용 고정 출력 변화), E-4 data_checks 고카디널리티 메모리 예산(U), E-5 GUI 프로필 내용 편집(U), E-6 텍스트 편집 들여쓰기 키(U), E-7 read_file 줄 범위·여러 곳 바꾸기(X, 실제 모델 점검 뒤). PM이 O 후보의 근거 줄을 target blob에서 직접 확인했다.
+- E-1 채택: usage.md 16절·privacy.md 13절·standalone-gui.md 152–153줄의 "집계 도구 없음" 문장을 현재 사실(`unreadablePaths`+`analyze-private`/`query_table`, 보장은 행 비전송뿐)로 고쳤다. 과거 결정 표는 이력으로 두었다. 3파일 +4/−4의 작은 문서 단위라 DR-64 관행대로 PM이 diff를 검토했다. worker `d4a2e412`, 병합 `53497ce0`(tree `e9ffd0d0` 일치, staged 공백·비밀 검사 0).
+- 사용자 요청 라이선스 검토 license-policy-review-sec-01(codex-sec)을 회수·ACK했다. 현재 의존성 36개(루트 23·GUI 13 lock 항목)는 모두 MIT·ISC·Apache-2.0이며 유료·비상업 조건을 찾지 못했다(법률 의견 아님). 사용자가 2026-11-15 지침 반영·허용 기준·README/NOTICE 표기(Copyright 2026 gangdonggil)·비차단 lock 목록 스크립트를 결정했다(**DR-75**).
+- DR-75 채택: codex-loop 구현과 OR 식 분류 보완(정책 문서와 일치하도록 PM 판단: OR은 거부 아닌 대안이 있으면 검토, AND·WITH에 거부 계열이 있으면 거부), codex-audit 독립 검토 **H0/M0/L0**. 12파일 +265/−6, LICENSE 무변경. worker `4b50f696`, 병합 `1421a922`. main이 base `97964ef7`에서 E-1로 움직였으므로 staged 병합 patch가 후보 patch와 byte 동일함을 확인했다. 시험 6/6, 실제 lock allow36/review0/deny0, GUI lock 검사 0, staged 공백·비밀 검사 0. 모든 새 커밋 작성자·committer gangdonggil, trailer 0.
+- 남은 것: E-2는 다음 O 후보, E-3~E-6은 사용자 결정 대기, E-7은 실제 API 경계. 12 수동 항목 NOT_RUN, 실제 API·GU9/DR67·역사적 한계는 그대로다. Codex 주간 한도가 약 12%라 배정을 좁게 유지한다.
+
+## 진행 요약 (CP-55, 2026-11-15) — 사용자 요청 Claude PM 재위임·codex-review 일반 작업자 전환
+
+- Claude가 명시 **ACK pm-20261115-claude-01**로 인수했고, 필수 문서의 실제 읽은 범위·완료/미실행/한계·소유권·통신 전환·무trailer 금지를 자기 말로 확인했다. ACK 화면 원문 SHA256 8d5a3fbc29645416bdbc22be344c62dce9594e1e2b0930d2c1a8dc139b727376와 인수 기록은 .codaryn/pm-tools/claude-handoff-20261115/에 보존한다. 큰 설계의 관련 절을 읽은 것과 수동 점검표 본문/외부 temp 패킷은 아직 읽지 않은 것을 구분했고 후자는 활성화 뒤 수신자가 이어서 확인한다. pm-control은 새 ID·실제 owner로 active로 전환했다.
+- 최신 사용자 지시로 실제 조회한 Claude **w3:pG/session9d6ad963-02c1-4d06-848f-f3c59b3a04e9**에게 [전체 업무](operations/pm-handoff-2026-11-15.md)를 인계한다. 위임 ID는 pm-20261115-claude-01이며 canonical main pm-control.json의 active를 기준으로 한다. 인수자는 필수 문서·CP54·증거·세션·통신 한계·금지사항을 읽고 명시 ACK하며, 인계자의 마지막 활성화 문서 커밋/push 알림 뒤 새 PM 단독 운영으로 전환한다. codex-review w3:p3는 일반 작업자로서 배정 전 STOP, main 수정·배분·통합·push를 하지 않는다. 구현/문서/분석/검증은 기존 Codex 세션에 배정한다.
+- 출발 main/origin은 c8cf7a9dd9c2780def3b8ea9e111371b03a5ffaa/tree5db495c219afb6e0e36e33f23aeb1c04f99905b7, clean이다. CP51 C11·CP52 현재문서·CP53 한 대본 actual CLI/별도host 비교·CP54 유한한 오프라인 인계는 완료 상태를 유지한다. 모든 worker report는 full READ/hash/explicit ACK CLOSED 후 STOP이다. 폐기/보존 live01 CHECKOUT_MISMATCH만 예상 예외이며 재전송하지 않는다.
+- notifier32360은 codex-review 고정이라 전체 ACK 확인 후 PID/Node/명령줄/시작시각/owner를 확인해 그 프로세스만 종료했다. 즉시 조회는 종료 중 프로세스를 관찰했으나 다음 독립 CIM 조회에서 부재를 확인했다. 재kill/다른 프로세스 종료 없이 로그와 종료 증거를 .codaryn/pm-tools/claude-handoff-20261115/에 보존했다. 이전17044도 종료 상태다. 새 PM은 helper의 file-only register/dispatch(no send)/poll(no notify)/ack와 별도 명시 native prompt를 사용한다. 이름/pane/env 위장이나 기존 Codex notifier 재시작은 하지 않는다. former PM은 worker 허용 목록 밖이라 별도 수동 task/receipt/READ/hash/ACK로 구분한다.
+- 실제 API·모델·키 조회·installer GU9/DR67 미승인/실제Windows12수동 NOT_RUN/다른OS·실볼륨/U333u22원인/U321경합/JSONpin 한계를 빠짐없이 인계한다. 패킷과 모든 실패·raw proof/기존 이력을 보존한다. 사용자 추가 지시 **어떤 Git trailer/자동 귀속도 금지**를 인계자·수신자·작업자에게 명시하고 푸시 전 작성자/committer/메시지를 확인한다. 이 체크포인트는 운영 문서만 바꾸며 제품·시험·권한 범위를 확장하지 않는다.
+
+## 진행 요약 (CP-54, 2026-11-15) — 승인된 오프라인 범위 인계, 키 없는 수동 패킷 준비
+
+- [인계 조사 원문](reviews/2026-11-15-offline-acceptance-handoff.md)과 [요구별 행렬](reviews/2026-11-15-offline-acceptance-matrix.md)을 읽고 SHA/report/matrix/checked/proof 체인·34proof·19literalGitblob·기존 읽기 metadata6개를 PM이 확인해 canonical 명시 ACK했다. 대상은 exactc00ce7d0a30a855afda3111ebf83b969509ef222/tree75f8fb0d632097f7487bdac92604e41d508cde5c다. 새 실행/읽기 실패0이며 tracked/index/checkout 무변경이다. 이 제한된 조사에서 새로 착수할 근거가 있는 승인된 오프라인 코드 단위를 확인하지 못했고, C1~C11·현재문서·CP53 한 대본 비교를 닫힌 범위로 인계한다. 추가 optional 시험/새gate/C12/반복 문서 작업을 발명하지 않는다.
+- 다음 유한한 행동은 기존 [수동 점검표](manual-checks.md)의 keyless Windows 항목이다. [CP54 운영자 패킷](acceptance/windows-keyless-cp54.md)에 M-1.1~1.4, M-3.2/3.3/3.4/3.5/3.6/3.13/3.15/3.17의 준비·정확한 기대·기록 형식을 고정했다. 실제 TTY·OS dialog 기본/Enter/Esc·IME·Narrator/고대비/배율은 실제 운영자 관찰이 필요하다. **12항목 전부 NOT_RUN**, 제품 CLI/GUI를 시작하거나 실제 UI를 통과 처리하지 않았다.
+- 준비 패킷은 C:/Users/gangd/AppData/Local/Temp/codaryn-manual-cp54-vlZX3f다. CP53 독립 fresh root/GUI 빌드2056파일의 SHA와 기존 Node26.13.1/Electron45.3.1 실행파일을 고정하고, 서로 분리된 CLI/GUI 합성 예시·원문 slowJSON·LF/CRLF+BOM 편집파일·private HOME/config/user-data·NOT_RUN 기록표를 만들었다. 기존 Electron은 pm-unit의 설치본이며 새 설치/다운로드/패키징은 없다. 실행기는 매번 핀을 확인하고 정적 자식환경만 전달하며 사용자 기존 key/env/config를 읽거나 지우지 않는다. 자동 삭제도 없다. launcher syntax와 info-only만 확인했고 actual cli/gui 모드는 운영자 실행 전이다. 이는 OS sandbox가 아니다.
+- PM packet helper의 첫 node --check는 Markdown template의 미이스케이프 backtick SyntaxError로 코드 실행 전에 실패했다. 원래 helper/도구 출력을 보존하고 template만 바로잡은 뒤 syntax0·준비0·launcher syntax0·info0을 확인했다. 제품/API/UI/시험 실행 실패로 세지 않으며 수동 결과도 생성하지 않았다. 로컬 manifest/receipt/seal은 .codaryn/pm-tools/receipts/keyless-manual-cp54*.json, 이전 오프라인 증거/실패/보고는 그대로다.
+- 실제 API 단계1b/2/3 및 실제 모델 자기개발은 미실행이다. 키 없는 패킷과 live/key 필요 항목을 섞지 않는다. GU9/DR67 installer·서명/게시/비용은 명시적 미승인 상태이며 버전/체크섬/실제URL/명령/산출/검증/비용의 구체 제안 없이 승인 질문을 올리지 않는다. 다른OS/실볼륨·실제 UI/접근성 한계와 U333u22 원인/U321 부모교체·hardlink 경합/과거JSONpin 범위도 남는다. 전체 제품·단계5 완료로 확대하지 않는다.
+- 기존 Codex 작업은 모두 보고 회수·읽기/해시·명시 ACK 후 STOP이다. 새 코드 단위를 임의 배정하지 않고 실제 수동 관찰 또는 구체적인 범위 결정이 들어오면 해당 요구와 재현을 확인해 좁게 이어간다. Claude 배정/worker push/새worktree/이력 재작성/키 조회/실API/외부시험망은 없다. PM-only push·file-first 통신을 유지하며 갱신된 watcher32360/session39452가 explicitPMw3:p3에서 살아 있다. 이전17044는 모든 job ACK 후 소유/PID/시작시각을 확인해 갱신했고 로그를 보존했다. 이 인계는 자동 제품 검증의 반복이나 수동 합격 판정이 아니다.
+
+## 진행 요약 (CP-53, 2026-11-15) — 실제 CLI·별도 host의 한 대본 완전 저장물 비교 채택
+
+- 추가 오프라인 CLI/HOST-PARITY 증거를 main/origin/main **823486b5b81d2c1a956bc074f574a383559475ce**에 채택·push했다. PM worker commitcc41c47559f11de6f232e297d25b5a557740ff19, 검토·병합 treed00713587784543cb4f4ce10aa8bf9db14b7c160 일치. gui/tests/unit/cli-host-parity-support.ts328줄과 cli-host-parity.test.ts79줄, 정확2개 새 시험 파일407줄만 추가했다. 기존 제품·시험·fixture·설정·package/lock을 바꾸지 않았다. C11 완료를 다시 여는 필수 gate나 새 C12/제품 기능/전체 단계5 완료가 아니다.
+- [계획](reviews/2026-11-15-cli-host-composition-plan.md)에서 기존 c01 실제CLI↔인프로세스 앱·GUI bridge/process 시험을 인정하고 첫 범위를 한 paired 문서 대본으로 좁혔다. 실제 CLI child와 actual startEngineHost의 별도 Node child가 같은 초기 task/script/workspace로 README 읽기·보호 경로 쓰기 거부·NOTE 쓰기·file_rules verifier·마지막 답을 수행한다. 전체 disk result/journal과 순서/필드를 비교하며 의도적으로 축약된 IPC view는 같은 host run의 저장 결과로 별도 대조한다. engineDir/--engine-dir가 실제 API이고 새 환경변수 API를 만들지 않았다.
+- [최초 실패 보고](reviews/2026-11-15-cli-host-parity-initial.md)는 그대로 보존했다. 최초 writer 이름 처리 오류는 제품 실행0/신뢰할 cleanup receipt 없음, 다음 실제 쌍은 PM이 잘못 지정한 toolCalls3에서 멈췄고 controls/IPC/full 비교는 미실행이었다. PM은 고정 BASE2c202 engine handleCall1198/1229 거부가1240 증가 전에 반환함과 기존 n17:199–200의 거부 제외 assertion을 직접 읽고 **실행2회·tool_result3개**를 새 배정으로 명시했다. 제품/기존 oracle를 관찰값에 맞춘 변경이 아니라 신규 PM 기준 오류 교정이다. [후속 수정](reviews/2026-11-15-cli-host-parity-count-fix.md)은 tuple3→2+근거 주석1줄만 바꾸고 모든 다른 기준을 유지했다.
+- worker 실제 후속: 새 파일 **10pass(실제 쌍 부모1+negative8+positive1)**, 관련GUI5pass, 기존 rootc01 24pass, 모두 fail/cancel/skip/TODO0. 양쪽 scripted/done/verified0, usage4turns/2tools/4input/4output/repair0,23journal·3tool_result와 wdeny의 requested/path/protected_path·policy_denied를 확인했다. 원래 failed pair1와 후속 pair1은 같은 고유 fixture1의 별도 실행이며 두 시나리오로 더하지 않는다. root/전체GUI의 이미 성공한 build/type/lock은 핀 확인 후 재사용하고 해당 GUI test config만 다시 컴파일했다. S0+plan135개 파일 불변과 첫 cleanup 한계·요약 helper permission 가정 오류를 보존했다.
+- [PROBE 독립 검토](reviews/2026-11-15-cli-host-parity-probe.md) **H0/M0/L0**. exact2c202 archive1388멤버+정확2working bytes를 자기 A/source에 구성하고, 기존 pinned compiler/type 패키지와 Electron 선언2개만 복사해 설치·Electron 실행 없이 fresh root1678/GUI378출력을 만들었다. 실제 새 시험10/10·관련GUI5/5, 독립 복사본 negative4가 통과했고 worker c0124는 READ로 구분했다. 고유 fixture1/독립 실제쌍1이다. 원본 S0/plan/S1의196개 및 working/source/dependency/build bytes 불변을 확인했다. 준비 helper 오류3와 잘못 잡은 workflow 분기 근거를 보존하고 일반 handleCall 증명을 별도로 고정했다. PM은 본문·checked/proof 체인·4,226파일 해시(별도 metadata-only2개 제외)·원본196·working2핀·명령/관찰을 읽고 명시 ACK했다.
+- 완전 저장 비교는 unknown field·presence·array/journal 순서·비허용 leaf를 보존한다. 정규화는 검증된 RUN 포인터·각 journal 최상위at·같은 run에서 일치하는 duration2곳·A/B 발급 token2개의 bijection/좌표뿐이다. status/error/policy/order/token merge/일반ISO문자/외부runId/unknownfield 거부와 허용 비결정성 positive, 추가 nestedISO/음수duration/local불일치/unknownjournalfield 검사를 원본·sibling·raw관찰 불변 상태로 수행했다. IPC는 독립 기대 투영에 연결하며 전체 disk 비교를 대신하지 않는다. host/CLI 종료·잠금 부재·정상 cleanup도 확인했다.
+- PM은 두 worker 보고와 PROBE 보고를 읽고 ACK한 뒤 staged2새파일 raw/GitLF·scope·공백/비밀0을 확인해 커밋했다. main/origin clean·동일 BASE 확인 후 literalcc41 --no-commit 병합→동일d007 tree→staged 검사0→별도 merge commit→새2커밋 작성자/committer·무trailer 확인→PM만 push했다. 제품 입력이 그대로라 성공한 root 전체suite/GUI전체/smoke/graph를 반복하지 않았고, 기존4328unit/684integration/GUI426/smoke227/CLI95를 새 전체 수치로 덮거나 GUI436을 실측처럼 계산하지 않았다.
+- 현재 문서의 추가증거를 미래 선택으로만 적은 문장을 이번 한 사례의 실제 검증 범위로 갱신했다. 원래 실패·보고·과거 CP/수치·사용자 결정은 보존한다. 합성 repository fixture는 compiler/tests가 읽을 수 있다는 PM 보완을 fresh build 전에 전달했고 수동 hash 제외/metadata와 compiler 입력 읽기를 구분했다. 실제 개발자 key/env/config·private mapping은 읽지 않았다. 실제 client는 host 내부 stderr를 버리므로 그 stream은 검증하지 못했으며 loopback-only/refused0은 OS/syscall/socket 격리 증명이 아니다. 실제 API/model/다른OS/realTTY/dialog/IME/접근성/installer DR67 및 U333u22/U321경합/JSONpin 한계는 남는다. 다음 판단은 이미 승인된 요구의 남은 증거·수동/승인 경계를 구체적으로 정리하는 것이며 추측성 기능·추가 gate를 만들지 않는다.
+
+## 진행 요약 (CP-52, 2026-11-15) — C11 뒤 현재 상태 문서4개 보완 채택
+
+- DOC-POST-C11-CURRENT를 main/origin/main **42b16b94512ee8d696c36d53ae48450e4980abbf**에 통합·push했다. PM이 만든 worker commit5bf48869756f5ee0778529acc074e3c611a62951과 병합 tree47596dad2c0bd3871bee8c7c536aaa347ad87474가 일치한다. roadmap/progress/implementation-map/decision-register 정확4파일 +52/-4=56줄이며 제품·기존 시험·설정·패키지 변경은 없다. 기존 fullchecked881533부터 현재까지 비문서 raw Git 차이0을 별도로 확인해 같은 제품 입력에 기존 검증을 연결했다.
+- [선행 읽기 전용 조사](reviews/2026-11-15-post-c11-next-plan.md)의 보고/계획을 PM이 읽고84proof·52literalGitblob을 직접 확인·ACK한 뒤 작은 문서 보완을 채택했다. 실제 CLI↔인프로세스 앱의 전체 EngineResult/journal 비교(c01), real app→GUI view/parser, 실제 host/CLI 잠금·취소 시험이 이미 있다. 포괄적인 “계약시험 없음”은 낡은 현재 상태 설명이었고 이번 조사에서 새 제품 결함을 확정하지 않았다. 조사 helper 읽기 오류2건도 보존했다.
+- [구현 보고](reviews/2026-11-15-post-c11-current-check.md)는 D1~D6의 날짜 있는 현재 overlay와 DR65 구현 상태만 보완했다. C11 경계 완료·P1 A/B/Markdown/models/권한 질문 구현을 현재로 연결하며 3aca6b5/76c5280/349726a의 원래 표·수치·경로·실패는 이력으로 남긴다. DR65 사용자 결정문은 그대로, 이전 상태는 날짜를 붙여 cell 안에 보존했고 DR67 등 다른 모든 결정 bytes도 동일하다. 원래4문서 before/work raw bytes는 선언한 추가/치환을 역변환하면 완전히 재구성된다. LF/CRLF를 구분했다. worker helper 실패4건도 보고에 남겼다.
+- [AUDIT 독립 검토](reviews/2026-11-15-post-c11-current-audit.md) **H0/M0/L0·사실 오류0**. 같은 미커밋4working raw/GitLF pins·patch3f95eac7...를 검토하고 전·후 역변환/정변환 전체raw·기존 표/CP/DR65/DR67를 확인했다. 신규 링크30(추가 줄 물리33 중 재포함 기존3 제외), heading4/t17·실제 source/test assertion을 대조했다. 원래 S49+envelope3/P84+envelope3 및 literal52+추가5blob도 확인했다. PM은 보고 본문·checked/proof 체인·own551proof·4working hashes를 직접 확인 후 canonical ACK했다. AUDIT helper 오류3(신규 링크/순서/CRLF 가정), 잘못 추정한 읽기 경로 등은 보존했고 제품 시험 실패로 세지 않았다.
+- PM은 구현/AUDIT ACK를 HEAD 이동 전에 완료하고, 별도 staged 비밀 검사·공백0과 raw/GitLF4핀·소유를 확인해 worker commit을 만들었다. main/origin clean·동일판 확인 뒤 literal5bf48869 --no-commit 병합→검토47596dad tree 일치→staged 검사0→별도 merge commit→두 새 커밋 작성자/committer·무trailer 확인→PM 전용 push 순서를 지켰다. 새 worktree/Claude/worker push/amend/이력 재작성/--no-verify는 없다.
+- 문서 단위에서는 제품 시험·build·graph·selftest·API·GUI를 실행하지 않았다. 기존 unit4328/4317pass0fail10skip1TODO, integration684/682pass0fail1skip1TODO, GUI426/smoke227/CLI95same과 CP51 source/runtime0·selftest30/147은 기존 정확판의 READ·동일 입력 근거다. C11 완료를 다시 열거나 전체 단계5/제품/API 완료로 넓히지 않는다.
+- 다음은 같은 대본의 실제 CLI와 별도 GUI host 프로세스가 남기는 전체 저장 결과·journal을 직접 대조하는 **추가 오프라인 증거 단위의 구체화**다. 기존 c01/bridge/process 시험이 없는 것으로 취급하거나 새 C12·필수 gate·제품 기능 요구를 만들지 않는다. 먼저 실제 host 진입점·정규화 허용 범위·동기화·오류/취소/DR4 시나리오와 최소 소유 파일을 설계해 PM이 범위를 고정한다. U333 최초u22 원인/U321 경쟁/JSON narrow-pin scope 및 실제API/model/다른OS/realTTY/manualdialog/IME/접근성/installer·서명·배포 한계와 GU9/DR67 미승인 경계는 유지한다. 통신 file-first·READY 후 STOP·명시 ACK 및 PM만 push 규칙을 계속 적용한다.
+
+## 진행 요약 (CP-51, 2026-11-15) — C11 완료: 실제 최종 혼합 source union·fresh runtime CLI 의존0
+
+- PM은 U327~U336 **10/10 구현 채택과 C11 최종 구조 검증 완료**를 판단했다. 정확한 검증 대상은 main/origin/main37fb966abe088a666cb33ce533f484a5b06b5957, treef1be8b6ef2b5a825354f1d370a786f69f242823f다. 기존 전체 검사 판881533de4b66d9ab3e1497cf22c7043c7b398504와는 CP50 문서2개만 다르고, 제품·빌드·시험 입력이 동일하다. 이 체크포인트도 문서 변경으로만 연결하며 성공한 전체 시험·빌드를 불필요하게 반복하지 않는다.
+- [SEC 실제 최종 그래프](reviews/2026-11-15-c11-final-graph-sec.md): exact archive1383멤버, production src200+package/lock/tsconfig3=203입력, 처음 dist 부재 뒤 pinned native compiler의 새 production build exit0, JS200+map200=400출력과 source-map origin을 확인했다. 권위 있는 **혼합 source union roots66/reachable156/edges918(value522/type396)/CLI0/unknown0**, **fresh runtime roots66/reachable154/edges522/CLI0/unknown0**이며 두 실제 graph CLI 모두 exit0·zero-within-model이다. 물리 ALL app roots와 native program/graph inputs 집합을 대조했고 source151/runtime140 boundary·unknown/witness·독립 BFS를 확인했다. type/value 투영이나 wrapper exit0을 통과 판정으로 쓰지 않았다.
+- SEC 최초 제출은 전체 성공이 아니었다. PM이 지정한 중첩 session-comms cwd에서 원본 selftest의 상대 typeRoots가 잘못 풀려 첫 사례2688/unknown1·exit1, 완료0/30·입력4개(3동일/1config차이)·143미생성이었다. 원래 BLOCKED 보고/checked/실패를 보존하고, PM이 새 sibling cwd를 명시 허용한 **별도 PROBE 검토**로 배치를 바로잡았다. 도구·기준·expected·config를 패치하거나 링크로 우회하지 않았다. 도구의 일반 cwd 의존 자체가 사라진 것은 아니다.
+- [PROBE 독립 최종 검토](reviews/2026-11-15-c11-final-graph-probe.md) **신규 H0/M0/L0, 배치 M1 해소**. 원본 selftest를 올바른 새 sibling cwd에서 단1회 무수정 실행해 **30/30pass·fail0/skip0**이며 원래 입력147파일 전부 raw bytes 동일,30결과 의미·음성 진단·witness도 같다. 동일 SEC 입력으로 graph native CLI를 모드별1회 독립 실행했고 source/runtime 전체 JSON이 각각0fd1074a.../95a32e85...로 **raw bytes 동일**, roots66·CLI0·unknown0·exit0을 재확인했다. 별도 새 제품 build/fullsuite는 하지 않았고 추가8 loader 회귀는 기존 독립 검토 READ로 구분했다.
+- PM은 두 보고 본문·정확 SHA와 checked/proof 체인을 읽고 canonical 명시 ACK했다. SEC 증거89·production203·fresh400·dependencies673과 PROBE own 증거246(A64/B182)를 직접 해시 확인했고, selftest147 입력도 양쪽 실제 bytes를 직접 비교했다. 원본 SEC89와 보고/checked/envelope/첫 실패·입력·출력·의존성은 전후 그대로다. frozen v1/v2 봉인1282/889도 전후 exit0·불변, graph/selftest/compiler/API/AST/Node-types·Node26.13.1win32x64/TS7.0.2 핀을 유지했다. 가짜 fixture/제품 프로그램은 실행하지 않았다.
+- PM의 기존 전체 검사(offline ci/type/build/GUI build·lock0, unit4328/4317pass/0fail/10skip/1TODO, integration684/682pass/0fail/1skip/1TODO, GUI426, smoke227, CLI95차이0, 비밀 검사0)는 동일 제품 입력에 연결되는 별도 실행 결과다. 이번 graph/selftest 관찰과 합산하지 않는다. 환경형 leaf2개는 metadata만 확인한 한계, 컨테이너 archive 해시와 leaf 내용 검사의 구분도 보존한다.
+- adapter-contract 3절 현재 방향과7.2 상태를 갱신했다. 공통 init core는 app/init-command.ts, JSON/Markdown 표시는 presentation/json.ts·report.ts이고 CLI는 기존 공개 binding을 유지한다. **검사한 AST/native resolver 모델에서 전체 app의 CLI 값·형 의존0**을 뜻하며 모든 CLI parser/질문/출력을 앱에 옮겼다는 선언은 아니다. 과거 구조·시험 수는 당시 이력으로 구분한다.
+- C11 완료는 제품 전체/단계5/실 API·실제 모델 자기 개발 완료가 아니다. U333 최초u22 원인 미확정, U321 부모 교체/마지막 검사 뒤 hard-link 경합, historical JSON narrow-pin scope와 realAPI/model/다른OS/실제TTY 미검증은 남는다. 임의 reflection/custom loader/global monkeypatch/경합의 보편적 증명으로 확대하지 않는다. 다음 작업은 최신 설계와 구현의 남은 차이를 읽기 전용으로 다시 분류해 오프라인 후속 단위를 정하는 것이다. 설치 패키지·실 API 등의 별도 사용자 경계를 자동 승인하지 않는다. 통신은 파일 기준 STARTED→READY→전체 읽기/해시→ACK, 구현·검증은 기존 Codex만, push는 PM만 유지한다.
+
+## 진행 요약 (CP-50, 2026-11-15) — REPORT presentation 채택, 구현10/10과 최종 그래프 준비
+
+- U336 REPORT-PRESENTATION을 main/origin/main `aa1eb936ab4c206d93fb2f91e4952b353b898cd3`에 채택·push했다. worker 최종 `ef009c7adcda299d746a5566080404a6a7c16d0f`, 정확 후보 `881533de4b66d9ab3e1497cf22c7043c7b398504`, 검증·병합 tree `0e7da89ab9a5b2dd392017617b70c4c179648aa1` 일치. 4파일 +633/-381=1014줄. 전체 Markdown helper·상태·상수·renderer closure는 src/presentation/report.ts로 이동하고 CLI는 같은 함수/배열과 형을 공개한다. app.ts는 renderer import 한 곳만 바꿨으며 reader/runReport/앱 본문·가림·순서·null-finally·폭 기본 getter는 보존했다.
+- 첫 worker 보고59c41e는 읽고 ACK했으나 채택하지 않았다. 전체 namespace 타입 비교 실패를 Readonly로 정규화한 결과가 실제 const-binding 읽기 전용 약화를 가린 사실을 PM의 native compiler로 재현했다. 수정 보고4d8d94와 source/hash를 검토·ACK한 뒤, 같은 배열 객체의 명시 export const aliases로 원래 전체 타입을 복원했다. PM의 무수정 raw probe도 성공했고 새 영구 modifier 시험을 추가했다. 기존 실패·잘못된 해석·expected-error 로그는 그대로 보존했다.
+- [V55 독립 검증](reviews/2026-11-15-v55-codex-verify-u336.md) 신규 H0/M0/L0이며 PM M1을 독립적으로 닫았다. actual-parent 전체 선언 fresh emit·import8곳 가역 연결 뒤 **정규화 없는 FULL RAW namespace equality**,27 Assert/10개 exact members/양방향8대입 통과. 구조 namespace 값의 두 const 쓰기는 OLD/후보 모두 의도한 TS2540 네 건, 원래 함수 멤버 할당4개는 허용됐다. getter/throw/state/default/폭/배열·함수 binding의 OLD8/동일 후보8 차이0과 원래368호출/90조건 차이0, FS trace352/key-order368,253봉인 및 기존15415항목/1005디렉터리 불변을 확인했다. 환경형4파일은 내용·hash를 읽지 않고 경로/크기만 확인한 한계를 유지했다.
+- PM exact 후보 첫 전체 검사: offline ci/typecheck/clean root build/GUI build·lock0, unit4328 중4317pass/0fail/10skip/1TODO(단독 먼저), integration684 중682pass/0fail/1skip/1TODO, GUI426/426, smoke227/227, CLI95차이0, tracked/staged 비밀 검사0. 재시도 없고 모든 실제 결과와 V55 본문·checked SHA/tree·proof19개/해시 체인·archive를 읽고 확인했다. pm-unit/.codaryn/codex-u336-final-evidence/에 명령/원문을 보존했다. V55의 새 archive/build src200/dist1678은 산출물 수이며 PM 전체 시험이나 부모368을 후보 고유 수로 더하지 않았다.
+- PM이 첫 커밋5a5e935의 EOF 구분용 빈줄 경고를 커밋 전에 반영하지 못한 실수도 보존했다. 추가 커밋ef009는 마지막 함수 밖 separator LF 하나만 제거하며 이력을 재작성하지 않았다. 최종381라인 canonical에 그 한 LF를 붙이면 원래369라인 closure가 재구성되고 renderer/compiled body는 동일하다. V55 준비 오류2건(도구 생성 SyntaxError, compiled EOF 가정)과 worker fixture/parser/EOL/형 검증 오류도 원문 그대로다. 현재 branch/staged 공백·비밀 검사0을 별도로 확인했다.
+- worker와 AUDIT 보고는 본문·정확 SHA를 읽고 명시 ACK했다. worker HEAD 이동 전에 보고 ACK를 완료하고, V55 ACK 후 별도 literal 후보 병합→동일 tree→staged 검사/공백→새 커밋 작성자·메시지 확인→PM 전용 push를 지켰다. Claude 배정/worker push/새 worktree/이력 재작성 없음.
+- C11의 **구현 단위10/10을 채택**했다. 다음은 이 운영·문서 뒤 실제 최종 판에서 동결 GRAPH v2의 selftest와 도구/compiler/API/AST/Node-type 지문·seal을 확인하고, exact archive/production fresh build의 **권위 있는 혼합 source union과 runtime 각각 roots>0·CLI0·unknown0**을 검증하는 단계다. type-only/value-only 투영이나 wrapper exit0으로 대신하지 않는다. 별도 독립 확인 후 C11 완료를 판단한다. 현재 전체 app→CLI0/최종 그래프 완료를 아직 선언하지 않으며 U333 u22 원인·U321 경쟁 위험·JSON narrow-pin scope 및 실제 API/모델/다른 OS/실제 TTY 미검증은 유지한다.
+
+## 진행 요약 (CP-49, 2026-11-15) — JSON presentation 채택, REPORT 부모 준비
+
+- U335 JSON-PRESENTATION을 main/origin/main `ba9889b33ff9d68c1b17461c9808c46a497ced89`에 채택·push했다. 구현 `7dfeef15563db698b30a899ff93f517d45b8f7ba`, 정확 후보 `016b02f7601cbdeac4698a82d88cbb68fde836c7`, 검증·병합 tree `94ea63b96b08efd404f8d0b25c41ea5ff66c7262` 일치. 4파일 +84/-11=95줄이다. N19 주석과 jsonLine 함수9줄은 src/presentation/json.ts의 순수 단일 원천으로 옮겼고 guard는 같은 binding을 재수출하며 app.ts는 import 한 곳만 바꿨다. plan alias·기존 exports/types·readonly·함수/prototype·예외·UTF16 escape/LF·가림/재파싱/await 본문을 보존했다.
+- PM의 exact 후보 실측: offline ci/typecheck/clean root build/GUI build·lock0, full unit4319 중4308pass/0fail/10skip/1TODO, integration684 중682pass/0fail/1skip/1TODO, GUI426/426, smoke227/227, CLI95 차이0, tracked/staged 비밀 검사0. 첫 unit은 단독 실행했고 재시도 없었다. 명령·원문은 pm-unit의 .codaryn/codex-u335-final-evidence/다. 고정 기준·기존 시험·패키지·설정 등 소유4파일 밖의 tracked 내용은 그대로다.
+- [V54 독립 검증](reviews/2026-11-15-v54-codex-verify-u335.md) 신규 H0/M0/L0 원문과 checked.json·입력13해시를 PM이 모두 확인했다. exact archive1379파일/fresh production build398출력, 원래25×두 legacy 진입점=50관찰 차이0(반환24/의도 예외26), 원본29봉인 전후 불변, 소스11+compiled guard1·binding23·strict 타입12조건+양방향6 통과. canonical=guard=plan 동일 객체와 namespace·readonly·함수 반사·constructibility를 별도로 확인했다. 새 준비/관찰 실패0, network/예상 밖 실제FS/fixture쓰기0이다. 원본 oracle·expected·normalization은 무수정이며 제한 출력 guard의 경로 한 곳만 가역 비교했다.
+- worker OLD58/후보61 및 source12는 worker 실행으로 구분한다. 최초 private TEMP/HOME이 설치 안쪽인 절차 오류를 제품 수정 없이 harness에서 outside-installation으로 고쳐 최종 type/build/61/source를 재실행했고 이전 결과를 보존했다. 반복을 새 고유 사례로 더하지 않았다. 과거 N19 narrow snippet-pin 추출 범위는 여전히 미확인이며 전체 guard/actual9줄의 직접 동일성으로 이동을 검증했다. U333 최초 u22 원인·U321 기존 경합 위험도 해결로 처리하지 않았다.
+- 새 통신 절차로 worker와 SEC의 STARTED/READY를 실제 회수하고 보고 본문·정확 SHA를 읽어 명시 ACK했다. worker HEAD를 PM 커밋으로 옮기기 전에 구현 보고 ACK를 마쳤다. SEC ACK 후 별도 호출의 literal 병합→동일 tree→staged 검사/공백→작성자·메시지 확인→PM 전용 push 순서를 지켰다. 감시의 idle 알림이 실제 후속 PM turn을 시작한 것도 확인했다. Claude/worker push 없음.
+- C11 구현 단위는 **9/10 채택**이다. 남은 REPORT presentation은 CHECK의 읽기 전용 소유/상태 closure 계획과 AUDIT의 INIT+JSON 뒤 실제 부모 V42 원본368호출/90조건·253봉인 gate를 확인한 뒤 연다. 과거 안전 replay 준비는 별도 old-parent 자료이며 새 actual 부모나 REPORT 후보 승인으로 쓰지 않는다. 이후 별도 최종 source union/fresh-dist CLI0·unknown0이 남았다. 전체 app→CLI0, 더 넓은 앱 masking/실제 API·모델/다른 OS·실제 TTY 완료를 아직 주장하지 않는다.
+
+## 진행 요약 (CP-48, 2026-11-15) — 세션 통신 적용·실제 수신 확인
+
+- 운영 통신 도구를 main `8caa83b6954d9076a915c15c10c086eda48740d0`에 채택·push했다. 정확 후보 `c22fa348fb40c692fe3356acefabb8835e6ae049`, tree `41c33a35e182265e5b60da1aa5b422c0c2dc46b1` 일치. 새 script·자체 시험·[사용 절차](workflows/session-communication.md) 3파일 +1183이며 제품/기존 시험/패키지/고정 기준은 바꾸지 않았다. 별도 PM 검토·staged 검사·작성자/메시지 확인 뒤 PM만 push했다.
+- [초기 독립 검토](reviews/2026-11-15-session-comms-initial.md)의 cwd/checkout 결함과 [첫 수정 검토](reviews/2026-11-15-session-comms-cwd-fix.md)의 Windows case 낮음1을 추가 커밋으로 고쳤다. [case 재검토](reviews/2026-11-15-session-comms-case-fix.md) 신규0/0/0 후에도 실제 송신에서 native CLI 인자 거부를 찾았다. 최초 UNKNOWN과 별도 진단을 보존하고 같은 작업을 재전송하지 않았다. native timeout 옵션을 제거하되 부모 프로세스10초 제한과 전달 접수 의미는 유지했고 [최종 독립 검토](reviews/2026-11-15-session-comms-transport-final.md)를 받았다. 실패를 성공으로 덮거나 이력을 재작성하지 않았다.
+- 통신77 통과, tracked/staged 비밀 검사0. 독립 원본77/원래7/원래20/CLI1 및 추가 경계 검사의 실행 결과·준비 오류·한계는 최종 보고를 따른다. 나머지1369 raw blob은 전체 검사한0e711과 동일하며 빌드/유닛4316 중4305pass·0fail/통합684 중682pass·0fail 증거를 입력 동일성으로 연결했다. c22fa에서 제품 전체 검사를 새로 실행한 것으로 세지 않는다.
+- [실제 통신 확인](reviews/2026-11-15-session-comms-live.md): 새 LOOP 지시→STARTED→READY→PM 보고 원문·SHA 확인→명시 ACK 완료. main 채택 후 기존 Codex5개도 canonical 절대 script로 같은 교육/통신 흐름을 수행하고 모두 closed ACK했다. Claude 배정/worker push 없음. 앞으로 파일이 기준이며 직접 Herdr 통지는 필수가 아니다. 전달 접수·착수·완료·인수·제품 채택을 구분하고 READY 후 worker는 정지한다.
+- PM watcher는 PM 권한 문맥에서만 실행하며 working 때 큐, idle/done과 확인된 정상 입력 footer에서만 metadata를 전달한다. PC 재시작 후 poll→미인수 회수→watch 재기동 순서다. 모호한 전송은 맹목 재송신하지 않는다. OS 전원/디스크/ACL·세션 재사용 등 한계와 실제 API 미검증은 유지한다.
+- C11 구현 단위는8/10 채택 상태다. 남은 JSON presentation→REPORT presentation→별도 최종 source union/fresh-dist CLI0·unknown0을 이어간다. JSON의 provisional7258 gate는 완료했고 이 운영·문서 채택 뒤 실제 부모 입력 동일성을 SEC가 확인한 후 LOOP 구현을 연다. U333 최초 u22 원인 미확정과 U321 등 기존 위험은 해결로 처리하지 않는다.
+
+## 진행 요약 (CP-47, 2026-11-15) — 앱 초기화 직접 연결 채택, 작업 세션 통신 보완
+
+- main/origin/main `dbdeab5d2493a2c0e6181397cd85ba592f4e3be3`: U334 APP-INIT-DIRECT 채택·push. 구현 `b0ebdb2f4e01ffb5ff17cb91b71fa2fe3284ef36`, 정확한 판 `2f5c4742cc7dead53c956ff8b064e7313cdf924a`, 검증·병합 tree `eecff415240391bfc6aa9e450414f113eeea30e9` 일치. app.ts의 private JSON facade와 createSettings 연결, 새 공개 시험만2파일 +195/-4=199줄이다. 기존 try/IO 평가순서·single outer await·JSON 완료/catch·wx 포트를 보존했고 CLI init 값·형 의존을 제거했다. 전체 app→CLI0을 선언하지 않는다.
+- PM 첫 전체 검사: offline ci·typecheck/clean build·GUI build/lock 통과. 유닛4316 중4305pass/0fail/10skip/1TODO, 통합684 중682pass/0fail/1skip/1TODO, GUI426/426(skip/TODO0), smoke227/227, CLI95 차이0, tracked/staged 비밀 검사0, 고정5파일 불변. 유닛은 다른 모드 전에 단독 실행했고 이번 판의 재실행은 없었다. `.worktrees/pm-unit/.codaryn/codex-u334-final-evidence/`에 원문·명령을 보존했다. U333 u22 최초 실패 원인은 미확정이며 해결로 처리하지 않았다.
+- [V53](reviews/2026-11-15-v53-codex-verify-u334.md) 신규 H0/M0/L0을 PM이 전체 읽었다. OLD10을 독립 fresh parent에서 먼저 통과시킨 뒤 같은 후보10·기존 관련90=후보 고유100개 통과, CLI40/APP16-182 차이0, 원본80/333/V52-3213봉인 전후 불변. 독립 소스14·Promise/receiver/getter13·타입10 equality+양방향2 조건 통과. 전체 app.ts는 허용6사이트만 다르고 fresh createSettings는 callee/comment 외 동일했다. 자체 도구 준비 실패2건과 worker OLD8pass/1잘못된 새 fixture 예상→제품 수정 전OLD10고정 이력을 보존했다. PM은 READY.json의 보고서/checked 해시도 확인했다.
+- 검증 원문과 전체 결과를 읽고, 별도 호출로 literal SHA 병합→tree 일치→staged 비밀 검사/공백→작성자·메시지 검사 뒤 오케스트레이터만 push했다. 관리 main과 원격의 추가 변경 없음도 먼저 확인했다. 문서 기록은 이 채택 뒤 별도 커밋이다.
+- 사용자가 진행률을 조회했을 때 LOOP는 READY였지만 Herdr elevated-server 접근 거부로 PM 직접 통지가 안 돼 대기 중이었다. PM이 파일·세션 상태를 직접 조회해 보고를 회수했고, `.codaryn/pm-tools/receipts/U334-pm-received.json`에 보고서SHA·기준·판·인수 상태를 남기고 LOOP에 ACK를 전달했다. 이 수신 확인과 제품 채택을 구분했다.
+- **사용자 추가 요청: 작업 세션 통신을 안정적으로 정리한다.** CHECK를 기존 claude-store의 별도 `ops/session-comms-codex-check`에 배정했다. 소유는 새 `scripts/pm-session-comms.mjs`, 자체 시험, `docs/workflows/session-communication.md`뿐이며 U334 판에는 포함되지 않는다. assignment→STARTED→READY→PM 수집/ACK를 지속 파일로 연결하고 Herdr 직접 통지는 보조 수단으로 둔다. 권한 거부·모호한 전송·중복·재시작·잘못된 세션/SHA/path·PM 승인 화면을 실패 경로로 검증한다. 현재 구현/검토 중이며 도구 완료·라이브 통신 검증·채택을 아직 주장하지 않는다. 별도 AUDIT 검토와 정확한 통합판 검사를 거쳐 PM이 채택한다.
+- 다음 제품 단위는 JSON presentation→REPORT presentation→최종 source union/fresh-dist CLI0·unknown0이다. 통신 보완을 먼저 인수해 이후 지시·완료 회수에 사용한다. Claude 배정/worker push 없음. 실제 API·키·외부 시험망 금지 및 이전 경쟁 경계·실제 API 미검증 한계는 유지한다.
+
+## 진행 요약 (CP-46, 2026-11-14) — 초기화 core 채택과 복구 후 검증
+
+- main/origin/main `db688901f395665e91f5547ae3e21b892391c309`: U333 INIT-CORE 채택·push. 구현 `b4a76402dbb0ff75da8f3c350bad3f20ff93224c`, 정확한 검증판 `f852df5892b80f17f62bafce42af80d205e4d280`, 검증·병합 tree `a0406098d084e1c6705516f9ff23d2c06f69d7dc` 일치. 5파일 +542/-296=838줄이며 상수·설정 생성·생성 규칙은 app/init-core·init-command에 단일 원천으로, 인자·질문·해석·표시는 CLI에 둔다. 기존6개 export와4개 binding을 보존하고 app/init.ts는 import 원천 한 곳만 바꿨다. app.ts 직접 연결은 아직이다.
+- PM 실측: 오프라인 ci·typecheck/clean build·GUI build/lock·tracked/staged 비밀 검사 통과. 최종 같은 판 유닛4306 중4295pass/0fail/10skip/1TODO, 통합684 중682pass/0fail/1skip/1TODO, GUI426/426(skip/TODO0), smoke227/227, CLI95 차이0, 고정5파일 변경 없음. 증거는 pm-unit의 `.codaryn/codex-u333-recovered-final-evidence/`와 별도 유닛 재실행 `.codaryn/codex-u333-retry1/`이다. 전체 결과와 독립 원문을 읽고 별도 호출로 literal SHA를 병합해 tree·staged scan·작성자/메시지를 확인한 뒤 PM이 push했다.
+- **최초 전체 유닛은 실패1이었다.** u22 only-busy report가 run_in_progress 대신 run_not_found였다(4306/4294pass/1fail/10skip/1TODO). 제품·시험을 바꾸지 않고 다른 전체 검사 종료 뒤 같은 SHA로 재실행해 위 최종 실패0을 확인했다. [독립 분석](reviews/2026-11-14-u333-unit-flake-analysis.md)은 관련9소스 동일과 busyOn이 damaged 목록도 준비 완료로 받는 기존 빈틈을 확인했다. OLD/후보 제한 재현 각1회는 둘 다 통과했다. **실제 최초 원인은 미확정**이며 초기 journal 경합은 가능한 설명이다. 최초 실패를 성공으로 덮지 않았고 U333의 직접 회귀 근거를 찾지 못한 것과 모든 timing의 보장을 구분한다. 이 기존 위험은 미해결 후속 항목이다.
+- [V52](reviews/2026-11-14-v52-codex-verify-u333.md) 신규 H0/M0/L0. 별도 exact archive/fresh build에서 원래 CLI40·APP16/182 차이0, 봉인80/333/637 불변, 독립 소스69검사·strict 타입12조건·공개 binding/Promise9검사 통과. 관련 고유92개 중 최초91pass/1검증 guard 실패 뒤 sp0 파일2개만 재실행해2pass(중복1)를 기록했다. 최초 실패는127.0.0.1 모의 서버까지 막은 검증 guard였고 제품/시험은 고치지 않았다. SEC 원문은 실패·도구 수정·한계를 구분한다. 증거3213개 봉인도 PM이 재확인했다.
+- 커밋 전 staged 비밀 검사가 합성 fixture 표기1건을 거부했다. 커밋 없이 지정5파일만 unstage한 뒤 담당자에게 반환했고, 계산 property 한 줄로 실행 이름·합성 값을 동일하게 유지했다. 제품4파일 hash 불변, OLD12·HEAD92·타입/binding/source42 및 실제 staged 검사0 뒤 커밋했다. 원래 실패 로그·봉인·기대값을 보존했고 scanner를 바꾸지 않았다.
+- runInit의 AsyncFunction→일반 Function 반사 차이는 C10/U331과 같은 허용된 경계로 공개한다. 실제 Promise·예외·microtask·receiver/getter·질문 await와 동기 finish는 보존했다. init wx 생성을 CAS writer로 합치지 않았다. 전체 app→CLI0이나 최종 그래프 완료를 선언하지 않는다.
+- 다음 U334 APP-INIT-DIRECT는 LOOP가 app.ts의 createSettings/직접 필요한 helper·import와 새 공개 시험만 맡고 PROBE가 독립 검증한다. 실제 채택 부모의 source/원래 CLI40+APP16 gate를 확인한 뒤 구현을 연다. JSON→REPORT→최종 source union/fresh-dist CLI0·unknown0은 이후다. Codex만 배정하고 결과 수신·검토·통합·push는 오케스트레이터가 맡는다. 실제 API·키·외부 시험망 금지와 U321 경쟁 경계 등 기존 한계는 유지한다.
+
+## 진행 요약 (CP-45, 2026-11-14) — 강제 종료 복구와 Codex 재교육
+
+- 사용자 재개 지시로 codex-review가 Codaryn 오케스트레이션을 이어간다. 최신 사용자 지시: Claude에는 토큰 소진으로 업무를 배정하지 않는다. 기존 Codex 작업 지시는 재확인 없이 직접 전달한다. 작업자는 결과를 오케스트레이터에게 제출하며 **원격 push는 오케스트레이터만 수행한다**. 다른 프로젝트의 세션은 배정하지 않았다.
+- 복구 기준은 main/origin/main `88484a844d9c093f5da3d971b5d5ddaa73af7a58`(CP44 기록)이다. 초기 main은 깨끗했고 기존 worktree를 모두 조회했다. U333의 `claude-store` / `unit/U-333-codex-check`에 중단 전 새 시험 `tests/unit/app/u333-init-command.test.ts` 하나가 미추적으로 남아 있어 보존·재사용을 명시했다. 나머지 기존 worktree 11개에는 변경 표시가 없었다. 새 worktree를 만들거나 기존 변경을 지우지 않았다.
+- OPTIONAL(`w3:t3`)·OPTIONAL-sub(`w3:t5`)의 기존 Codex 다섯 worker를 확인하고 역할 이름을 복구했다. `codex-check`(`w3:pD`)는 U333 구현, `codex-sec`(`w3:pC`)는 V52 독립 검증, `codex-loop`(`w3:p8`)는 U334 후속 구현, `codex-probe`(`w3:pF`)는 U334 독립 검증, `codex-audit`(`w3:pE`)는 REPORT 독립 감사 준비를 맡는다. PM은 `w3:p3`이다. Claude pane에는 업무를 보내지 않았다.
+- 다섯 worker에게 main AGENTS·personas·development-workflow·CP44·현재 배정표를 읽히고 역할, 소유 파일/worktree/브랜치, 완료 기준, 금지사항, OLD 확인→구현→정확한 통합판 전체 검사→독립 검증→PM 채택 순서를 복창하게 해 확인했다. 현재 CHECK만 제품을 구현한다. 나머지는 각자 교육 기록만 지정된 ignored 경로에 남기고 기준을 동결한 채 대기한다. 모든 worker의 직접 push를 금지했으며 CHECK는 stage/commit도 하지 않고 READY 후 명령을 정지한다.
+- PM이 기존 SEC 실제 부모 `88484a84` gate 보고를 다시 읽었다(CLI40+APP16/182조건 차이0, 원본 및 새637봉인 보존). 이는 중단 전 검증 증거이며 이번 후보 검증으로 세지 않는다. 재개 후 CHECK의 기존 제품 새 빌드에서 새 공개 시험 12개 통과 로그를 확인했다. CP44의 전체 검사 결과는 이전 실행 기록이며 재부팅 후 전체 검사 완료로 기록하지 않는다. U333은 아직 구현·후보 전체 검사·V52·채택 전이다.
+- 다음 순서는 U333 READY 검토→PM 커밋과 정확한 통합판 전체 검사→SEC V52→SHA/tree·staged 비밀 검사·작성자/메시지 확인 후 PM 채택·push→실제 부모를 지정해 LOOP U334를 연다. JSON·REPORT·최종 그래프는 그 뒤다. 기존 corpus/oracle/expected/seal·실패 기록을 보존한다. 실제 API·키 조회·외부 시험망 금지, 이력 재작성·새 worktree 금지 및 U321 경쟁 경계 등 기존 미해결 한계는 유지한다.
+
+## 진행 요약 (CP-44, 2026-11-14) — 앱 모델 직접 연결 채택, 초기화 core 준비
+
+- main/origin/main `d3db0d26d2ae95cf126e7c8a5607023567254c83`: U-332 APP-MODELS-DIRECT 채택·푸시. 구현 `8a864de3`, 최종 판 `1575bde19948162612bf1af1d3e49ccc28a04375`, 검증·병합 트리 `b8761df68721d67554ccf34a18445cc80d599077` 일치. 두 파일 +193/-5=198줄이다. app.ts는 모델 core와 canonical hook형을 직접 쓰고 private Promise adapter에서 기존 JSON·가림을 완료한다. CLI/core/writer/계약/기존 시험은 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,294 중 4,283 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u332-final-evidence/`. 전체 결과 후 독립 검증을 열고 최종 보고·트리·staged 검사를 읽은 뒤 별도 병합했다.
+- [V51](reviews/2026-11-14-v51-codex-verify-u332.md) 높음 0/중간 0/낮음 0. 원래 CLI85/541·APP20/157=105사례/698조건 차이0·205+335봉인 불변. 후보32와 같은 assertion OLD10 통과, 소스40비교·strict hook/Promise 타입 통과. 전체 app.ts는 명시한6경계만 다르고 models 본문은 callee 외 동일하다. pretry 요청/env 복사·io 구성·1await/jsonOutcome/catch·가림과 getter/this·지연 Promise를 유지했다. 공개 함수 종류도 유지했다.
+- 초기 OLD의 8통과/1실패/1cancel은 Windows 합성 fixture 경로 비교 오류였고 app.ts 수정 전 path.resolve로 바로잡아 OLD10을 먼저 고정했다. 최초 컴파일/TS5112/EOL 경고 도구 오류도 보존했으며 독립 검증자가 원문 이력을 별도로 보존했다. 후보에 맞춰 기존 oracle·기대값을 고치지 않았다.
+- 모델 core→앱 연결의 두 단위가 끝났다. 앱은 CLI models의 값·형을 직접 가져오지 않으며 CLI는 같은 앱 core와 writer를 쓴다. guard/report/init 의존은 남으므로 전체 app→CLI 0은 아직 선언하지 않는다.
+- 다음 U-333 INIT-CORE는 codex-check가 helper 포함 core 한 벌과 CLI 외피를 맡고 app.ts는 제외한다. 새 app/init-core.ts·app/init-command.ts, CLI init.ts, app/init.ts의 canonical import, 새 공개/경계 시험을 약950~1300줄로 예상한다. 1500줄 초과 전망이면 helper만 먼저 별도 단위로 분리한다. 질문·숫자/언어 해석·표시를 CLI에 남기고 원래 async question/direct ask/lister·finish 순서를 보존한다. init wx 생성과 CAS writer를 통일하지 않는다. 실제 MODELS 뒤 부모 source gate와 CLI40+APP16 원래 기준을 먼저 확인한다. 앱 직접 연결은 그 뒤 별도 U-334다.
+- SEC는 기존 CLI40/APP16을 안전하게 재사용할 provisional 실행 경로를 준비하고 AUDIT는 고정 root를 요구하는 V42 보고서 oracle의 add-only head/출력 격리를 준비한다. 원본 corpus/봉인/기대값/예전 실행 파일은 그대로 두며 안전한 격리를 확인하지 못하면 진행하지 않는다. 그래프 v2와 독립 재검토는 동결됐고 실제 최종 C11 판의 source union/runtime CLI0·unknown0 검사는 아직 남았다. API·키·외부 시험망 금지 및 이전 사용자 질문·한계는 그대로다.
+
+## 진행 요약 (CP-43, 2026-11-14) — 모델 core 채택, 앱 직접 연결 준비
+
+- main/origin/main `474c26c6cd5e0f878a697990be6e42d31a65f149`: U-331 MODELS-CORE 채택·푸시. 구현 `e69587cc`, 최종 판 `b6f610b88f0b5ff9eb5c9f4462ee8989d3ca290b`, 검증·병합 트리 `19c8f4e91711163ae6b33d31ee68d11843223bf9` 일치. 세 파일 +519/-298=817줄이다. app/models-command.ts가 규칙·내부 포트와 원래5await를 소유하고 CLI는 파서·질문·renderer·카탈로그·최종 가림을 유지한다. app.ts·계약·writer·고정 파일은 바꾸지 않았다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,284 중 4,273 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u331-final-evidence/`. 결과를 읽고 독립 검증을 연 뒤 최종 보고·정확한 트리·staged 검사를 확인해 별도 병합했다.
+- [V50](reviews/2026-11-14-v50-codex-verify-u331.md) 높음 0/중간 0/낮음 0. 원래 CLI85/541·APP20/157=105사례/698조건 차이0,205+335봉인 불변. 관련95·프로세스40=135시험과 OLD 공개8 대조 통과, 소스40비교·타입 호환 통과. renderer/catalog/helpers·currentModel과 flow의 지정 callback 경계 외 원문이 같고, core type83/runtime45 전이에서 CLI0이다. 전체 앱 의존0은 아직 아니다.
+- runModels의 AsyncFunction→일반 Function 및 constructibility/prototype 차이는 공개한다. 실제 소비자는 await Promise 계약을 사용하고 parse 거부/동기 예외/core Promise 직접 반환·기존 getter/this·5await·동기 완료 순서를 보존했다. C10과 같은 기술 경계로 수용하며 새 함수 반사 계약을 선언하지 않는다. 값·형·공개 CLI runtime export 네 개는 유지했다. raw key/context는 같은 프로세스 내부 completion에만 있고 공개 결과/IPC를 늘리지 않았다.
+- 다음 U-332 APP-MODELS-DIRECT는 codex-check 구현/codex-probe 검증으로 app.ts의 models/import·동형 hook형과 새 공개 시험만 소유한다. 기존 pre-try 요청/env 복사, io literal 평가 순서, private Promise adapter, jsonLine→scrub→전체 hideKeys→기존 jsonOutcome을 유지한다. 원래105기준을 다시 적용하며 core/CLI/계약/기존 시험은 제외한다. PM은 검증 후보→채택 전체 트리와 문서 전용 부모의 제품/빌드 입력 동일성을 기계적으로 확인해 실제 부모 gate를 기록한 뒤 구현을 연다. 이 연결은 새 판의 재생 성공으로 세지 않는다.
+- INIT은 실제 소스분량상 helper 포함 core 약950~1300줄→앱 직접 연결 약180~350줄이 기본안이다. 실제 core가1500줄을 넘을 전망일 때만 helper 단위를 먼저 분리한다. CLI suggestedScripts와 앱 scriptsIn의 protected-lstat/직접fs 순서는 합치지 않고 init의 wx 생성을 CAS writer로 통일하지 않는다. 실제 MODELS 뒤 부모 확인과 CLI40+APP16 기준은 그대로 필요하다.
+- [그래프 v1 도구 검토](reviews/2026-11-14-graph-tool-v1-review.md)의 runtime builtin alias 중간1은 [동결 v2 재검토](reviews/2026-11-14-graph-tool-v2-review.md)에서 닫혔다. 원래30입력147파일·추가8회귀/총38확인, source/runtime 실제 재현이 모두 incomplete로 막히고 새 발견0이다. v1/v2 봉인1282/889와 OLD source955/runtime549 CLI12/unknown0·입력/출력 핀을 보존했다. 도구 재사용 READY일 뿐 최종 C11의0 판정이 아니며 실제 최종 판 archive/fresh build/혼합source union+runtime CLI0/unknown0이 모두 필요하다. 실제 API·키·외부 시험망 금지 및 이전 질문·한계는 그대로다.
+
+## 진행 요약 (CP-42, 2026-11-14) — 설정 writer 채택, 모델 core 준비
+
+- main/origin/main `9a0f33284f047af9f5a48c2da5782ccc5f466b8d`: U-330 CONFIG-WRITER 채택·푸시. 구현 `1af048d4`, 최종 판 `4b8598f88aa535594366b50bee6f7cea0288d14a`, 검증·병합 트리 `c26ef3c06efd851607280e4efeee28b2fec64889` 일치. 네 파일 +240/-86=326줄이다. app/config-write.ts가 writer 단일 원천이고 CLI는 같은 두 함수·형을 재수출한다. LF/BOM은 내부 공유이며 CLI public export는 네 개 그대로다. settings-change의 import 한 줄 외 소비자·모델 선택/질문/renderer·app.ts는 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,272 중 4,261 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u330-final-evidence/`. 집계 후 독립 검증을 열고 최종 보고를 읽은 뒤 별도 병합했다.
+- [V49](reviews/2026-11-14-v49-codex-verify-u330.md) 높음 0/중간 0/낮음 0. 원래 26관찰(계약 안25/밖JS1) JSON bytes 동일·14봉인 유지, 공개14+관련130+프로세스40=184시험 통과. 8블록/주석·CLI 나머지·settings import만 확인, 같은 함수 binding·옵션형·오류/cleanup 우선순위 유지. 새 core의 runtime은 builtin3, type 폐쇄의 CLI 도달0이며 전체 앱 의존0을 선언하지 않았다.
+- 별도 [모델 소비자 검증](reviews/2026-11-14-u330-models-consumer.md)도 높음 0/중간 0/낮음 0이다. CLI85/541·APP20/157=105사례/698조건 차이0, 원래205+335봉인 불변. writer 이동 후에도 모델 호출·가림·getters/Promise 경계가 같다. 실제 post-writer M1 부모 확인 전에는 구현 승인으로 쓰지 않는다.
+- 작업자 최초 프로세스37통과/3실패는 설치 내부 TEMP 설정 오류였고 제품 수정 없이 외부 전용 TEMP로 해당 두 파일만 재실행40통과했다. 최초 로그 및 독립 검증 도구 초기 오류는 보존했다. READY 후 PM 커밋에 따라 작업자의 oldHEAD assertion이 멈춰 final-state.json은 생성되지 않았다는 정정을 받았다. 소스 네 해시는 같았으며 없는 파일을 증거로 쓰지 않고 정확한 판을 새로 전체·독립 검증했다.
+- [V48 해시 출처 보충](reviews/2026-11-14-v48-hash-format.md): archive CRLF와 raw Git LF는 594줄/594바이트 차이이고 줄 끝만 변환하면 양방향 bytes 동일하다. V48의 두 형식 지문은 모두 맞으며 고정판·채택판·문서판의 raw blob도 같다. 기존 보고서·봉인·기대값을 고치지 않았다.
+- 다음 U-331 MODELS-CORE는 codex-loop 구현/codex-probe 검증으로 새 app/models-command.ts·CLI models.ts·새 관련 시험을 소유한다. app.ts와 공개 계약은 제외하고 core와 앱 직접 연결을 직렬로 나눈다. 실제 채택 부모 source gate 후 시작하며 sync completion·기존 ask Promise·getter/this·최종 JSON/전체 가림 순서를 보존한다. CLI85와 APP20을 core 단계부터 함께 검증한다. 1,500줄을 넘는 논리 폐쇄는 별도 분할한다.
+- 최종 그래프 도구의 독립 검토에서 package imports alias가 node:module로 해석되는 합성 runtime 사례의 거짓0을 찾았다. 같은 사례는 source에서 incomplete여서 이중 게이트 우회·제품 결함으로 주장하지 않는다. 원본 도구/30사례/봉인은 보존하고 SEC가 별도 v2에서 실제 해석 뒤 capability를 판정하도록 수정 중이며 AUDIT 재확인 전 최종 완료에 쓰지 않는다. 기존 API·키 파일·외부 시험망 금지, 사용자 질문과 한계는 그대로다.
+
+## 진행 요약 (CP-41, 2026-11-14) — 전체 파서 채택, 설정 writer 준비
+
+- main/origin/main `056ed984730df0932ca0fab1e1059bfc551215d3`: U-329 C11-ARGS 채택·푸시. 구현 `dac2ad05`, 정확한 최종 판 `79371e7d19b7abb28bc1415d5000420e3d5dad2b`, 검증·병합 트리 `94630692419f510f0319e094f19bee00748c51a2` 일치. 네 파일 +644/-595=1,239줄이다. 원래 594줄 parser는 app/input/args.ts로 옮기고 상대 import 7곳만 바꿨다. CLI args.ts는 모든 값·형의 재수출, app.ts는 import 원천 한 줄만 바꿨다. 기존 runs 전용 파서는 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,258 중 4,247 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u329-final-evidence/`. 종료 집계 후 독립 검증을 열고 최종 보고를 읽은 뒤 정확한 SHA·트리로 별도 병합했다.
+- [V48](reviews/2026-11-14-v48-codex-verify-u329.md) 높음 0/중간 0/낮음 0. 원래 262호출/399조건 차이 0, 옛/새 26값 Object.is 동일, 10함수·15문자열 bytes·contracts 정규식 binding 유지, 18옛 경로 형·18개 양방향 및 canonical 3형 호환 통과. 관련 204시험·c01 프로세스 24시험 통과, 원래 25봉인 불변이다. parser JS는 contracts 경로, app TS/JS는 parser import 외 동일하다. source map까지 동일하다고 주장하지 않는다.
+- adapter-contract 현재 입력 그림·의존 설명·7.2 상태만 갱신했다. 과거 U308 실측 및 옛 main의 설계 이력은 보존했다. CLI 계약의 동작이나 문구는 바꾸지 않았다. 전체 app→CLI 의존 0은 아직 아니다.
+- 다음 U-330 설정 writer는 codex-check 구현/codex-loop 독립 검증이다. 새 app/config-write.ts·CLI models facade·app/settings-change.ts import·새 공개/fs 시험만 소유하고 app.ts·app/models.ts·모델 선택/질문/renderer는 제외한다. LF/BOM은 새 앱 모듈의 내부 export를 CLI에서 local import하며 CLI public export에 더하지 않는다. 원래 오류 우선순위·원자 쓰기·모델 ID 무검증을 보존한다. LOOP가 채택280d148e에서 원래 26관찰(계약 안25/밖JS1)·14봉인·8블록 동일을 확인했으나 실제 post-ARGS 부모의 좁은 확인 전 구현하지 않는다.
+- 모델·초기화 후속은 core와 앱 직접 연결을 나눠 채택한다. PROBE의 앱 모델 OLD 20사례/157조건·335봉인과 앱 초기화 OLD 16사례/182조건·333봉인을 준비했다. SEC의 CLI 초기화 OLD는 40조건/40호출(반환35·거부5, 계약 밖 exists 거부1 포함)·같은 OLD 차이 0·80봉인이다. 봉인 전 Symbol 메타데이터 저장 오류의 폐기 실행은 최종 수에 가산하지 않았다. 기존 CLI 모델 85/541과 함께 잠정 기준으로 보존한다. 각 실제 부모 확인과 core 채택 때에도 CLI·앱 기준을 함께 재생해 기존 wrapper 소비자의 경계를 확인한다.
+- SEC는 기존 TypeScript 7 native AST/해석기와 fresh dist를 쓰는 최종 그래프 감사 도구를 자기 폴더에서 준비한다. 타입·동적 import·require·재수출·중립 경유 및 불명 경로를 구분하며 정규식 검색이나 예외 목록으로 0을 선언하지 않는다. 아직 최종 후보 검증이 아니다. 실제 API·키 파일·외부 시험망 금지 및 이전 사용자 질문·기존 한계는 그대로다.
+
+## 진행 요약 (CP-40, 2026-11-14) — 공용 정리 B 채택, 전체 파서 이동 준비
+
+- main/origin/main `67d974b902e4115d12ab3d60d72866de902050b9`: U-328 SHARED-B 채택·푸시. 구현 `b7c237ff`, 실제 채택 A 부모 `400c12ae`, 정확한 최종 판 `3b1bf0300d870c4250b5cce736b0c95add1e5a7d`, 검증·병합 트리 `7cc341efb595524c07971014eeee6bc909598c89` 일치. 다섯 파일 +119/-84다. changes-plan-output의 순수 closure만 앱 원천으로 이동했고 옛 CLI와 human index는 같은 값·형을 재수출한다. CLI runIdOf·renderer·질문 tail, app.ts와 A의 reader/resolver는 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,230 중 4,219 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u328-final-evidence/`. A 채택 후 새 union 판의 결과를 읽고 독립 검증을 열었으며 최종 보고를 읽은 뒤 별도 병합했다.
+- [V47](reviews/2026-11-14-v47-codex-verify-u328.md) 높음 0/중간 0/낮음 0. 실제 A 부모 15소스 동일, 원래 24사례/48관찰·mask 102호출 차이 0, 관련 72시험 통과, 새/legacy/barrel binding·타입 호환과 원문 closure/tail 확인. 독립 타입 명령 최초 두 번의 설정 오류를 보존했고 명시적 Node 타입 설정의 최종 명령은 실제 종료 0이었다. 원래 34봉인과 expected/harness 불변이며 전체 앱 의존 0 선언은 아니다.
+- 다음 U-329 전체 args는 codex-loop 구현/codex-audit 검증으로 직렬 분리한다. 새 app/input/args.ts에 원래 파서 전체를 옮기고 CLI args.ts는 모든 값·형의 같은 binding 재수출, app.ts는 import 원천 한 줄만 바꾼다. 파서 규칙·문구·요청 변환·runs 전용 파서·고정 파일은 바꾸지 않는다. 채택 후 실제 부모의 source gate 확인 전 구현하지 않는다. 잠정 기준은 262호출/399조건·26값/18형·25봉인이다. B의 승인된 plan-view import 변경은 설명해서 대조하며 옛 88개 type 폐쇄 목록을 억지로 유지시키지 않는다.
+- 후속 writer는 codex-check 구현/codex-loop 검증으로 분리한다. 실제 소비자는 app/settings-change.ts이며 app/models.ts는 writer를 쓰지 않는다. 새 config-write·CLI models facade·settings-change import·새 관련 시험만 한 단위로 삼고 app.ts·모델 선택/질문/renderer는 제외한다. LF/BOM은 내부 공유 상수로 두고 CLI에서 재수출하지 않는다. 실제 post-ARGS source gate와 기존 26관찰을 먼저 확인한다.
+- models core의 독립 OLD 기준은 codex-probe가 eddd72df 자체 archive에서 85사례/541조건·같은 OLD 차이 0·205봉인으로 준비했다. 오류 outcome 31·거부 Promise 10은 의도한 관찰이며 실제 원자 쓰기 검증은 별도 writer 기준이다. 실제 post-args/writer 부모 확인 전 잠정이다. 모델/초기화 core와 app direct를 각각 나누고 JSON·report·최종 AST/fresh-dist 그래프를 뒤에 둔다. 기존 API·키 파일·외부 시험 네트워크 금지, 사용자 질문과 기존 한계는 그대로다.
+
+## 진행 요약 (CP-39, 2026-11-14) — 공용 정리 A 채택, B 통합 검증
+
+- main/origin/main `38d4591e5d4a3cbe4a37b681066d02f9c3ed31bd`: U-327 SHARED-A 채택·푸시. 구현 `35eb7006`, 최종 판 `4c05d17378d71f643c14af7ee8bd83b992401b2c`, 검증·병합 트리 `4385e6f064c6d8ae8da8e1915068f55321be711d` 일치. 네 파일 +25/-9다. app.ts의 기존 앱 환경형 참조와 reader/resolver 원천 import만 정리했고 새 공개 포트는 없다. 컴파일한 app.js 55,889바이트가 OLD와 같고 옛 CLI 함수 binding도 유지했다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,229 중 4,218 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 증거 `.worktrees/pm-unit/.codaryn/codex-u327-final-evidence/`. 종료 집계를 읽은 뒤 독립 검증을 열고 최종 보고를 읽은 뒤 정확한 SHA를 별도 병합했다.
+- [V46](reviews/2026-11-14-v46-codex-verify-u327.md) 높음 0/중간 0/낮음 0. 불변 V44 60사례/604조건 차이 0, 31+9봉인 불변, strict 타입 호환 검사와 옛 경로 함수 5개 identity 통과. 관련 93개 고유 사례는 최초 92통과/1환경 실패였으며, 빠진 PowerShell PATH를 보완한 뒤 실패 사례 하나만 재실행해 통과했다. 최초 전체 명령의 종료 1과 재실행 로그를 보존했으며 처음부터 전체 통과였다고 처리하지 않았다.
+- U-328 B는 codex-check의 구현 `b7c237ff`로 다섯 파일 +119/-84를 동결했다. 순수 changes 계획 출력 closure만 이동하고 CLI 질문·renderer는 남긴다. 이 문서가 채택된 A main에 B를 합친 정확한 별도 판에서 PM 전체 검사 후 codex-sec의 V47을 받는다. 작업자 옛 기준에서의 시험으로 최종 union 검증을 대신하지 않는다. 다음 args·writer·models·init·표시·최종 그래프는 기존 순서이며 app.ts 작성자는 계속 한 명이다.
+- codex-probe는 자체 새 archive에서 models 명령의 OLD 비교 기준만 준비한다. 제품 수정은 없고 실제 args/writer 뒤 parent의 원천 확인 전 구현을 열지 않는다. API·키 파일·외부 시험 네트워크 금지, 사용자 확인 대기와 기존 한계는 그대로다. 전체 app→CLI 의존 0을 아직 선언하지 않는다.
+
+## 진행 요약 (CP-38, 2026-11-14) — C10 완료, 공용 정리 분담
+
+- main/origin/main `ae90664b6180c965c3c23aea50e23eed7c0ec674`: U-326 APP-DOCTOR 채택·푸시. 구현 `a70c71cc`, 최종 판 `de99a20d86905ca035559b835db5d60b946af90e`, 검증·병합 트리 `7f35dc0faef78e70491c39eda5c25b08c0a647a6` 일치. app.ts doctor/import와 새 공개 시험 두 파일만 +193/-4다. 요청·io 구성 원문, inner Promise 한 번 await, 동기 completion의 JSON/전체 가림, 기존 결과·예외 변환을 유지했다. C10의 helper→core→앱 연결 세 단위가 모두 채택됐다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,224 중 4,213 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 결과를 읽은 뒤 V45c를 열고 최종 독립 보고를 읽은 뒤 별도 병합했다. 증거 `.worktrees/pm-unit/.codaryn/codex-u326-final-evidence/`.
+- [V45c](reviews/2026-11-14-v45c-codex-verify-u326.md) 높음 0/중간 0/낮음 0. 원래 119+보충 22=141관찰 동일, 후보 88시험·OLD 20시험 통과, 공개 앱 Promise/결과 6쌍 및 CLI 8쌍 차이 0, 입력 101개·봉인 불변. core/types/helper/CLI/args/guard/command-outcome 7파일 바이트 동일. 공개 결과나 IPC에 raw context를 추가하지 않았다. 전체 app→CLI 의존 0은 아직 아니며 C11이 남았다.
+- 이행 계획의 문서 절차에 따라 adapter-contract 3절 현재 구조와 7.2 상태 열만 갱신했다. 옛 main b386166/6ef6e3a의 설계·실측 수치는 이력으로 보존했다. CLI 계약에 migration C10 doctor의 낡은 물리 위치 표기는 없어 변경하지 않았고, U100 설계 공백 C-10을 혼동해 고치지 않았다. 원래 호출 경로의 다른 역사 서술을 이번 문서 정정에 섞지 않았다.
+- 다음 공용 정리는 U-327 A(이미 앱에 있는 포트형·reader/resolver 원천 직접 참조)와 U-328 B(순수 changes 계획 출력 closure 이동)로 나눈다. A는 codex-loop가 기존 adapter worktree에서 app.ts의 타입 주석/import·run-events/runs import만, B는 codex-check가 기존 store worktree에서 새 changes-plan-output·옛 CLI human facade·changes-plan/plan-view import만 소유한다. B는 app.ts를 수정하지 않으며 새 command-ports나 중복 포트 interface는 필요 없다.
+- 이 두 단위는 소유 파일이 겹치지 않으므로 채택된 같은 C10 기준에서 각각 OLD oracle/source gate를 닫은 뒤 구현을 병렬로 열 수 있다. 통합은 A를 먼저 전체 검증·독립 검토·채택하고, B는 A가 채택된 main과 B 단위로 만든 정확한 별도 판에서 다시 전체 검증·독립 검토한다. A 검증자는 codex-audit(기존 V44 원본), B 검증자는 codex-sec(새 순수 출력 기준)이며 구현자와 분리한다. 그 밖의 app.ts 후속은 기존 직렬 순서를 유지한다.
+- B 잠정 기준은 codex-sec가 bb382b04의 공개 helper 24사례×두 legacy 경로=48관찰·같은 기준 차이 0·관련 16통과·34파일 봉인으로 준비했다. A는 실제 채택 parent에서 기존 V44 60사례/604조건과 31+9봉인을 확인한다. 소스 확인 전 구현을 열거나 새 결과로 기대값을 재생성하지 않는다. args/JSON/writer의 잠정 기준은 그대로 보존한다. 실제 API·키 파일·외부 시험 네트워크 금지, 사용자 출력 질문과 기존 위험은 이전 CP 범위 그대로다.
+
+## 진행 요약 (CP-37, 2026-11-14) — doctor core 채택, 앱 연결 준비
+
+- main/origin/main `4034eb77b6397a6571574c8e5ed33c1175300bdb`: U-325 C10-2 core 이동 채택·푸시. 구현 `3c01d767`, 최종 판 `62cfd5d30cc5377ac64915228ce59e87d9703f4a`, 검증·병합 트리 `27d503322e3d93abf549ac4c53097de50b0e7dc2` 일치. 소유 4파일 +706/-635=1,341줄. 새 checkDoctor가 점검을 맡고 CLI는 파서·동기 completion 안의 원래 표시/가림을 유지한다. app.ts·기존 helper·renderer는 그대로다.
+- 최초 미커밋 후보의 await checkDoctor가 I/O 없는 호출에도 새 중단점을 만들었다. PM 재현에서 호출 직후 terminal 옵션을 바꾸면 출력이 1,342→1,744자로 달라져 채택하지 않았다. 동기 completion과 core Promise 직접 반환으로 고쳤다. 정확한 OLD의 고정 scheduling 8시험은 기준 8통과 → 거부 후보 2통과/6실패 → 수정 8통과이며 trace·출력 bytes/hash도 일치했다. 이전 289시험 통과만으로 이 회귀가 없었다고 처리하지 않았다.
+- CLI runDoctor는 Promise<CommandOutcome> 서명·예외 거부·관찰 순서를 유지하는 일반 Promise 반환 함수다. AsyncFunction constructor 종류는 달라진다는 점을 숨기지 않고 PM이 구현 경계로 수용했다. 실제 제품 소비자가 모두 Promise 계약을 사용하고 함수 종류를 검사하지 않음을 독립 검토했다. 광범위 reflection·전역 monkeypatch를 새 공개 계약으로 만들지 않는다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,212 중 4,201 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 실패 0을 읽은 뒤 독립 검증을 열고 최종 보고·정확한 트리·staged 검사를 읽은 뒤 별도 병합했다. 증거 `.worktrees/pm-unit/.codaryn/codex-u325-final-evidence/`.
+- [V45b](reviews/2026-11-14-v45b-codex-verify-u325.md) 높음 0/중간 0/낮음 0. 원래 119관찰 + 새 OLD scheduling 22개 = 141개 동일, 관련 76시험 통과, 동일 고정 scheduling의 OLD/후보 8쌍 동일. 원래 봉인·입력 101개 불변. 보충의 v1은 Symbol 진단 저장 오류로 폐기·보존하고, 손실 없이 기록한 별도 v2만 OLD 재생 차이 0을 확인해 사용했다. 후보로 기대값을 재생성하지 않았다. 12개 await 지점과 renderer/helper/app.ts 바이트가 유지됐고 private currentKey 문맥은 공개 결과·IPC에 추가하지 않았다. core 런타임 폐쇄 79모듈의 CLI 도달 0은 전체 앱 의존 0 선언이 아니다.
+- 다음 U-326 APP-DOCTOR는 어댑터 구현 경험이 있는 codex-loop의 기존 `.worktrees/claude-adapter`에 맡긴다. app.ts doctor/import와 새 공개 경계 시험만 직렬 소유하고 core/CLI/계약은 동결한다. codex-audit의 읽기 전용 준비안대로 request getter는 기존 try 앞, 전체 io/env/default 구성은 parse 앞, parse 거부도 inner Promise 한 번 await, completion의 jsonLine→전체 hideKeys→기존 jsonOutcome 순서를 지킨다. 구현 전 실제 채택 기준에서 공개 getter/완료 순서 시험을 먼저 실행한다. 독립 검증은 codex-probe다.
+- C11 writer 잠정 기준은 codex-loop의 별도 archive에서 원래 공개 함수 26관찰·같은 기준 차이 0·14파일 봉인으로 준비됐다. 그중 25개는 타입 계약 안, 1개는 지원되지 않는 provider 문자열을 넣은 JS 관찰임을 분리했다. 지원 제공자는 anthropic/openai 두 개이며 Gemini 지원을 주장하지 않는다. 보고 문구만 고쳤고 기대값/harness/seal은 보존했다. 그 단위 구현은 다른 담당에게 배정한다. 기존 실제 API·키·외부 시험 네트워크 금지와 출력 질문·남은 위험은 그대로다.
+
+## 진행 요약 (CP-36, 2026-11-14) — doctor helper 채택
+
+- main/origin/main `cf6868bf0de8dfbcca7bbb71c76939306cbf4532`: U-324 C10-1 helper·점검 포트 이동 채택·푸시. 구현 `fc40e42f`, 최종 판 `68e74aed42c0b28e675db2724c995442050a1b07`, 검증·병합 트리 `6a78f509bdb13ad06f5447c184e5e3d55319c7d8` 일치. 지정 4파일 +436/-346=782줄. 새 doctor-checks/types가 단일 원천이고 옛 CLI 값·형 export는 유지한다. app.ts·CLI renderer·runDoctor 본문·고정 시험은 그대로다.
+- 최종 PM 실측: 오프라인 npm ci·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,204 중 4,193 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 5개 변경 없음. 각 종료 JSON과 집계를 읽은 뒤 V45a를 열고 최종 독립 보고를 읽은 뒤 별도 병합했다. 증거 `.worktrees/pm-unit/.codaryn/codex-u324-final-evidence/`.
+- [V45a](reviews/2026-11-14-v45a-codex-verify-u324.md) 높음 0/중간 0/낮음 0. 원래 99+E4 양성 20관찰 모두 동일, 관련 68시험 통과, 입력 101개·봉인 불변. helper 실행문과 주석은 export·환경 타입·EOF 경계 외 동일하며 core·renderer는 바이트 동일하다. 옛 값 binding과 환경/LockState 타입도 확인했다. helper 런타임 폐쇄 70모듈의 CLI 도달 0이며 전체 앱의 의존 0을 선언한 것은 아니다. currentKeys/context를 새 공개 결과나 IPC로 추가하지 않았다.
+- 실제 staged 검사에서 새 파일 EOF 빈 줄 두 곳을 발견해 담당이 각 1바이트만 제거하고 재동결했다. cached diff-check와 비밀 검사 통과 뒤 커밋했으며 최종 전체 판은 정리된 바이트로 검증했다. 최초 작업자의 untracked 제외 diff-check만으로 공백 검증을 마쳤다고 처리하지 않았다.
+- 다음 U-325는 같은 codex-check의 기존 claude-store에서 점검 본문만 앱 doctor.ts로 옮긴다. 소유 범위는 새 core·필요한 check input/result 형·CLI wrapper이며 app.ts는 U-326까지 제외한다. renderer·parse·마지막 가림·오류/await 순서와 옛 export를 유지하고 앞 단계의 봉인 119관찰을 재생한다. U-326 뒤에만 C-10 전체 완료를 판정한다.
+- 뒤 단계 준비는 구현과 겹치지 않는 자기 archive에서 병렬 수행했다. C11-ARGS(codex-audit): 공개 262호출/399조건, value export 26·type export 18, 같은 기준 차이 0, 25파일 봉인. C11-JSON(codex-sec): 25사례/50관찰, 예외 identity/순서·옛 alias 확인, 같은 기준 차이 0, 29파일 봉인. 둘 다 기준 d1a95ce2의 잠정 자료이며 실제 착수 parent 확인·후보 비교 전 통과로 승격하지 않는다. 설정 writer 기준은 codex-loop가 준비 중이고 그 단위 구현은 다른 담당에게 배정해 독립성을 유지한다.
+- 새 정책/출력 변경 없이 CP-35의 단위 경계를 따른다. 실제 API·키 파일·외부 시험 네트워크는 미수행이며 사용자 출력 질문과 기존 위험은 이전 CP 범위 그대로다.
+
+## 진행 요약 (CP-35, 2026-11-14) — APP-APPLY 채택, 남은 단위 분할
+
+- main/origin/main `00cfa2b6aa98107089b298a13d684aa8222ee180`: U-323 APP-APPLY 채택·푸시. 구현 `9e86d99d`, 최종 판 `dbb849fe14dfbc98df327e307f9e6c31ce736cd3`, 병합 트리 `0a68b54ec5d3daf4060af37d21d3e16debdac860` 일치. app.ts의 applyPlan/import와 새 시험 두 파일만 바뀌었다. 같은 parse/prepare 뒤 앱 applyLife를 직접 한 번 부르며 기존 raw callback 0회·시작 gate·늦은 조회/this·가림·changes만의 lockLeft를 유지한다.
+- 최종 실측: 오프라인 npm ci(빈 user/global npmrc, ignore-scripts)·typecheck/build·GUI build/lock·tracked/staged 비밀 검사 통과. 유닛 4,199 중 4,188 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0, 고정 파일 변경 없음. 전체 결과를 읽은 뒤 V-44를 열고, 독립 결과를 읽은 뒤 별도 호출로 병합했다. 증거는 `.worktrees/pm-unit/.codaryn/codex-u323-final-evidence/`다.
+- 검증자의 최초 preload 경로 오류에서 이전 판 로그 사본이 섞인 것을 발견해 격리했다. 검증 세션의 Windows sandbox에서 끝나지 않은 유닛·통합과 기동 실패한 Electron도 별도 보존하고 통과 수치에서 제외했다. PM 환경에서 같은 환경 격리 명령을 끝까지 실행한 유닛·통합·smoke의 새 로그/종료 JSON이 최종 근거다. 제품 assertion·정규화·ACL은 바꾸지 않았다. 중단한 sandbox 실행의 모든 자손 종료까지 증명하지는 못했으며 광역 process kill도 하지 않았다.
+- [V-44](reviews/2026-11-14-v44-codex-verify-u323.md) 높음 0/중간 0/낮음 0. 독립 공개 앱 60사례·604조건 차이 0, 관련 13파일 57시험 통과, 원래 31개와 보충 9개 봉인 불변. 동시 append의 저장 seq별 boxed 오류는 undefined/null/Error도 자기 Promise에만 대응하며 앱 이벤트 래퍼를 중복하지 않는다. 기존 callback 미전달이나 기존 경쟁 한계를 수정 성과로 세지 않는다.
+- 사용자 지시("작업 단위를 잘 분할해서 잘 분배")에 따라 doctor는 U-324 helper·점검 포트, U-325 core, U-326 공개 앱 직접 연결로 나눈다. 구현은 codex-check의 기존 `.worktrees/claude-store`를 재사용하고, 독립 비교는 codex-probe가 맡는다. U-324/325에는 app.ts 수정권이 없다. 채택 소스의 독립 기준 확인 후 각 단위를 열며, 다음 구현은 앞 단위 독립 검증·병합 뒤 시작한다.
+- C-11 준비는 codex-loop가 공용 포트/계획 출력 → 전체 args → 설정 writer → models → init → JSON → report → 독립 그래프의 기능 경계로 나눴다. models/init이 커지면 규칙 추출과 앱 연결도 나눈다. app.ts 수정권은 한 명씩 직렬로 넘긴다. codex-sec는 기존 TypeScript 7의 unstable/sync·ast를 로컬 확인했고, 소스(타입 포함)와 fresh dist의 전이 그래프를 각각 검사하는 방향을 채택했다. 미해석/계산 로딩은 의존 0으로 숨기지 않는다. 아직 구현·완료 판정은 아니다.
+- 위 분할과 검증 준비 보고서는 각 담당의 `.codaryn/`에 있고 현재 소유권은 PM의 `.codaryn/pm-tools/dispatch-current.md`로 추적한다. 실제 API·키 파일 조회·외부 시험 네트워크는 미수행, 기존 위험과 사용자 출력 질문은 CP-31/32 및 CP-25~27의 범위를 유지한다.
+
+## 진행 요약 (CP-34, 2026-11-14) — APP-REVERT 채택, APP-APPLY 기준 확인
+
+- main/origin/main `d68ecab9406c61bb0c50d5bd60d039a3143b6e8b`: U-322 APP-REVERT 채택·푸시. 구현 `8cfa7ee4`, 최종 판 `ca00809ca4e474939857cc8a85f954e08de23c25`, 최종 병합 트리 `7c9d0d3f23590afdf943dbc4d225aff79d7b91c4` 일치. app.ts의 revert/import와 새 시험만 바뀌었고 공용 helper·store·CLI·계약·고정 출력은 그대로다.
+- 최종 실측: typecheck/build·GUI build/lock 검사·tracked/staged 비밀 검사 통과. 유닛 4,190 중 4,179 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 전체 판 결과를 읽은 뒤 V-43에 후보를 넘겼고, 최종 독립 결과·트리·staged 검사를 다시 확인한 뒤 병합했다. 증거는 `.worktrees/pm-unit/.codaryn/codex-u322-final-evidence/`에 있다.
+- [V-43](reviews/2026-11-14-v43-codex-verify-u322.md) 높음 0/중간 0/낮음 0. 공개 revert 54사례·접근 사건 1,298개·파일/기록/잠금·오류 키 순서 일치, 관련 30시험 통과(새 7 포함), 봉인 71파일 불변. 최종 비교는 PID와 복원 임시 이름만 좁게 대응했다. 동의 선검사·adapter 바인딩·단일 원복·loadPlan 부재·dryRun·lockLeft sibling을 보존했다.
+- 첫 독립 재생의 Windows 경로 치환 오류로 검증자 자신의 이전 비봉인 실행용 fixture가 재처리됐다. 그 실행은 전부 폐기하고 오류 증거를 보존했다. 봉인 expected/prestate/스크립트 71파일은 변하지 않았고, 새 fixture와 쓰기 경로 guard로 다시 비교했다. 최종 쓰기 가능 경로 인수 341개는 각 새 fixture 안이었다. 이전 시도 경로 194개는 실제 수정 파일 수가 아니며 저장소/작업자 트리는 변경되지 않았다. 이 도구 오류를 제품 결함이나 유효한 통과 수치로 섞지 않았다.
+- 다음 U-323 APP-APPLY를 기존 `.worktrees/claude-adapter`, `unit/U-323-codex-loop`, 기준 d68ecab9에서 시작했다. codex-loop가 app.ts의 applyPlan/import와 새 `tests/unit/app/u323-apply-direct.test.ts`만 직렬 소유한다. codex-audit가 채택 원천의 6개 app 블록·26개 의존 파일 및 원래 봉인 31개·추가 봉인 9개의 불변을 확인한 뒤 구현 배정을 열었다. 기존 raw callback 0회, masked event/confirm의 횟수·지연 조회·this·시작 gate·취소·환경·오류 순서를 유지한다. 기존 수명·공용 helper·계약·GUI는 소유 범위에 넣지 않는다.
+- V-44 기준 준비는 기존 46+4시나리오/451조건에 유효한 읽기 제외 10사례/153조건을 별도 봉인으로 추가했다. 네 원천의 승인 경로 제외는 모델 전 plan_stale, 실행 중 private read/write는 unreadable_path, 명령 validator와 함께면 준비 단계 invalid_task를 구분했다. 기존 잘못된 privacy 필드 사례는 입력 거부 대조로 유지했으며 기대값을 새 결과로 덮지 않았다. 후보 U-323 검증은 아직 아니다.
+- C-10 독립 기준은 codex-probe가 준비 중이다. C-11에서 새로 남은 jsonLine 의존은 순수 함수·주석만 `src/presentation/json.ts`로 이동하고 guard의 같은 binding 재수출과 planJsonLine identity를 유지하기로 했다. ASCII 직렬화·두 단계 가림·기존 오류 경계를 바꾸지 않는다. C-10 뒤 배정할 기술 경계이며 아직 구현하지 않았다. 운영 문구 정정은 15e981cb로 반영·교차 검토 완료, 미해결 제품 위험은 CP-31/32의 범위 그대로다.
+
+## 진행 요약 (CP-33, 2026-11-14) — APP-REPORT 채택, 현재 운영 지시 정리
+
+- main/origin/main `e52ac23e07199b13aeccdc85f96ba54c90747cd1`: U-316 APP-REPORT 채택·푸시. 구현 `5f68f0c4`, 최종 판 `4122f0846394d512e327b5e851c4203615745b9d`, 최종 병합 트리 `f9db08f0210aeb0e46c3669b4251948d8a791737` 일치. report/reportMarkdown은 앱 readReport를 직접 부르며 기존 파서·renderer·직렬화·최종 가림을 유지한다. 앱→CLI 의존 0을 주장하지 않는다.
+- 최종 실측: typecheck/build·GUI build/lock 검사·tracked/staged 비밀 검사 통과. 유닛 4,183 중 4,172 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 고정 출력 파일 변경 없음. 로그는 `.worktrees/pm-unit/.codaryn/codex-u316-final-evidence/`에 보존했다. 최초 staged 검사에서 합성 시험값 표기 2건을 발견해 실행 바이트가 같은 분할 fixture로 고쳤고, 재검사 발견 0 뒤 커밋했다. 시험의 네트워크형 경로도 127.0.0.1로 맞췄다.
+- [V-42](reviews/2026-11-14-v42-codex-verify-u316.md) 높음 0/중간 0/낮음 0. 사전 봉인한 공개 앱 352+16호출 차이 0, 기본 호출의 파일 접근 순서 동일, 독립 조건 90개 통과, 253개 봉인 항목 불변, 관련 49시험 통과. JSON 직렬화 경계의 합성 현재 값이 기존 internal_error를 만드는 경우도 보존했다. 직접 CLI 모듈 의존은 jsonLine 때문에 8→9, 간접 CLI 모듈은 양쪽 22이며 C-11에서 정리할 잔여다.
+- U-322 APP-REVERT를 codex-loop에게 배정했다. 기존 `.worktrees/claude-workspace`, `unit/U-322-codex-loop`, 기준 e52ac23e. 소유 파일은 app.ts의 revert/import와 새 `tests/unit/app/u322-revert-direct.test.ts`뿐이다. 동의 선검사·파서·잠금·오류/JSON·lockLeft를 보존하며 app startRevert→revertOnce 1회→revertOutput을 직접 연결한다. loadPlan·취소·새 가림 정책을 추가하지 않는다. app.ts 작성자는 한 명이며 뒤의 applyPlan은 아직 구현하지 않는다.
+- codex-sec의 V-43 기준은 최종 U-316 판에서 공개 revert 54사례·파일 접근 1,298 events·관련 23시험으로 고정됐다. 수집 당시에는 미채택 후보였으나 위 최종 병합 트리 일치로 같은 원천임을 확인했다. 후보 U-322는 아직 미검증이다. codex-probe가 APP-APPLY 준비를, codex-check가 운영 규칙 점검을 맡았다.
+- APP-APPLY 준비에서 기존 앱 소비자의 onStoredRecord/onStoredRunRecord가 0회 전달됨을 확인했다. PM은 이번 이행에서 0회 동작을 유지하고 masked event·confirm만 기존 횟수/시점/this로 전달하도록 정했다. 계약상 선택 콜백의 실제 연결은 별도 후속 검토로 남기며 raw 기록이나 새 handle/IPC 필드를 이번 연결로 열지 않는다. codex-audit가 e52ac23e에서 변경 전 공개 API 기준을 준비하되 U-322 채택 후 같은 apply 원천인지 확인한다.
+- 사용자 지시대로 PM·오케스트레이션과 규칙 관리를 계속한다. [운영 문구 감사](reviews/2026-11-14-codex-rules-audit.md)는 중간 4/낮음 1을 찾았으며 제품 결함이나 실제 잘못된 병합의 수치가 아니다. 기존 지시를 반영해 AGENTS/workflow/personas/handoff의 Codex 전용 배정, 미보고 커밋에도 재작성 금지, 관리자도 worktree add 금지, 명시 배정 범위에서만 main 병합, 최신 체크포인트 우선 문구를 정리했다. 과거 체크포인트·종료한 위임 owner는 보존했다. 새 권한·정책을 추가한 것이 아니다.
+
+## 진행 요약 (CP-32, 2026-11-14) — U-321 한정 수정 채택, APP-REPORT 검증 준비
+
+- main/origin/main `e56ba0dcbfac87dd119b6f8da98fb2cc3e1c0d78`: U-321 cleanup 메타데이터 검증을 채택·푸시했다. 구현 `399f7731`, 최종 판 `00f7085cc3dc77cb756ecd1c0eff5482832a7e94`; main 병합 트리 `c375487582e12759687d8d7f43ac49a47539994d`가 검증 판과 같았다. 작성자·본문 없는 커밋·staged 비밀 검사를 확인했다.
+- 최종 실측: typecheck/build 및 tracked/staged 비밀 검사 통과. 유닛 4,179 중 4,168 통과/실패 0/skip 10/TODO 1, 통합 684 중 682 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 고정 출력 파일 변경 없음. 유닛의 추가 skip 2는 파일 symlink 권한과 열린 부모 디렉터리 rename 거부다. 통합 로그 끝의 assertion은 기존 U-295 TODO이며 실패 건수는 0이다. 증거는 `.worktrees/pm-unit/.codaryn/codex-u321-final-evidence/`에 보존했다.
+- [V-41b](reviews/2026-11-14-v41b-codex-verify-u321.md): 신규 0/0/0, 최종 archive 전용 시험 20통과/2skip, 실제 CLI/앱 24회와 store 16경계. 준비된 정션·하드 링크를 삭제 전에 거부하고 선택 기록을 보존했다. **기존 중간 잔여 위험은 미해결**: 마지막 검사 뒤 부모 교체로 외부 `.gitignore` 2바이트 쓰기, 마지막 검사 뒤 로그의 새 hard-link alias 추가로 같은 inode의 로그 137바이트 노출. 기준에도 같은 결과가 있고, 이번 채택은 정적으로 준비된 공격과 실행한 교체 경계의 한정 수정이다. 모든 경쟁 조건의 안전성을 승인한 것이 아니다.
+- U-316 APP-REPORT 구현은 codex-loop가 지정 두 파일만 완료했다. 기준에서 새 4시험을 먼저 통과시켰고 변경 뒤 관련 58시험·typecheck/build가 통과했다. PM 검토 중 시험의 네트워크형 경로를 loopback 표기로 맞추도록 지시했다. 아직 커밋·판 검증·채택 전이다. codex-audit는 기준 23a41eaf 공개 앱 352호출과 추가 16호출, 90 assertion을 고정했고 같은 기준 재실행에서 결과·파일 호출 순서 차이가 없었다. 후보에 대한 판정으로 세지 않는다.
+- 사용자 지시에 따라 Codex pane 명령 전달은 재확인하지 않는다. `herdr --skill`의 명령과 실제 pane을 확인해 기존 Codex만 배분한다. 세션 한도·크레딧 질문에는 답하지 않는다. U-316 다음은 앱 revert, applyPlan을 직렬로 진행한다. codex-sec의 revert 준비, codex-check의 C-10 준비 갱신, codex-probe의 C-11 의존 정리가 완료됐다.
+- C-11의 구현 경계를 [이행 계획의 2026-11-14 보완](reviews/2026-11-13-cli-migration-plan.md)에 기록했다. 기존 출력과 옛 경로 재수출을 보존하며 공용 순수 파서·표시 모듈을 옮기는 기술 선택이다. 새 기능이나 출력 변경 승인이 아니다. 기존 V-40 낮음 잠금 잔류와 U-321 경쟁 경계는 별도 미해결 항목으로 유지한다.
+
+## 진행 요약 (CP-31, 2026-11-14) — C-7b 채택, 앱 후속 시작
+
+- main/origin/main `23a41eaf801d20a0ab365b8075936358e44e1688`: U-320 C-7b CLI apply 수명 전환 채택·푸시. 구현 `374103ff`, helper 거부 복구 `89f279bb`. 최종 판 `f930d147fa7374b7db7ffab713040854735fb76f`, main 병합 트리 `05d659f2751f4e439070a9e221fb28f0eb67c658`가 검증 판과 같았다. 최초 write-tree는 샌드박스의 index.lock 쓰기 거부로 실패했고, 허용된 권한으로 다시 산출해 일치를 확인했다.
+- 최종 실측: typecheck/build·tracked/staged 비밀 검사 통과, 유닛 4,166 중 4,157 통과/실패 0/skip 8/TODO 1, 통합 675 중 673 통과/실패 0/skip 1/TODO 1, GUI 426/426, smoke 227/227, CLI 95사례 차이 0. 고정 출력 파일 변경 없음. `.worktrees/pm-unit/.codaryn/codex-cp28/`의 수정판 로그와 `compare-u320-b.md`, 거부했던 첫 판은 `codex-u320-first-evidence/`에 보존했다.
+- [V-39](reviews/2026-11-14-v39-codex-verify-u320.md)의 낮음 1 helper 거부 차이를 수정했다. [V-39b](reviews/2026-11-14-v39b-codex-verify-u320.md) 0/0/0: 직접 moves 계획 거부의 전체 오류·파일 불변, 정상 changes/run의 load 1→assemble 1, 봉인 기준 26사례/84호출 차이 0, 일반 run 12사례/72호출 차이 0, 관련 104시험 통과. task:run이라는 지원 전제를 보존하며 잘못된 종류에 새 쓰기 권한을 열지 않는다.
+- [V-40](reviews/2026-11-14-v40-codex-verify-u320.md) 새 회귀 0/0/0. 기존 낮음 L1은 미해결 후속 항목: moves 적용의 잠금 획득 뒤 cancelSignal 생성이 예외를 던지면 try/finally 진입 전이라 잠금이 남는다. 합성 주입에서 재현, 기본 CLI 등록 100회 정상·일반 입력으로 실제 등록 실패 미재현. 이행에서는 고치지 않았다.
+- U-321 보안 수정 후보 `399f773121a28c2dd5a7d0bc860dfc02b6f9d917`를 PM이 검토·검사 후 작업 브랜치에 커밋했다. [V-41 분기 검증](reviews/2026-11-14-v41-codex-verify-u321.md): 새 회귀 0/0/0, 준비된 상태 정션/로그 하드 링크 차단과 선택 기록 보존, 관련 42통과/2skip. 정상 CLI 35쌍 동일+상태 정션의 의도된 거부 1쌍, 앱 11쌍과 추가 정상 4쌍 동일. **최종 통합판은 아직 미검증·미병합**.
+- U-321의 보장 범위는 정적으로 준비된 M1와 실행한 교체 경계까지다. 기존 중간 경쟁 경계는 남는다: 최초 `.gitignore` 쓰기 직전 부모 교체로 외부 2바이트 생성, 마지막 검사 뒤 하드 링크 추가로 외부 alias에 로그 137바이트 추가가 기준/후보에서 같이 재현됐다. 모든 경쟁 조건을 닫았다고 보고하지 않는다. 개별 파일 손잡이는 부모 경로와 향후 링크 수를 잠그지 못한다.
+- U-316 APP-REPORT는 codex-loop가 기존 claude-adapter의 `unit/U-316-codex-loop`, 기준 23a41eaf에서 구현한다. app.ts의 report/reportMarkdown 및 필요한 import, 새 `tests/unit/app/u316-report-direct.test.ts`만 소유한다. app readReport를 직접 부르되 기존 검사 순서·JSON/Markdown·두 단계 가림·끝 개행을 유지한다. 렌더러와 파서는 기존 것을 사용하며 앱→CLI 의존 전부가 없어졌다고 주장하지 않는다. codex-audit가 변경 전 공개 앱 결과를 독립 기준으로 고정한다.
+- 다음 앱 작성 순서는 report 채택 → revert → applyPlan. 다른 app.ts 작성자는 없다. codex-probe는 C-11의 남은 의존과 렌더러·파서 경계를 읽기 전용으로 정리 중이고, C-10 준비 보고는 완료됐다. U-321은 별도 보안 후보로 독립 검증과 전체 판 검사를 거쳐 판단한다.
+
+## 진행 요약 (CP-30, 2026-11-14) — U-318 채택, C-7b 호환성 재확인
+
+- main/origin/main `406d3860cd4f3dd0a2b053ed03ae0ee51cf76246`: U-318 GUI 경로 가림 수정까지 병합·푸시했다. 최초 시험 판 `91d98b64`, 최종 판 `9b589b3f`는 이후 PM 보고서 문서만 달랐다. 제품 차이 없음과 최종 병합 트리 `3043cfb9f46d6fb9d1db1b5ef345156694a580fe` 일치를 확인했다.
+- U-318 실측: 유닛 4,150 통과(전체 4,159/skip 8/TODO 1), 통합 673 통과(675/skip 1/TODO 1), GUI 426/426, smoke 227/227, 모두 실패 0. [V-38b](reviews/2026-11-14-v38b-codex-verify-u318.md) 새 회귀 0/0/0, 후보 4시험 통과, 다른 사유의 화면 24쌍 동일. 기록은 `.worktrees/pm-unit/.codaryn/codex-u318-evidence/`에 보존했다.
+- U-320 C-7b: codex-loop 구현 `374103ffde87aa1f716ae445bd270cb917f4d82b`(PM이 지정 5파일을 검토·검사 후 작업 브랜치에서 커밋). 후보판 `372ad5355f414e889088aca40db00d64a8e8f50b`. typecheck/build/비밀 검사 통과, 유닛 4,155/4,164(실패 0/skip 8/TODO 1), 통합 673/675(실패 0/skip 1/TODO 1), GUI 426, smoke 227, CLI 95사례 차이 0. **아직 미채택**이다.
+- C-7b 독립 기준: codex-audit가 전환 전 e7229c03에서 고정한 26사례/84 CLI 호출과 기대값 해시를 그대로 후보에 적용해 차이 0. 일반 run 12사례/72호출도 차이 0. 그러나 시험용 export `applyChangesPlan`에 moves 계획과 plan:apply task를 직접 주면 기존에는 run_not_plan/plan_kind_differs로 거부했는데 후보는 이동·폐기를 수행했다. 제품 호출자는 없고 문서의 task:run 전제 밖이지만, PM은 이행에서 해당 helper의 쓰기 허용 범위를 넓히지 않도록 기존 거부 복구를 지시했다. codex-loop가 같은 파일 소유권으로 수정하고 V-39 재확인을 받는다. 현재 판을 통과로 병합하지 않는다.
+- V-40(codex-sec)는 동의·잠금·취소·가림의 별도 보안 검증 중이다. 기준에도 있는 cancelSignal 생성 예외 뒤 잠금 잔류 후보를 분리해 조사한다. C-7b에서 기존 결함을 몰래 고치지 않는다.
+- 별도 U-321: codex-check가 기존 claude-store를 재사용, `unit/U-321-codex-check`, 기준 406d3860에서 cleanup M1 수정 중이다. 소유 파일은 `src/store/cleanup.ts`, 새 `tests/unit/store/u321-cleanup-metadata.test.ts`, 새 `tests/integration/u321-cleanup-metadata.test.ts` 세 개. 공통 ensureStateDir/lock/계약/CLI/고정 출력 수정 금지. 정적 상태 정션과 로그 하드 링크를 첫 외부 쓰기·삭제 전에 거부하며 잔여 경쟁 조건을 명시한다. 별도 보안 단위로 검토하고 이행 후보에 섞지 않는다. codex-sec이 작성자와 분리해 재검증한다.
+- 사용자 상시 지시 추가 확인: **기존 Codex pane 명령 전달은 재확인 없이 바로 한다.** `herdr --skill`에 따른 명령과 실제 agent 이름을 쓰고, `herdr agent prompt` 허용 규칙을 사용한다. Claude는 배정하지 않으며 사용 한도·크레딧 선택은 사용자 몫이다.
+- C-10 준비(codex-check)와 app.ts 세 후속 준비(codex-audit)는 보고서로 완료됐다. 구현 순서는 C-7b 채택 → app.ts report/revert/applyPlan 직렬 전환 → C-10/C-11이다. app.ts는 아직 작성자 미배정이다.
+
+## 진행 요약 (CP-29, 2026-11-14) — U-319 채택, Codex 전용 배분
+
+- 현재 PM은 codex-review(w3:p3). 사용자 재확인대로 `herdr --skill`·설치된 도움말·HERDR_ENV=1·실제 세션 목록을 확인하고 **기존 Codex만** 배정한다. Claude 세션이나 한도·크레딧 화면은 조작하지 않는다. Herdr 서버 접속에 필요한 권한은 사용자 승인으로 확보했다.
+- 회수 문서 `647a3bcf`와 U-319 채택 `e7229c030d10f333e42c64ee72a55017ebac7557`을 origin/main에 푸시했다. U-319 판은 `ac91a17ac0a02f2d68d81d2785303dc6abc3ae05`, 병합 트리는 검증 트리 `afe7e82935a219d1da69c515c805a978f4a4291e`와 일치했다. 작성자·단일 제목·trailer 없음과 staged 비밀 검사를 확인했다.
+- U-319 최종 PM 실측: 오프라인 npm ci, typecheck, build, tracked/staged 비밀 검사 통과. 유닛 4,159 중 4,150 통과/실패 0/skip 8/TODO 1, 통합 675 중 673 통과/실패 0/skip 1/TODO 1, GUI 424/424, Electron smoke 227/227. CLI 비교 95사례 차이 0. 고정 출력 파일 변경 없음. 로그는 `.worktrees/pm-unit/.codaryn/codex-u319-evidence/`에 보존했다.
+- 처음 샌드박스 시험은 프로세스 종료·정리 EPERM으로 완료되지 않았다. 후보판 재실행은 사용자 승인된 실행 권한, LANG·키를 상속하지 않는 환경, 설치 경로 밖의 합성 임시 폴더를 사용했다. 처음 잘못 둔 임시 폴더 때문에 발생한 workspace_is_install_dir 실패는 제품 회귀가 아니며 재실행과 구분한다. 위 통과 수치는 재실행의 실제 종료 코드 0을 읽은 뒤 기록했다. 8 skip은 8.3 이름 4개, 파일 링크 권한 2개, 대소문자 구분 파일시스템 1개, POSIX FIFO 1개다.
+- 기준 b129ebb8의 별도 샌드박스 재측정은 전체 통과가 아니다. [BASE-28](reviews/2026-11-14-cp28-codex-baseline.md): GUI 424 통과, full unit 미종료, 통합 665 통과/3 실패/1 취소/1 skip/1 TODO, smoke ACL 오류. 환경 제한을 후보판의 위 최종 결과와 섞지 않는다.
+- [V-37](reviews/2026-11-14-v37-codex-verify-u319.md): U-319 새 회귀 0/0/0, 관련 59시험, CLI 48쌍·공개 앱 11쌍 일치. **기존 중간 M1** 별도: 상태 폴더 정션 또는 cleanup.jsonl 하드 링크가 바깥 합성 파일 쓰기로 이어짐. 기준에도 재현되므로 이행에 섞지 않았으며 codex-sec에 최소 수정 설계를 배정했다. 미해결 결함이지 해결 완료가 아니다.
+- U-318: [V-38](reviews/2026-11-14-v38-codex-verify-u318.md) 0/0/0. 통합 후보판 `91d98b64d38c1e927e9fb8616b0825d9dc171a39`를 기존 pm-unit에 만들었고 PM 전체 검사와 codex-probe의 V-38b 진행 중. 아직 main 미병합.
+
+| Codex | 현재 작업 / 역할 | 소유와 경계 |
+| --- | --- | --- |
+| codex-loop p8 | U-320, C-7b CLI 개발 | 기존 claude-workspace, `unit/U-320-codex-loop`, 기준 e7229c03. plan-commands.ts/run.ts, 새 표시 연결 시험, 필요한 최소 u280·cli-contract 위치 설명. app.ts·apply-life·계약·고정 출력 제외. push는 PM만 |
+| codex-audit pE | C-7b 독립 검증 기대값 준비 | 기준판 archive에서 승인·동의·취소·잠금·기록 순서의 독립 결과를 고정. 구현 파일 수정 없음. app.ts 후속 세 작업의 준비 보고는 완료 |
+| codex-check pD | C-10 doctor 전환 준비 | 읽기 전용 범위·옮길 코드·불변식·시험 계획. 구현 배정 전까지 수정 없음 |
+| codex-sec pC | 기존 cleanup M1 수정 설계 | 읽기 전용. 공유 ensureStateDir 영향·로그 신원·경쟁 조건·기존 오류 매핑 검토. 구현은 별도 배정 |
+| codex-probe pF | U-318 통합판 V-38b | 자기 archive에서 호스트 IPC·메인 상태·한영 화면 재검증 |
+
+- app.ts 작성권은 아직 누구에게도 넘기지 않았다. C-7b 뒤 report → revert → applyPlan을 직렬로 배정한다. 사용자 결정 목록은 CP-25~27을 유지하며 출력 변경을 이행에 섞지 않는다.
+
+## 진행 요약 (CP-28, 2026-11-14) — Codex PM 회수
+
+- 사용자 인계 지시에 따라 codex-review(w3:p3)가 개발 관리자·통합 담당을 맡고 `pm-control.json`의 임시 위임을 `revoked`로 바꿨다. 기존 owner 필드는 종료한 위임의 이력이다. Claude PM의 새 배정·병합·푸시는 종료됐다.
+- 회수 전 확인: main과 로컬 origin/main은 `b129ebb80985d0c6a10fac59b3fa2d5b0e4f4003`, main과 두 미완료 단위의 추적 파일은 깨끗했다. 네트워크 fetch로 새 원격 상태를 조회한 것은 아니다.
+- U-319: `7cadaea69764593615cde1b7258bc2b368064929`, 기준 분기점 `0a47499b`. 완료 수치가 없고 기존 dist는 변이 시험 중 멈춘 것이므로 다시 빌드한다. PM이 기존 pm-unit에 후보판을 만들고 검증한 뒤 판단한다.
+- U-318: `818e58fb91e4be7fedbf3d798b4aa135db7d1fd3`, `.worktrees/claude-gui/.codaryn/report-U-318.md` 완료 보고 확인. 보고된 통과 수치는 아직 PM 재실행 결과가 아니다.
+- 배정(별도 git archive 사본, 제품 파일 수정 없음): codex-check는 b129ebb8 전체 기준 수치 재측정(BASE-28), codex-sec은 U-319 독립 보안 검증(V-37), codex-probe는 U-318 호스트·IPC·화면의 경로 가림 독립 검증(V-38), codex-loop는 C-7b CLI 전환 준비. 결과는 `.worktrees/codex-verify/.codaryn/`의 각 보고서에 쓴다. codex-audit는 후속 배정 대기.
+- Herdr 서버는 일반 클라이언트 접속을 거부했다. 서버나 권한을 바꾸지 않고 기존 Codex 작업 연결 도구로 위 네 세션에 전달했다. 한도·크레딧 질문은 조작하지 않았다.
+- 다음 순서: 기준 수치와 U-319 후보판 검증·독립 검증 → U-319 및 U-318 채택 판단 → C-7b 전환 → app.ts의 report/revert/applyPlan 후속을 직렬 처리 → C-10/C-11. 출력 변경을 요구하는 질문은 CP-25~27의 목록을 유지하고 하나씩 사용자에게 묻는다.
+- 실제 API·키 조회 금지, 시험 네트워크는 127.0.0.1, 이력 재작성·amend·검사 우회 금지, 지정 작성자와 trailer 없는 커밋, 새 board worktree 생성 금지, 이행 출력·JSON 유지 규칙을 그대로 적용한다.
+
+## 진행 요약 (CP-27, 2026-11-14 09:26, main `2f2e103`) — Codex로 전수 인계
+
+- **사용자 지시(2026-11-14 09:2x)**: "클로드 이제 토큰 다 썼을거야 코덱스들에게 전수 인계해줘". 임시 PM(w3:p1)은 이 체크포인트를 끝으로 새 배정·병합·푸시를 멈춘다. 인계 문서는 [임시 PM 인수인계](pm-handoff.md)의 "2026-11-14 Codex로 전수 인계" 절이다. `pm-control.json`은 임시 PM이 바꾸지 않았다(회수 규칙: Codex가 `revoked`로 바꾼다).
+- **CP-26 뒤 병합한 단위 27개**(새 체계 합계 298개; 병합 커밋 제목에서 셈): U-295, U-294, U-293, U-297, U-298, U-296, U-301, U-302, U-299, U-303, U-300, U-304, U-305, U-307, U-306, U-310, U-308, U-312, U-309, U-311, U-314, U-315, U-317, U-313, 그리고 CP-26 직후의 U-292·U-271(CP-26에 이미 셈)을 뺀 것. 내용은 병합 커밋 제목에 있다.
+- **CLI 구조 이행**(DR-65): 16단계 가운데 열둘이 main에 있다 - P-2, C-1, C-2, C-3a, C-3b, C-4, C-5, C-6a, C-6b, C-7a, C-8, C-9a. `codaryn run`, 승인 계획 수행, 계획 보기·검토, report, revert가 앱 계층의 규칙을 쓴다. 앱이 CLI 모듈에 기대는 곳은 26개에서 11개가 됐다(담당이 센 수). 판 비교 사례는 93개. 고정 출력은 바뀌지 않았다.
+  - **C-7b(적용을 앱의 수명으로)는 중간이다**: 사례(U-308)·계약(U-309)·앱의 적용 수명(U-313)은 main에 있고 **아직 아무 제품 코드도 `src/app/apply-life.ts`를 부르지 않는다**. 남은 것은 CLI 전환(na-core)과 문서. 전환 판은 Codex 검증과 ne-verify 검토·연기 뒤에 병합한다(U-303→U-300 때와 같은 방식: 분기와 전환을 함께 본다).
+  - 남은 단계: C-7b 전환, C-9b(진행 중), C-10, C-11, 그리고 이행 끝의 정리(옛 자리 다시 내보내기, 지금 목록 시험이 지키는 것 약 스무 곳).
+- **가장 최근 검증**(U-313 판 `0f4486e`, 트리는 병합 `2f2e103`과 같음, 임시 PM 실행): 타입 검사 통과, 유닛 4,146건 중 4,141 통과·0 실패·todo 1, 통합 675건 중 673 통과·0 실패·건너뜀 1(4 GiB 실측)·todo 1(U-295의 발견), 비밀 검사 통과, 고정 값 변화 없음, GUI 유닛 424건 통과, 판 비교 93사례 차이 0. GUI 연기 시험은 C-9a 판 `4868687`에서 227/227 세 번(ne-verify); **main `2f2e103`에서의 연기 시험은 요청했으나 결과를 받지 못했다**.
+- **진행 중인 작업(인계 시점)**
+  - na-core(w3:p2): `unit/U-319-na-core`(C-9b, cleanup을 한 벌로; 끝 `7cadaea`까지 커밋 여섯, 완료 보고 전). 이 단위에 한해 `src/app/cleanup.ts`를 na-core가 고친다(PM 예외; p5a가 diff 검토). 판을 만들면 Codex 검증 뒤 병합(파일을 지우는 명령). 그 뒤 C-7b 전환.
+  - p5u-gui(w3:pB): `unit/U-318-p5u-gui`(R-119 L-1: GUI의 되돌리기 목록이 CLI는 감추는 경로를 보임; 끝 `818e58f`, 완료 보고 전).
+  - p5a-adapter(w3:pA): 다음 차례 U-316(C-8의 앱 쪽: report import, 앱의 report()가 readReport를 바로 부르게), 그 뒤 C-9a의 앱 쪽(앱의 revert()가 옮긴 함수를 바로 부르게; 앱→CLI 11에서 9), na-core의 cleanup diff 검토. 아직 가지 없음.
+  - ne-verify(w3:p4): main의 병합 뒤 연기 시험(요청 중).
+  - nc-human(w3:p6): 대기. 이행 뒤에 할 것 - 검증을 둔 task가 첫 턴 전에 끝나면 끝 요약이 "Checks: none configured"라고 쓰는 낮음(U-295의 todo; 준비 보고서 있음).
+  - nb-i18n, nd-docs, p4g-general: 대기.
+- **열려 있는 것**: R-119 L-1(U-318로 고치는 중). `revert --json`의 건너뛴 경로가 원문인데 계약 주석은 "가린 경로"라고 함(JSON을 바꾸는 일이라 사용자 질문). 계획을 claim한 프로세스가 죽으면 계획이 applied로 남고 잠금이 남음(전부터, 한계). 잠금 아래 거부 때 앱이 손잡이를 먼저 줘 GUI에 실행 화면이 잠깐 열림(기능 단위 후보). 해시 조각 크기 두 가지(기능 단위 후보). DR-25 동의 질문을 C-7b의 동의 고리 꼴로 맞추기(이행 뒤 정리 후보). cleanup의 입력 검사를 CLI와 GUI에서 하나로(기능 단위 후보).
+- **PM의 실수와 조치**(CP-26 뒤): C-9a를 둘에게 나란히 배정하면서 시험 파일 하나(목록 시험의 표)가 겹치는 것을 확인하지 않았다(담당이 시작 전에 찾아 멈춤; 나란히 배정할 때는 시험 파일의 겹침도 나눔에 적게 한다).
+- **확인하지 않은 범위**(그대로): 실제 Anthropic·OpenAI API 호출(한 번도 없음), 실제 터미널과 실제 콘솔 Ctrl+C, 실제 OS 대화상자·알림, 실제 한글 입력기, FAT/exFAT(하드 링크 실패는 시험 모듈로 흉내만), 일반 심볼릭 링크(권한 없음; 정션은 봄), Linux·macOS, GUI 패키징·서명, 접근성 수동 점검.
+- **사용자에게 물을 것(모아 둠, 아직 묻지 않음)**: CP-25·CP-26의 목록에 더해, 진행 줄을 100칸에서 접을지(이행에 섞지 않고 미룸), 적용의 글을 설정 언어로 맞출지, 이동 계획 적용 결과에 lockLeft를 더할지(GUI에 보임), `revert --json`의 건너뛴 경로 원문.
+
+## 진행 요약 (CP-26, 2026-11-14 05:06, main `82e8285`)
+
+- **CP-25 뒤 병합한 단위 43개**(새 체계 합계 271개; 병합 커밋 제목에서 셈): U-250, U-249, U-246, U-252, U-255, U-253, U-254, U-257, U-256, U-265, U-267, U-268, U-258, U-261, U-270, U-278, U-262, U-269, U-272, U-279, U-275, U-276, U-259, U-273, U-280, U-277, U-274, U-283, U-281, U-282, U-284, U-285, U-247, U-251, U-266, U-286, U-288, U-287, U-291, U-290, U-289, U-292, U-271. 내용은 병합 커밋 제목에 있다.
+- **CLI 구조 이행**(DR-65, 계획서 `docs/reviews/2026-11-13-cli-migration-plan.md`): 16단계 가운데 P-2(U-250), C-1(U-254), C-2(U-262·U-269), C-3a(U-280), C-3b(U-282), C-4(U-285·U-286), C-5(U-287)의 일곱이 main에 있다. 앱이 CLI 모듈에 기대는 곳은 26개에서 14개가 됐다(담당이 센 수). 판 비교 사례는 32개에서 65개로 늘었고, 단계마다 PM이 판에서 돌려 차이 0을 확인했다. 고정 출력은 바뀌지 않았다.
+  - 옛 자리에 남긴 다시 내보내기는 15곳이고 목록 시험이 지킨다. 이행 끝에 정리 여부를 정한다.
+  - C-4(조립)는 Codex V-29, C-5(실행 전 단계)는 V-30을 받고 병합했다(둘 다 높음 0·중간 0·낮음 0).
+  - **C-6a(위험 높음)가 진행 중이다**: 사례(U-289)와 계약 형(U-290, U-292)과 지금 동작을 고정하는 시험(U-291)이 들어갔고, 앱의 실행 수명(U-293, p5a)이 진행 중이다. 그 뒤가 CLI 뒤집기(na-core)다.
+  - PM 판단: 끝 요약의 수는 앱이 세어 결과 옆에 준다. CLI는 저장된 기록 그대로로 진행 줄을 그린다(앱의 새 통로 `onStoredRecord`; GUI의 호스트는 쓰지 않으며 시험이 지킨다). 진행 줄을 100칸에서 접을지는 이행에 섞지 않고 이행 뒤 사용자에게 묻는다. 계획서와 다르게 `unreadable.ts`는 C-3b에서 통째로 옮겼다.
+- **개인정보 표(묶음 A)에서 모델로 새던 길을 닫았다**(DR-70; 묶음 A 문서를 쓰다가, 그리고 Codex V-28이 찾음):
+  - 검증기(U-258, U-276): 읽기 제외 원본은 실행의 k행 이상 묶음만 맞대고 행 번호를 싣지 않는다. 표 질의가 주지 않는 값의 규칙, 읽기 제외 아래 대상의 규칙, 읽기 제외 아래 파일을 보는 `file_rules` 규칙은 맞대지 않는다(맞대지 않은 규칙만 있으면 inconclusive). 실행의 k가 검증기에 간다.
+  - 표 질의(U-261, U-277, U-283): 거부 까닭마다 맞는 안내, 읽기 제외 표에서는 행·줄 번호 없음, `not_number`로 거부하지 않고 숫자 아닌 칸을 빈 칸처럼 뺌.
+  - Codex V-28(높음 1·중간 1, 둘 다 묶음 A 때부터 main에 있던 것), V-28b(첫 고침이 만든 중간 1), V-28c(0·0·0). 남는 것은 계약과 `privacy.md` 13절에 적은 한계다: 받은 수끼리의 차로 추론할 수 있다.
+  - 실제 API로는 돌린 적이 없어 이 길로 실제 모델에 나간 것은 없다.
+- **GUI**: 설정 화면의 읽기 제외·k 편집과 `analyze-private` 안내(U-247; Codex V-27, 검토 R-111·R-111b·R-111c), 후속 모음(U-271; 검토 R-113), 구현자가 아닌 세션의 보안·계약 시험(U-274, U-284). R-111b는 부하에서 연기가 11번 중 5번 실패하는 것을 찾았고(잠금 이어받기), 고친 뒤 부하 10번을 통과했다.
+- **가장 최근 검증**(U-271 판 `8485eab`, 트리는 병합 `3ee4f8b`와 같음, PM 실행): 타입 검사 통과, 유닛 4,096건 중 4,091 통과·0 실패·todo 1, 통합 643건 중 642 통과·0 실패·건너뜀 1(4 GiB 실측, 환경 변수를 줄 때만 돎), 비밀 검사 통과, 고정 값 변화 없음, GUI 유닛 409건 통과. GUI 연기 시험은 판 `eb6ce05`에서 227/227 네 번(ne-verify, 셋은 부하에서); 그 뒤 계약 형과 판 비교 사례만 바뀌었고, main `82e8285`에서의 연기 시험은 요청해 둔 상태다(아직 결과 없음).
+- **열려 있는 것**: R-113의 낮음 둘(텍스트 저장의 잠금 거부가 이 창의 호출로 세어짐, 보고서 요약의 거부 안내가 한 가지 글)은 U-294(p5u-gui)로 고치는 중. 해시를 읽는 조각 크기가 두 가지(64 KiB, 1 MiB)인 것과 읽는 동안 폴더가 바뀐 실패를 사람에게 따로 알리는 것은 기능 단위 후보.
+- **PM의 실수와 조치**(CP-25 뒤): 판의 유닛에 실패 1건(시간에 기대는 시험)이 있는 채로 문서 단위 U-278을 병합했다(판 만들기와 병합을 한 명령에 묶음; 같은 트리의 재실행은 실패 0; 그 뒤로는 판 결과에서 실패 0을 읽은 뒤 따로 병합한다; 그 시험은 U-279로 고침). C-3a가 대기 중인데 같은 문서를 건드리는 단위를 먼저 병합해 담당이 main을 두 번 다시 받았다(대기 중인 판이 있으면 겹치는 파일의 단위를 넣지 않는다). C-3a의 첫 판은 GUI 시험 하나를 조용히 건너뛰게 했고, PM이 통과 수가 아니라 건너뜀 수를 보고 찾았다(그 뒤로 GUI 수치는 건너뜀과 todo도 읽는다).
+- **확인하지 않은 범위**(그대로, `docs/manual-checks.md`): 실제 Anthropic·OpenAI API 호출(한 번도 없음), 실제 터미널, 실제 OS 대화상자, 실제 한글 입력기, FAT/exFAT, Linux·macOS, GUI 패키징·서명, 접근성 수동 점검, 실제 창의 CSP(연기 시험이 위반 수는 봄)와 OS 알림.
+- **사용자에게 물을 것(모아 둠)**: CP-25의 목록에 더해, 고정 출력이 바뀌는 열 가지(p4g의 `.codaryn/report-pin-change-questions.md`: 실패 수의 코드별 내역, 진행 줄의 대상, 권한 요약과 doctor 항목, organize 지시문, 다음 명령의 다이제스트, 보고서의 지역 시각, 시작 줄의 실행 id, doctor의 가릴 값 점검 등), 넓은 폴더 경고의 기준(`.codaryn/report-c14-wide-folder.md`), `data_checks`의 묶음 수 상한(64 MB에서 약 0.8 GiB), macOS·Linux 지원 범위, 수동 점검 항목을 언제 할지.
+
+## 진행 요약 (CP-25, 2026-11-14 00:15, main `1f0eb85`)
+
+- **CP-24 뒤 병합한 단위 56개**(새 체계 합계 228개; 병합 커밋 제목에서 셈): U-190, U-199, U-200, U-201, U-174, U-184, U-192, U-180, U-187, U-181, U-189, U-205, U-209, U-197, U-202, U-214, U-191, U-198, U-195, U-196, U-206, U-203, U-220, U-217, U-219, U-227, U-224, U-213, U-221, U-208, U-228, U-230, U-232, U-216, U-235, U-236, U-238, U-231, U-241, U-234, U-243, U-242, U-248, U-218, U-229, U-226, U-240, U-244, U-210, U-207, U-223, U-237, U-204, U-215, U-212, U-245. 내용은 병합 커밋 제목에 있다.
+- **P1 묶음 B가 사용자에게 열렸다**(DR-69): 계획을 만든 실행의 계획을 사람이 승인하면 실행기가 그대로 옮긴다. CLI의 `plan run`(U-191·U-198·U-195·U-196·U-206)과 GUI의 계획 실행(U-218·U-229·U-226·U-240·U-244). 엔진·저장은 U-180·U-187·U-181.
+- **P1 묶음 A가 사용자에게 열렸다**(DR-69, DR-70, DR-74): 읽기 제외 경로와 묶음 크기 하한 5를 task·설정·프로필·작업 유형 정의에서 읽고, 어느 원천도 경로를 빼거나 크기를 내리지 못한다. 작업 유형 `analyze-private`과 `query_table`(U-208), 모든 실행의 관문·도구·검증기·무결성 대상이 한 함수로 받는다(CLI와 앱 계층). 설정에서 경로를 빼거나 크기를 내리는 것은 넓히기다. GUI가 그 넓히기를 이름 붙여 묻고 분석이 무엇을 보내는지 말한다.
+- **GUI의 텍스트 편집 화면**(DR-71~DR-73; U-174·U-184·U-192)과 그 앱 계층 통합 시험(U-199), 읽기 도구의 신원 재대조(U-189·U-205), 읽기 다시 시도(U-213)가 들어갔다.
+- **PM 결정 DR-74**: k 하한 5, 계획 실행의 목표는 계획을 만든 실행의 목표, 길 위 링크면 계획 낡음, 가린 표시는 `[masked]`, 표 상한 64 MiB로 올리지 않음, 읽기 도구는 신원 재대조·쓰기와 계획 적용의 폴더 바꿔치기는 알려진 한계. 그 밖의 판단: 지연 잠금 재해제(U-211)는 Codex V-17·V-17b 뒤 뺌. 읽기 제외는 모델로 가는 것을 막고 사람의 파일 보기·변경 보기는 연다. 100칸 줄 나눔(U-233)은 고정 출력이 바뀌어 하지 않음.
+- **Codex 검증 V-11~V-26**과 검토 R-99~R-110b는 `docs/reviews/2026-11-13-*`, `2026-11-14-*`에 있다. 묶음 A: V-22·V-23 높음 0·중간 0·낮음 0(실제 CLI), V-24 중간 3을 고친 뒤 V-24b 0, V-26은 203개 확인에서 0. 검토 R-108의 높음 2(실행된 계획의 관문과 앱 조립에 목록이 없음)는 고쳤다.
+- **가장 최근 검증**(묶음 A 판 `3eb1c09`, PM 실행): 타입 검사 통과, 유닛 3,974건 중 3,969 통과·0 실패·todo 1, 통합 635건 통과, 비밀 검사 통과, 고정 값 변화 없음. GUI 유닛 336건 통과. GUI 연기 시험은 판 `87ddd92`에서 220/220 두 번(ne-verify, 하나는 부하에서); 그 뒤 GUI 안내 글 하나와 시험 표시 다섯이 바뀌었고, main `1f0eb85`에서의 연기 시험은 ne-verify에 요청해 둔 상태다(아직 결과 없음).
+- **진행 중**: U-247(GUI 설정 화면의 읽기 제외 편집), U-249·U-252(문구 다듬기), U-250(이행 P-2: 실행 이벤트의 도구 이름 제한), U-251(사람 점검표의 묶음 A·계획 실행 항목), U-253(묶음 A 예시와 개인정보 문서), 설계 대조 재점검(p4g).
+- **CLI 구조 이행 시작**(DR-65, 계획서 `docs/reviews/2026-11-13-cli-migration-plan.md`, U-248): 직렬로 P-2, C-1~C-11. 첫 단계 C-1(계약 형 옮김, U-254)을 p4g에 배정했다. 출력과 JSON은 바뀌지 않아야 한다. C-6a 전에 "진행 줄을 접을지" 사용자 답이 필요하다.
+- **PM의 실수와 조치**(CP-24 뒤): U-138을 "읽었다"고 과장해 적었다가 바로잡았다. U-246을 두 사람에게 겹쳐 배정했다(하나를 거둠. 배정 전에 진행 표를 본다). Codex에 잘못된 해시·기준을 준 것은 합쳐 네 번이다(판 생성이 실패했는지 확인한 뒤에만 해시를 넘기고, 조상 관계를 먼저 본다).
+- **알려진 한계(새로 적음)**: 에이전트 쓰기와 계획 실행기의 폴더 바꿔치기 틈(DR-73·DR-74), 계획 기록을 다른 작업 공간에 복사하면 거기서 실행됨, 여러 질의의 차로 작은 묶음을 추정할 수 있음, `revert`는 지금의 읽기 제외를 보지 않음, 읽기 다시 시도의 남은 틈(시계 눈금, FAT).
+- **확인하지 않은 범위**(그대로, `docs/manual-checks.md`): 실제 Anthropic·OpenAI API 호출(한 번도 없음. 묶음 A의 확인은 대본 모델과 모의 Anthropic뿐), 실제 터미널, 실제 OS 대화상자, 실제 한글 입력기, FAT/exFAT, Linux·macOS, GUI 패키징·서명, 접근성 수동 점검.
+- **사용자에게 물을 것(모아 둠)**: CP-24의 목록에 더해, 도구 호출 기록의 미등록 키 모양이 원문으로 남는 공통 동작을 고칠지, 표 상한 64 MiB(고정 문장이 바뀜), 100칸 줄 나눔을 위해 고정 출력을 바꿀지(진행 줄 포함, C-6a 전 필요), 계획 기록을 작업 공간에 묶을지, 읽기 제외가 사람의 화면에도 걸려야 하는지.
+
+## 진행 요약 (CP-24, 2026-11-13 17:10, main `c83ec5b`)
+
+- **CP-23 뒤 병합한 단위 51개**(새 체계 합계 172개): U-137, U-123, U-135, U-140, U-136, U-141, U-131, U-116, U-138, U-139, U-145, U-146, U-148, U-150, U-149, U-143, U-153, U-152, U-147, U-151, U-154b, U-155, U-160, U-157, U-161, U-156, U-158, U-124, U-144, U-162, U-164, U-165, U-166, U-171, U-167, U-163, U-173, U-170, U-175, U-177, U-179, U-172, U-185, U-188, U-182, U-186, U-183, U-176, U-178, U-193, U-194. 내용은 병합 커밋 제목에 있다.
+- **사용자 결정 DR-69~DR-73**(`docs/work-orders/phase-4-5-design.md`): P1 묶음 A·B를 범위에 넣고 B 먼저(DR-69). 개인정보 표에서 모델로 가는 것은 열 이름과 5행 이상 묶음의 키 값·개수·집계 수뿐(DR-70). 텍스트 편집 기능 검토 요청(DR-71)과 PM 판단(DR-72: 에이전트는 이미 `replace_text`가 있어 새 도구 없음, GUI에 사람이 고치는 작은 화면을 넣음). 편집 화면 바탕의 폴더 바꿔치기 틈은 알려진 한계로 적고 진행(DR-73).
+- **main에 들어온 것**: Markdown 규칙(P1 묶음 C, U-116), GUI의 권한 대화상자(U-124)와 경합 고침(U-144), `writablePaths`(U-170·U-175·U-182·U-186·U-183: 네 원천이 좁히기만, 앱 계층도 관문에 넘김, 설정 넓히기 판정), 묶음 B의 계약(U-170·U-175; CLI는 `plan run`을 아직 거부, U-177), 텍스트 편집의 앱 계층(U-172), `write_file`의 16 MiB 쓰기 상한(U-173), 잠금 풀기의 다시 시도와 실패 알림(U-176·U-193), 연기 시험 견고성(U-178), `models`의 한국어(U-156), 실행 목록의 `phase`(U-155·U-158·U-162).
+- **Codex 검증 세션 여섯**(사용자가 더함; PM이 이름을 붙이고 교육 뒤 배정): `codex-review`(w3:p3), `codex-loop`(w3:p8, 한도 안내 1%라 쓰지 않음), `codex-sec`(w3:pC), `codex-check`(w3:pD), `codex-audit`(w3:pE), `codex-probe`(w3:pF). 읽기 전용 검증만 맡긴다. 보고서는 `docs/reviews/2026-11-13-v*-codex-*.md`.
+  - Codex가 찾아 고친 것: U-170의 승인 없는 쓰기(V-2), U-175의 확인 없는 허용(V-3), U-176 첫 판의 '자기 잠금 거두기'가 다른 프로세스의 살아 있는 잠금을 지움(V-4, 그 기능을 뺌), U-183의 링크를 지나는 좁히기(V-8), U-180 요약의 키 모양(V-7).
+  - PM의 검증(시험 통과)만으로는 위 결함을 잡지 못했다. 보안·정합에 닿는 단위는 Codex 검증 뒤에 병합한다.
+  - Codex가 '내용을 표시할 수 없다'는 안내로 보고서 없이 멈춘 적이 세 번 있다(V-4 첫 시도, V-1b, V-10; 경로 바꿔치기 재현을 다룰 때). 남긴 결과 파일을 PM이 집계했고 그렇게 밝혔다.
+- **가장 최근 검증**(U-193·U-194 판 `d9ae775`, 트리는 `c83ec5b`와 같음, PM 실행): 타입 검사 통과, 유닛 3,475건 중 3,469 통과·0 실패·4 건너뜀·todo 2, 통합 603건 통과, 비밀 검사 통과. GUI 유닛 273건 통과(판 `d5a36a5`, PM 실행), GUI 연기 시험 216/216 네 번(같은 판, ne-verify 실행, 둘은 부하에서).
+- **병합 전에 멈춰 있는 것**: 묶음 B-3(U-180·U-187 엔진, U-181 저장; 판 `f07ba7a`)은 Codex V-11의 높음 1(승인 뒤 부모 폴더가 정션으로 바뀌면 승인 밖에 씀)을 p4g가 고치는 중. GUI 편집 화면(U-174·U-184·U-192)은 V-5b의 중간 1을, 읽기 도구 신원 대조(U-189)는 V-10에서 빠진 `inspect_files`·이름 찾기를 p5u-gui가 고치는 중.
+- **진행 중**: U-190(오류 글 둘), U-191·U-198(계획 실행의 사람용 글), U-195(CLI의 apply 나눔), U-196(앱 계층), U-197(묶음 A 계약), U-199(편집 앱 계층 통합 시험), U-200(writablePaths 문서), U-201(잠금 알림의 남은 연결).
+- **nb-i18n(w3:p5)은 14:55쯤부터 권한 질문에서 멈춰 있다**(작업 폴더 밖 임시 파일 읽기). PM은 작업자의 권한 질문에 답하지 않는다. 사용자에게 여러 번 알렸다. 문구 다듬기는 그동안 각 단위 담당이 초안으로 넣었다.
+- **PM의 실수와 조치**: Codex에 고침이 없는 병합 커밋의 해시를 주어 재확인이 헛돌았다(U-184, 다시 맡김. 해시는 `git rev-parse <브랜치>` 출력으로 넣는다). 사용자에게 "nb-i18n의 권한 질문이 사라졌다"고 잘못 알렸다가 바로잡았다(화면 끝 몇 줄만 봄). "모델은 파일 전체 쓰기만 한다"고 잘못 알렸다가 바로잡았다(DR-72). U-138 병합 커밋에 '읽음'이라 적었으나 일부만 읽었다.
+- **확인하지 않은 범위**(그대로, `docs/manual-checks.md`): 실제 Anthropic·OpenAI API 호출, 실제 터미널, FAT/exFAT, Linux·macOS, GUI 패키징·서명, 실제 OS 대화상자, 접근성 수동 점검.
+- **사용자에게 물을 것(모아 둠)**: 원천 문서의 어긋남 다섯(`docs/reviews/2026-11-13-source-docs-drift.md`), 임시 관행 넷, OpenAI가 다시 보내는 앞 응답 항목의 가림, 보고서 언어(Q-1~5, Q-7), 한국어 상태 낱말(고정 시험이 바뀜), `review --json`의 status 필드와 무결성 `run_end` 단계, `apply`·`revert --json`의 질문 중 Ctrl+C(R88b-I2), 기존 JSON 필드를 바꾸는 AX 지적, 기능 뒤 GUI 패키징.
+
+## 진행 요약 (CP-23, 2026-11-13, main `3af68f5`)
+
+- **CP-22 뒤 병합한 단위 33개**(새 체계 합계 121개): U-106, U-64, U-103, U-65, U-105, U-104, U-90, U-97, U-98, U-91, U-112, U-108, U-117, U-120, U-66, U-67, U-68, U-69, U-111, U-121, U-70, U-122, U-125, U-128, U-115, U-127, U-109, U-110, U-118, U-119, U-130, U-132, U-129. 내용은 병합 커밋 제목에 있다.
+- **실행 중 권한 확인(DR-3)**: CLI까지 main에 있다(U-74, U-107, U-106, U-108, U-109, U-110). 설정·프로필의 명령 규칙에 `confirm: true`를 두면 터미널에서 묻고, 질문 중 Ctrl+C는 실행 전체를 취소한다. 실제 터미널에서는 확인하지 않았다(흉내 낸 터미널로만). GUI의 OS 대화상자(U-124)는 진행 중이다. architecture·usage의 권한 확인 서술은 아직 갱신하지 않았다.
+- **앱 계층 함수 셋**(작업 공간 목록, 실행 사건 목록 U-90, 적용 전 점검 U-91)이 main에 있고, GUI가 이것을 쓴다: 기록 탭(U-118), 적용 전 점검(U-119), 조사서의 GUI 항목(U-60~U-70, U-103).
+- **그 밖에 들어간 것**: 첫 시작 안내(U-115), 화면 폭 함수(U-125), 실행 목록의 사람 판정과 적용 실행의 동작 수(U-129, `runs --json`에 `review` 더함), 두 판의 CLI 출력을 맞대는 도구(U-130, `scripts/compare-cli-boards.mjs`), 계약 층 시험(U-112), 예시 둘(U-122).
+- **가장 최근 검증**(U-129 판 `fc609c5`, 트리는 `3af68f5`와 같음, PM이 직접 실행): 타입 검사 통과, 유닛 3,072건 중 3,068 통과·0 실패·3 건너뜀·todo 1, 통합 584건 통과, 비밀 검사 통과. GUI 유닛 254건 통과(판 `1901063`, PM 실행), GUI 연기 시험 213건 통과(검토 R-92의 검토자 실행. PM의 worktree에는 Electron이 없다).
+- **작업자 한도 중단**: 12:24에 Claude 작업자 여섯이 주간 한도 안내로 멈췄다. 사용자의 "멈춘 세션 재개" 지시로 12:52쯤 다시 시작했고, 반쯤 된 변경은 없었다. 한도·크레딧 안내는 PM이 누르지 않고 사용자에게 알린다.
+- **PM의 실수와 조치**: U-110에서 담당이 끝났다고 보고하기 전에 판을 고정해 검토에 넘겼다(뒤 커밋이 빠져 다시 고정했다. 그 뒤로는 담당의 완료 보고를 받은 뒤 고정한다). 작업자에게 잘못된 해시를 한 번 전달했다(그 뒤로는 `git rev-parse` 출력을 그대로 붙인다).
+- **진행 중**: U-116(Markdown 규칙, 검토 R-89 중간 1 수정), U-123(GUI 낮음 셋, 검토 R-93), U-124(권한 확인의 GUI 대화상자), U-131(보고서의 판정 기다림 줄 등), U-135(비교 도구의 터미널 사례), U-136(임시 문구 다듬기), U-137(R88b-L1), U-138(사람이 직접 할 점검표 `docs/manual-checks.md`), U-139(R88b-I1).
+- **기능 뒤 예정**(DR-65, DR-67): CLI 구조 이행(`docs/reviews/2026-11-13-cli-migration-plan.md`), GUI 패키징 재질문.
+- **확인하지 않은 범위**(그대로): 실제 Anthropic·OpenAI API 호출, 실제 터미널, FAT/exFAT, Linux·macOS, GUI 패키징·서명, 실제 OS 대화상자, 접근성 수동 점검.
+- **사용자에게 물을 것(모아 둠)**: CP-22의 목록에 더해, P1 묶음 A(개인정보 자료 분석)·B(`plan: "run"`)를 범위에 넣을지와 A의 "표에서 모델로 가도 되는 것"(`docs/reviews/2026-11-13-p1-bundle-proposal.md`).
+
+## 진행 요약 (CP-22, 2026-11-13, main `bc3305d`)
+
+- **CP-21 뒤 병합한 단위 36개**(새 체계 합계 88개): U-58, U-60, U-37, U-38, U-55, U-61, U-73, U-57, U-71, U-72, U-75, U-76, U-77, U-81, U-26, U-88, U-78, U-80, U-79, U-83, U-84, U-82, U-89, U-62, U-63, U-92, U-93, U-87, U-101, U-74, U-100, U-102, U-99a, U-107, U-86, U-59. 검토 기록은 `docs/reviews/2026-11-13-*.md`(R-69~R-81, 조사 넷).
+- **사용자 결정 DR-65~DR-68**: CLI 구조 이행은 넣되 기능 뒤에, 연결되지 않은 줄 프로토콜·VS Code 코드 삭제(U-81로 함), GUI 패키징은 기능 뒤 다시 묻기, 전송 층의 재시도 판정을 결과에 남기고 고정 값에 키 하나를 더하는 것 승인(U-82로 함).
+- **설계 대조 조사 셋**(`docs/reviews/2026-11-13-gui-design-gap-survey.md`, `-adapter-design-gap-survey.md`, `-design-gap-survey.md`): 단계 0, 1a, 4(P0), 그리고 2·3의 오프라인 몫은 충족. 1b·2·3의 실제 API 몫은 확인하지 않았다(실제 API는 한 번도 호출하지 않음). 단계 5는 완료가 아니다.
+- **실행 중 권한 확인(DR-3)의 진행**: 계약·정책 관문·엔진(U-74)과 넓히기 판정(U-107)이 main에 있다. 아직 어떤 파일로도 확인 규칙을 켤 수 없고 어떤 어댑터도 묻지 않는다. 남은 순서: U-106(엔진의 답 읽기 견고함, 질문 글의 키 가림) → U-108(앱 연결) → U-109(설정·프로필에서만 `confirm`을 받음), U-110(터미널 질문) → GUI 대화상자.
+- **앱 계층 함수**: 작업 공간 목록(U-89, U-102)이 main에 있다. 실행 사건 목록(U-90)은 보안 검토 R-80의 중간 1로 수정 중이고, 적용 전 점검(U-91)은 R-81을 통과해 U-90을 기다린다. GUI의 임시 트리 읽기를 목록 함수로 바꾸는 단위(U-103)는 검토 R-82 중이다.
+- **가장 최근 검증**(U-86 판 `590d75b`, 트리는 `bc3305d`와 같음, PM이 직접 실행): 타입 검사 통과, 유닛 2,845건 중 2,841 통과·0 실패·3 건너뜀·todo 1, 통합 559건 통과, 비밀 검사 통과, 고정 시험 파일 `sp0-expected`·`real-catalog`는 변경 없음. GUI 유닛은 U-93까지 든 판 `42330f0`에서 222건 통과(PM), 연기 시험은 같은 넷을 합친 판에서 200건 통과(검토자 R-77).
+- **PM이 승인한 고정 값 변경**(더하기만): `sp0-golden.ts`의 실패 결과에 `retryable` 키 31개와 머리 주석(U-82, 사용자 결정 DR-68. PM이 스크립트로 "그 줄을 빼면 이전 파일과 같다"를 두 번 확인). U-34에서 만든 정리 미리보기의 영어 고정 시험 네 사례(U-86, 사람용 글의 구조를 바꾸는 것이 목적).
+- **검토에서 되돌린 것**(모두 고쳐 병합했거나 수정 중): U-37(R-69 M1), U-38(R-70 M-1, 허용 목록으로), U-62(R-73 M1, 경로 복사를 뺌), U-82(R-75 M1), U-86(R-76 M-1), U-90(R-80 M-1, 수정 중).
+- **PM의 실수와 조치**: 문서 단위 셋(U-60, U-72, U-76)을 병합 커밋에 "읽음"이라 적고 병합 뒤에 읽었다(문제는 없었다. 그 뒤로는 읽은 뒤에 병합한다). 사용자 질문 네 개에 답을 기다리는 동안 작업자들이 약 25분 쉬었다. 문구 담당이 다른 담당의 커밋을 기다리며 멈춰 있었는데 PM이 해시를 전달하지 않았다.
+- **임시 관행(사용자 확인 전)**: DR-64 둘에 더해, 문구 id만 더하는 계약 변경은 그 단위의 담당이 직접 하고 계약 담당이 뒤에 확인한다. 작은 단위 여럿을 한 판에 합쳐 한 번 검증한 뒤 단위별로 병합하고 최종 트리를 맞댄다(중간 상태는 따로 검증하지 않는다).
+- **진행 중**: U-90·U-91(앱 계층), U-103·U-64·U-65(GUI, 검토 R-82)와 U-66~U-70, U-104(진행 줄의 되풀이 줄 접기), U-105(엔진 쪽 빈 곳: 적용 전 점검 함수 등), U-106, U-108~U-110(권한 확인), U-97·U-98(문서).
+- **알려진 한계(바뀐 것)**: 연결 실패는 이제 재시도 가능으로 나온다(U-82). 자료 분석은 표의 행을 그대로 모델에 보낸다, `inspect_files`는 읽지 않은 파일의 해시도 준다, `plan.json`과 폐기 보관함은 로컬 원문이다(U-84가 문서로 남김). 실행 사건 목록 함수가 들어오기 전까지 GUI의 기록 탭은 없다.
+- **확인하지 않은 범위**(그대로): 실제 Anthropic·OpenAI API 호출(직접 실행할 점검 스크립트는 U-101로 준비됨, `tests/live/README.md`), FAT/exFAT, Linux·macOS, GUI 패키징·서명, 실제 OS 대화상자, 접근성 수동 점검.
+- **사용자에게 물을 것(모아 둠)**: 원천 문서와 지금 상태의 어긋남, 임시 관행(위), OpenAI가 다시 보내는 앞 응답 항목의 가림, 분석 작업 확인 항목 글의 언어, 범용 작업 P1 묶음의 범위와 값, 기존 JSON 필드를 바꾸는 종류의 AX 지적(AXM-12, AXM-19), 기능이 끝난 뒤 GUI 패키징.
+
+## 진행 요약 (CP-21, 2026-11-13, main `604f9e5`)
+
+- **CP-20 뒤 병합한 단위 30개**(새 체계 합계 52개): U-29, U-16, U-19, U-25, U-39, U-28, U-32, U-23, U-33, U-42, U-43, U-45, U-46, U-31, U-41, U-34, U-40, U-44, U-47, U-18, U-35, U-49, U-52, U-51, U-48, U-53, U-54, U-56, U-50, U-36. 내용은 병합 커밋 제목과 `docs/reviews/2026-11-13-*.md`(R-55~R-68b, 조사 셋)에 있다.
+- **사용자 결정 DR-54**: 가림 개수가 알리는 것(등록 값 전체와 같은 글이 모델에 갔는지)을 받아들이고 문서로 남긴다(U-25, U-39).
+- **PM 결정 DR-55~DR-63**과 임시 관행 DR-64(`docs/work-orders/phase-4-5-design.md`).
+- **닫힌 사용성 지적**: UX·AX 높음 넷(CP-20), AXM-4(U-18), AXM-5·AXM-7(U-15), AXM-6(U-50), AXM-17(U-25), UXM-4·5·15(U-16), UXM-7의 정리 안내·도움말·plan·changes 본문과 질문(U-34, U-35, U-36), UXM-14·24(U-32), UXM-17과 UXM-9의 인자 없는 실행(U-23, U-45). 열린 것의 목록은 문서 담당이 조사 중이다.
+- **가장 최근 검증**(U-36 판 `13414fc`, 트리는 `604f9e5`와 같음, PM이 직접 실행): 타입 검사 통과, 유닛 2,602건 중 2,598 통과·0 실패·3 건너뜀·todo 1, 통합 559건 통과, 비밀 검사 통과, 고정 시험 파일 셋은 변경 없음. GUI는 main `2ee6c0b`에서 유닛 193건·연기 시험 191건 통과(GUI 담당 측정. PM의 worktree에는 Electron 실행 파일이 없어 연기 시험을 돌리지 못한다).
+- **PM이 승인한 고정 값 변경**(더하기만): `sp0-expected.ts` "run --json"의 `masking`(U-25). 그 밖에 고정 시험 파일은 바뀌지 않았다. U-18과 U-55에서는 고정 값을 지키는 쪽으로 설계를 바꿨다.
+- **검토에서 되돌린 것**: U-16(M-1b와 PM이 찾은 뒷걸음), U-18(고정 시험·문서 인용이 깨짐), U-35(낡은 사실을 말하는 도움말), U-36(실제 CLI에서 한국어가 나오지 않음, R-66 M1), U-50(틀린 힌트, R-68 M-1), U-37(값을 받는 힌트의 사람용 줄 없음, R-69 M1), U-38(둥근 따옴표가 든 경로를 PowerShell에 붙이면 뒤가 명령이 됨, R-70 M-1). 앞의 다섯은 고쳐 병합했고 U-37과 U-38은 수정 중이다.
+- **진행 중**: U-37, U-38(수정), U-26(`init`이 제공자를 물음), U-55(다시 시도해도 되는 실패인지), U-57(시각 표기 등 UX 낮음), U-58(CLI에 남은 옛 용어), U-60~U-70(GUI 남은 설계 항목), 설계 대조 조사 둘(앱 계층, 나머지 설계 문서와 열린 사용성 지적).
+- **GUI 설계 대조**(`docs/reviews/2026-11-13-gui-design-gap-survey.md`, main `2ee6c0b`): 구현됨 66줄, 일부 18, 없음 27, 환경 밖 11. 화면의 큰 흐름과 보안 항목은 거의 다 있다. 남은 것은 편의 기능, 앱 계층 함수를 기다리는 네 기능, 패키징(GU-9)이다.
+- **PM의 실수와 조치**: 사용자 질문의 답을 기다리는 동안 작업자들이 약 한 시간 쉬었다(05:26~06:21). 병합 충돌을 손으로 풀다 닫는 괄호가 어긋났다(검증에서 걸려 고침, 시험 수를 세어 확인). U-37을 나눌 때 사람용 출력 담당을 빠뜨렸다(R-69 M1). 병합은 `/tmp`의 가드 스크립트(충돌·트리 해시 불일치·비밀 검사 실패에서 중단)로 한다.
+- **알려진 한계(새로 적음)**: 연결 실패처럼 HTTP 상태가 없는 모델 오류는 `retryable`이 없다(U-55가 병합되면). `revert`의 다음 명령 안내는 친 경로를 보이지 않는다. 읽기 명령은 쓰지 않는 한도의 상한을 검사하지 않는다. GUI 연기 시험은 병합 뒤 main에서 GUI 담당이 잰다.
+- **확인하지 않은 범위**(그대로): 실제 Anthropic·OpenAI API 호출, FAT/exFAT, Linux·macOS, GUI 패키징·서명, 실제 OS 대화상자, 접근성 수동 점검.
+- **사용자에게 물을 것(모아 둠)**: 원천 문서와 지금 상태의 어긋남 9건, 확정하지 않은 관행(DR-64 포함), OpenAI 인자 재전송의 가림, 분석 작업 확인 항목 글의 언어(고정 값이 바뀜), 전송 층의 재시도 판정을 결과에 남길지(고정 값 32개에 키 하나), GUI 패키징(새 의존성 둘과 내려받기)·서명.
+
+## 진행 요약 (CP-20, 2026-11-13, main `a191a50`)
+
+- **병합 방식이 바뀌었다(G-12, 사용자 확인)**: 묶음 대신 결정·기능 하나가 한 단위다. 약 1,500줄 이하, 검토 1건, PM 검증과 검토를 통과하면 바로 병합·푸시한다. 브랜치는 `unit/<id>-<pane 이름>`이고 main에서 딴다.
+- **새 체계로 병합한 단위 22개**: U-1, U-2, U-3, U-4, U-5, U-6, U-7, U-8, U-9, U-10, U-11, U-12, U-13, U-14, U-15, U-17, U-20, U-21, U-22, U-24, U-27, U-30. 각 단위의 내용은 병합 커밋 제목(`merge: accept unit …`)과 `docs/reviews/2026-11-13-*.md`에 있다.
+- **사용성 중간 점검(DR-46)**: UX·AX 전문가 페르소나의 점검 문서 `docs/design/ux-midpoint-review.md`, `docs/design/ax-midpoint-review.md`(U-12). 높음 네 건은 모두 병합했다: 정리가 폐기 파일을 주인 없이 남김(U-13), 승인 화면이 변조된 계획을 경고 없이 보임(U-14), 에이전트의 마지막 말이 사람에게 닿지 않음(U-21), 정리 JSON이 사실과 다름(U-22).
+- **사용자 결정 DR-47~DR-53**(`docs/work-orders/phase-4-5-design.md`): 에이전트 마지막 답을 머리말과 가림을 거쳐 보임, JSON 계약을 깨는 변경은 두 곳만, 터미널에서 JSON 줄 숨김·인자 없으면 도움말, 용어 통일, 다음 명령 안내에 사용자가 친 경로, 가림 개수만 결과에(보안 검토가 병합 조건), 보관함에 파일이 남은 적용 실행의 기록은 지우지 않음.
+- **통합 문서**: `docs/guidelines.md`(규칙 색인)와 `docs/decision-register.md`(결정 대장)를 U-6으로 넣었다.
+- **PM이 승인한 고정 값 변경**(더하기만): `tests/unit/cli/sp0-expected.ts`의 "run request" system 글(U-15), "run --json"의 `finalMessage`(U-21).
+- **가장 최근 검증**(U-22 판 `4eda8d8`, 트리는 `a191a50`과 같음, PM이 직접 실행): 타입 검사 통과, 유닛 2,273건 중 2,269 통과·0 실패·3 건너뜀·todo 1, 통합 559건 통과, 비밀 검사 통과. GUI 유닛 165건·연기 시험 181건 통과(검토 R-51b).
+- **진행 중**: U-16(실행 목록·되돌리기 안내가 적용 상태를 사실대로. 확인 R-55b의 중간 M-1b 수정 중), U-29(앞선 실행이 확인하지 못한 것을 apply가 알림. 검토 R-56 중), U-25(가림 개수, DR-52. CLI·사람용 몫 구현 중, 그 뒤 보안 검토), U-19(한국어 빈 곳), U-28(코드에 남은 옛 용어), U-31(문서), U-32(GUI 계획 화면 후속).
+- **대기**: U-18(실패한 도구 호출 보이기), U-23(DR-49·DR-51), U-26(`init`이 제공자를 물음).
+- **중단과 재개**: 2026-11-13 01:22~01:53에 작업 세션들이 사용 한도로 멈췄고, 사용자의 재개 지시 뒤 이어 갔다. Codex 두 세션(w3:p3, w3:p8)은 작업 공간 크레딧이 소진되어 멈춰 있다. 화면의 질문에는 답하지 않았다. 검토는 그 단위를 구현하지 않은 Claude 세션이 맡는다.
+- **알려진 한계(새로 적음)**: 죽은 실행의 잠금이 남으면 `--run latest`가 `run_in_progress`, 새 실행이 `workspace_locked`로 막히는 경우가 하나 있다(기존 잠금 규칙에서 옴, U-31에서 문제 해결 절에 적는다). OpenAI 제공자는 모델의 앞선 호출 인자를 가림 없이 그대로 돌려받는다(Anthropic 쪽은 가려진다). 실행이 끝난 뒤의 기록 변조는 감지하지 못한다.
+- **확인하지 않은 범위**(그대로): 실제 Anthropic·OpenAI API 호출, FAT/exFAT, Linux·macOS, GUI 패키징·서명, 실제 Electron 창과 OS 대화상자.
+- **사용자에게 물을 것(모아 둠)**: 원천 문서(CLAUDE.md, AGENTS.md 등)와 지금 상태의 어긋남 9건, 확정하지 않은 관행 12건, OpenAI 인자 재전송의 가림, GUI 배포 전 패키징·서명.
+
+## 진행 요약 (CP-19, 2026-11-12, main `6f85b65`)
+
+- **여섯 번째 묶음을 main에 병합했다**(`6f85b65`). 고정 판 `pm/bundle-6c`(`39df2ba`)와 트리 해시가 같다.
+- 고정 판에서 PM이 실행한 검증(루트만): 타입 검사 통과, 유닛 2077건 중 2065 통과·실패 0·건너뜀 3·todo 9, 통합 559건 통과, `check-secrets --tracked` 발견 없음, 고정 시험 파일 셋은 main과 같음. Codex(w3:p8)가 같은 판에서 독립으로 같은 수치를 냈고 유닛 두 번의 결과가 같았다. GUI 시험은 검토자(w3:p4)가 돌렸다.
+- 들어간 것: 기록 변조 감지(DR-38), 정리(DR-39)와 별도 확인(DR-44), 실행 중 가림의 끊긴 등록 값 처리, 검증기 합치기와 '키 같은 값' 조건(DR-43), GUI 정리 화면.
+- 경과: 고정 전 PM 검증에서 네 번 떨어졌다(타입 오류 3건, 고정 시험 실패 1건, 부하에 흔들리는 시간 시험 1건, PM이 문구 담당을 빠뜨려 생긴 타입 오류). 모두 검토에 넘기기 전에 잡았다. 정리는 검토 R-34, R-34b, R-34c 세 번을 거쳤다.
+- 병합 전 검토: R-33, R-33b, R-34, R-34b, R-34c, R-35, R-36, R-28c. 병합 시점에 열린 높음·중간 지적은 없다.
+- 남은 낮음(다음 단위): 실행이 끝난 뒤의 기록 변조는 감지되지 않는다(R-33), 기록 변경 표시가 사람용 출력에서 보고서에만 나온다, apply가 변경 표시가 있는 계획을 말없이 적용한다, 실행 시작 줄의 알림과 적용 기록의 알림(R-36), 정리의 계약과 store의 어긋남(손상 실행의 표시, 표지 파일 이름, 표지 없는 폴더가 보이지 않음, R-34c), todo 9건.
+- 사용자 결정(2026-11-12): 키처럼 생기지 않은 등록 값이 드문 문자로 끊긴 경우는 한계로 두고 문서화한다. 지침 G-7~G-11 추가. **병합·푸시 단위는 결정 하나가 한 단위(G-12)** — 이 묶음이 마지막 큰 묶음이다.
+- 확인하지 않은 범위: 실제 Anthropic·OpenAI API 호출, FAT·exFAT 실제 볼륨, Linux·macOS, GUI 패키지 빌드와 코드 서명.
+
+## 진행 요약 (CP-18, 2026-11-12, main `3bd0646`)
+
+- **다섯 번째 묶음을 main에 병합했다**(`3bd0646`). 고정 판 `pm/bundle-5`(`ab31417`)와 트리 해시가 같다.
+- 고정 판에서 PM이 실행한 검증(루트만): 타입 검사 통과, 유닛 1879건 중 1865 통과·실패 0·건너뜀 3·todo 11, 통합 559건 통과, `check-secrets --tracked` 발견 없음. GUI 시험은 검토자(w3:p4)가 같은 판에서 돌렸다: GUI 유닛 134/134, 연기 시험 131/131을 두 번.
+- 들어간 것: DR-41(설정·프로필·task 파일의 정책을 작업 종류의 규칙과 합침, 빠진 것 알림), DR-42 (a)(b) 키 거부, `doctor`와 키 안내 문구 수정, 되돌리기 미리보기 한국어, DR-38·DR-39의 계약(구현은 다음), GUI 후속(연기 시험 경합 수정 등).
+- 고정 시험 값: 바뀐 곳은 승인한 세 곳뿐임을 검토자(R-32)가 main과 직접 비교해 확인했다.
+- 가림 모듈의 끊긴 등록 값 가림은 R-28, R-28b를 거쳤고 낮음 1(토큰 범위 상한)을 고친 뒤 다음 묶음에 넣는다. 그때까지 main의 실행 중 가림은 끊긴 값을 가리지 못한다.
+- 다음 묶음: DR-43 (a)~(d), 가림 변경, DR-38·DR-39 구현(store, 엔진, CLI), GUI 남은 화면.
+- 확인하지 않은 범위: 실제 Anthropic·OpenAI API 호출, FAT·exFAT 실제 볼륨, Linux·macOS, GUI 패키지 빌드와 코드 서명.
+
+## 진행 요약 (CP-17, 2026-11-12, main `aedbb9d`)
+
+- **네 번째 묶음을 main에 병합했다**(`aedbb9d`). 고정 판 `pm/bundle-4`(`700fa35`)와 트리 해시가 같다.
+- 고정 판에서 PM이 실행한 검증(루트만): 타입 검사 통과, 유닛 1820건 중 1802 통과·실패 0·건너뜀 3·todo 15, 통합 559건 통과, `check-secrets --tracked` 발견 없음. GUI 시험은 PM이 돌리지 않았고 검토자(w3:p4)가 같은 판에서 돌렸다: GUI 유닛 133/133, 연기 시험 129/129를 세 번.
+- 들어간 것: GUI의 제공자 선택과 새 작업 화면의 제공자·모델 표시, 실행 목록에서 계획 열기, 모든 제공자에 걸리는 시험용 루프백 전용 전송과 소켓 감싸기·거절 횟수 단언(예약 주소 대신 닫힌 포트), 제공자 변경의 OS 확인, 앱 계층의 목적지 판정 다듬기와 설정 크기 상한, 문서.
+- 병합 전 검토: R-29(GUI, 높음 0·중간 0·낮음 1), R-30(앱 계층의 목적지 판정을 CLI의 실제 주소 해석과 설정 순서쌍 약 720만 개로 대조, 높음 0·중간 0·낮음 1). 낮음: 연기 시험의 '실행 중 창 닫기' 단계가 요청 수 검사와 경합할 수 있다(GUI), 상한 크기의 BOM 붙은 설정을 `models`만 거부한다(CLI).
+- 가림 모듈의 끊긴 등록 값 가림(`1f242fc`)은 R-28(높음 0·중간 0·낮음 0)을 통과했고 다음 묶음에 넣는다.
+- 확인하지 않은 범위: 실제 Anthropic·OpenAI API 호출, FAT·exFAT 실제 볼륨, Linux·macOS, GUI 패키지 빌드와 코드 서명.
+
+## 진행 요약 (CP-16, 2026-11-12, main `36cc99c`)
+
+- **세 번째 묶음을 main에 병합했다**(`36cc99c`). PM 통합 worktree의 고정 판 `pm/bundle-3b`(`57ff974`)와 한 파일도 다르지 않다(트리 해시 같음).
+- 고정 판에서 PM이 실행한 검증(검토에 넘기기 전): `npm ci` 성공, 타입 검사 통과, 유닛 1810건 중 1792 통과·실패 0·건너뜀 3·todo 15, 통합 559건 통과·실패 0, `check-secrets --tracked` 발견 없음. 실제 API 미실행.
+- 들어간 것: Anthropic 실행 거부용 키 모양 좁히기(DR-36 c)와 그 회귀 수정(DR-40: 끊긴 키, 붙은 키, 선형 시간, task·설정 파일 크기 상한), Anthropic 인증 실패 고정 문구(DR-37 a), `doctor`의 키 주소 안내와 모델 출처(DR-36 a, b), 변경 보기의 파일별 표시, 잠금 중 parked 알림(DR-37 c), OpenAI 통합 사례, 문서(privacy.md, usage.md 제공자 절, README, 색인), 앱 계층 수정 다섯 건(제공자·주소 변경을 넓히는 변경으로 판정, 모든 제공자의 키 값 거부, OpenAI 모델 목록). 그 앞에 store 수정 `e75726e`(OpenAI 실행의 목록·보고·되돌리기)를 따로 병합했다.
+- 병합 전 검토: 첫 고정 판 `005e10b`에 R-25(중간 1: main 대비 회귀), R-26, Codex의 고정 값 확인. 중간 때문에 병합을 멈추고 DR-40으로 고친 뒤 `57ff974`에 R-25b, R-27. 병합 시점에 열린 높음·중간 지적은 없다. 남은 낮음은 DR-42에 적었다.
+- todo 15건: `doctor` 설정 출처 문구와 제공자 문구(계약 id 대기), 끊긴 등록 값의 실행 중 가림(DR-42 c), R-12 L-2, G-C 등 다음 묶음에서 풀 재현 시험이다.
+- 바깥 연결 시도 세 건(작업자 자진 보고): 문서 담당의 `.test` 이름 조회 1회, GUI 담당의 예약 주소 `192.0.2.1` 요청 2회. 모두 가짜 키였고 실제 제공자 주소로 간 요청은 없다. 연결·응답 여부는 기록이 없다. 지침 후보 G-11을 임시 적용했다.
+- 다음 묶음: DR-41(설정 정책이 작업 종류 규칙을 대체하지 않게), DR-42 (a)~(e), DR-38(기록 변조 감지), DR-39(정리), `doctor` 문구 결함, GUI 묶음(제공자 선택, 실행 목록의 계획, 네트워크 거절 집계).
+- 확인하지 않은 범위: 실제 Anthropic·OpenAI API 호출, FAT·exFAT 실제 볼륨, Linux·macOS, GUI 패키지 빌드와 코드 서명.
+
+## 진행 요약 (CP-15, 2026-11-12, main `c20c51d`)
+
+- **두 번째 묶음을 main에 병합했다**(`c20c51d`). PM 통합 worktree의 판 `fe54cc6`(작업 브랜치 9개를 합친 `47756b4`에 문구 커밋 `5c0b4e1` 하나를 더한 것)과 한 파일도 다르지 않다.
+- 병합 뒤 main에서 PM이 실행한 검증: `npm ci` 성공, 타입 검사 통과, 유닛 1702건 중 1696 통과·실패 0·건너뜀 3·todo 3, 통합 537건 통과·실패 0, `check-secrets --tracked` 발견 없음. 실제 API 미실행.
+- 들어간 것: 두 번째 제공자 OpenAI(계약 SP-1, 공용 HTTP 모듈 SP-3, Responses API 어댑터 SP-5, CLI의 키 등록·가림 SP-2와 설정 SP-4와 연결 SP-6, 결정 DR-31~DR-35), 변경 보기의 가린 글 표시(DR-29, DR-32: 도구·store·앱 계층), 되돌리기의 parked 위치 알림, 적용 사전 점검 중 취소, 독립 GUI 화면(GU-3~GU-7), Anthropic 고정 시험(SP-0).
+- 병합 전 검토(구현자가 아닌 세션): r16, r17, r18, r19, r20, r21·r21b, r22·r22b, r23, r24와 Codex(w3:p3)의 계약 수정 확인, Codex(w3:p8)의 main 3회 독립 검증. 병합 시점에 열린 높음·중간 지적은 없다.
+- PM의 실수와 조치: 고정 판 `47756b4`를 만들 때 계약 브랜치의 최신 판을 합쳐, 다음 묶음으로 넘기기로 한 DR-36 (a)(b) 계약(문구 id와 타입만 추가)이 들어갔고 문구가 없어 타입 검사가 실패했다. 고정 판을 만든 뒤 빌드하지 않고 검토에 넘긴 것이 원인이다. 문구 커밋 하나만 골라 더해 바로잡고 전체 검증을 다시 통과시킨 뒤 병합했다. 기존 동작을 바꾸는 DR-36 (c)(d)는 들어가지 않았음을 확인했다.
+- 다음 묶음: DR-36 (c) Anthropic 실행 거부용 키 모양과 (d), DR-37 (a) Anthropic 인증 실패 고정 문구(둘 다 기존 Anthropic 동작을 바꾼다), `doctor`의 키 주소 안내와 모델 출처, 변경 보기의 파일별 표시, DR-37 (c)(d), 문서(privacy.md, usage.md의 제공자 절과 한계 절).
+- 확인하지 않은 범위: **실제 Anthropic·OpenAI API 호출**(OpenAI 어댑터는 공식 문서의 서술과 가짜 서버로만 확인했다), FAT·exFAT 실제 볼륨, Linux·macOS, GUI 패키지 빌드와 코드 서명. 현행 Codex 계열 모델 id가 API에 없으므로 OpenAI 제공자의 모델은 사용자가 고른다.
+- 알려진 한계(추가): 변경 기록 파일을 변조하면 변경 보기의 가림을 우회할 수 있다(DR-37 b). 심한 부하에서 잠금 판정이 안전한 쪽(`workspace_locked`)으로 끝날 수 있다.
+
+## 진행 요약 (CP-14, 2026-11-12, main `d7f8381`)
+
+- **사용성 개선과 범용 작업 묶음을 main에 병합했다**(`d7f8381`). 작업 브랜치 10개를 PM 통합 worktree(`pm/integration` `4ebc945`)에서 합쳐 검증한 판과 한 파일도 다르지 않다.
+- 병합 뒤 main에서 PM이 실행한 검증: `npm ci` 성공, 타입 검사 통과, 유닛 1508건 중 1503 통과·실패 0·건너뜀 3·todo 2, 통합 519건 통과·실패 0, `check-secrets --tracked` 발견 없음. 실제 API 미실행.
+- 들어간 것: 사용성 CLI 연결(N-1~N-27: 기본 설정 위치, `init`, 프로필, 한 줄 실행, 두 언어, 사람용 출력, `runs`, `--run latest`, `revert --dry-run`, 진단, 잠금 안내), 범용 작업(계약 G-A, 엔진 G-B, 도구·적용기·정책 G-C, 검증기·표 해석 G-D, 저장·되돌리기 G-E, CLI `plan`·`apply`·`review` G-F, 통합 사례 G-G), 앱 계층 추가분(실행 목록, 설정 만들기, 계획·적용·사람 확인, 동의 전달), 독립 GUI 뼈대(`gui/`, GU-1·GU-2), 사용 문서.
+- 병합 전 검토(모두 구현자가 아닌 세션, 원문은 `docs/reviews/2026-11-12-`): r5, r6, r7·r7b, r9·r9b·r9c, r10·r10b, r11, r12, r13, r14, r15. 병합 시점에 열린 높음·중간 지적은 없다. R-14·R-15의 중간(계획 보기의 가림 비교)은 CLI 연결 `2f6d5c8`로 닫혔고 PM이 통합 판에서 앱 계층 시험으로 확인했다.
+- CP-13에 적은 main의 알려진 결함 세 건(위조 실행 기록의 되돌리기, 검증기 id 출력, pid만 보는 잠금)은 이 병합으로 고쳐졌다.
+- 남은 것(후속 배정):
+  - 검토의 낮음 지적: R-10b 2건, R-12 4건, R-13 3건, R-14 3건, R-15 1건(링크와 원본 지우기 사이에서 끊긴 적용).
+  - todo로 표시된 시험 2건(`tests/unit/app/plan-review.test.ts`, `tests/unit/engine/g-real-combination.test.ts`)의 표시 제거.
+  - N-28 시험 수정(pid로 죽이는 유닛 시험, 간헐 실패 Z-1의 유력한 원인)은 w3:p5가 main 기준 커밋을 준비 중이다.
+  - DR-29 후속: 실행이 변경 파일의 가린 표기를 기록해 `changes`가 다시 글을 보여 줄 수 있게 한다. 폐기 보관함·실행 기록 정리의 계약과 함수.
+  - 두 번째 제공자(Codex, DR-22): 묶음이 병합됐으므로 착수한다.
+  - 독립 GUI의 화면 단위(GU-3 이후).
+- 확인하지 않은 범위: 실제 Anthropic API, FAT·exFAT 실제 볼륨(동의 경로는 링크 실패를 주입한 유닛으로만 확인), Linux·macOS, GUI 패키지 빌드와 코드 서명.
+
+## 진행 요약 (CP-13, 2026-11-12, main `143d161`)
+
+- main에 병합된 것(재개 뒤): 체험 예시와 사용 문서(N-D), 단계 4·5 설계 문서 넷과 맞춤(D3), `models` 통합 사례와 Z-1 진단, 사용성 계약(N-14~N-18 수정 포함), 두 언어 문구 카탈로그(N-B), 사람용 출력·실행 목록·`revert --dry-run` 모듈(N-C), 앱 계층 `src/app`(A-1, DR-15 수정 포함), 시험의 죽은 잠금 pid 수정(Z-2).
+- 마지막 합친 트리 검증(PM 실행, `143d161`): 타입 검사 통과, 유닛 850건 중 849 통과·실패 0·건너뜀 1, 통합 387건 통과, 비밀 검사 발견 없음. 실제 API 미실행.
+- 아직 main에 없는 것(브랜치에서 진행 중): 사용성 모듈의 CLI 연결(N-A, `claude/workspace-policy`), N-23~N-26 수정(`claude/core-tools`), 새 계약의 문구(`claude/security-core`), 범용 작업 계약·엔진(`claude/general-tasks`), 도구·적용기·정책(`claude/gui-design`), 검증기·표 해석(`claude/revert-store`), 앱 계층의 실행 목록·`changes`·VS Code 확장 코어(`claude/adapter-contract`). 계약·문구·출력·CLI는 합친 트리가 통과할 때 한 묶음으로 병합한다.
+- main에 남아 있는 알려진 결함: 위조된 실행 기록을 되돌리면 사용자 파일이 지워진다(R-2 M-2, 결정 N-23 (b)·N-26, 수정 진행 중). 진행 줄과 `report`가 task의 검증기 id를 그대로 낸다(R-3, N-24 (a), 연결 때 수정). 잠금이 pid만으로 생존을 판정한다(N-25).
+- 간헐 실패: Z-1(빈 stdout)은 재현되지 않았고 원인 미확정이다. Z-2(T-9)는 원인을 확인하고 시험을 고쳤다.
+- 검토 기록: `docs/reviews/2026-11-12-`의 n(계약), r1(설계), r2(문구·출력), r3(계약 수정), r4(범용 계약·앱 계층). R-5(엔진·도구)는 w3:p5가 진행 중이다.
+- 결정 번호: 사용성 N-14~N-26은 [사용성 개선 지시](work-orders/phase-4-usability.md), 설계 DR-1~DR-17은 [단계 4·5 설계 지시](work-orders/phase-4-5-design.md).
+- 운영 교훈: 새 모듈(A-1, N-C)을 독립 검토 전에 병합해 높음·중간 결함이 main에 들어갔다. 이후 새 모듈은 교차 검토 결과를 본 뒤 병합한다.
+
+## 사용자 지시 (CP-12, 2026-11-12)
+
+- 개발 목표는 최종 설계까지 모두 구현하는 것이다. 사용성 개선, 단계 4 범용 작업, 단계 5 어댑터 계약·VS Code 확장·독립 GUI를 설계에서 구현까지 이어 간다.
+- 작업자는 작업 지침 교육(개발 절차 5절)을 받고 시작한다.
+- 작업 중 필요해진 새 지침은 PM이 바로 추가하지 않는다. 아래 "지침 후보"에 모아 두고 사용자가 확인한 뒤 추가한다. 사용자가 수시로 필요한 지침이 있는지 묻는다.
+- 사용자 판단이 필요한 질문은 PM이 먼저 받아 아래 "사용자 확인 대기"에 모은다. 사용자가 질문을 알려 달라고 하면 하나씩 정리한다. 이미 쌓인 결정이나 문서에 근거가 있으면 PM이 직접 답하고 근거를 작업 지시서에 남긴다.
+- Codex는 사용 한도가 적어 검증 작업만 맡긴다. 한도로 멈추면 5시간 주기로 초기화되므로 그때 확인해 다시 배정한다.
+- 커밋과 push는 적절한 단위로 하고, 작성자는 `gangdonggil <gangdonggilstudy@gmail.com>`이다.
+- 필요하면 각 작업 탭에서 Claude 한 세션을 보조 관리자로 지정해도 된다(Codex 제외). 지금은 PM이 모두 직접 배정한다. 사용성 개선의 순서 조율이 PM의 병목이 되면 그때 WORKING 탭에 보조 관리자를 둔다.
+
+- 제품 방향(같은 날 추가): **GUI를 지원한다. Codex도 지원한다.** 참고 사항으로 받았다.
+  - GUI: 독립 GUI는 설계에서 끝내지 않고 구현 대상이다. 형태와 비용에 관한 Q-7은 그대로 확인이 필요하다.
+  - Codex: PM은 "Anthropic 외에 OpenAI Codex 계열 모델을 두 번째 제공자로 쓸 수 있게 한다"로 이해했다(Q-9로 확인 대기). 이 이해에 따라 모델 인터페이스, 설정, 문구, 어댑터 계약에 Anthropic 전용 가정을 새로 넣지 않는다. 구현 착수는 사용자 확인 뒤다. API 제공자 우선순위는 여전히 Anthropic이다.
+
+### 사용자 답 (2026-11-12, 질문을 하나씩 확인함)
+
+| 번호 | 사용자 답 | 적용 |
+| --- | --- | --- |
+| Q-9 | Codex 지원은 OpenAI Codex 계열 모델을 Anthropic에 이은 두 번째 API 제공자로 추가하는 것이다. 지금은 제공자 중립 조사만 하고 구현은 범용 작업 묶음이 main에 들어간 뒤 시작한다 | w3:p9가 조사 중. 결정 DR-22 |
+| Q-7 | 독립 GUI는 Electron, Windows 11 64비트 먼저. 코드 서명은 배포 전에 다시 정한다 | 결정 DR-20 |
+| Q-3 | **VS Code 플러그인은 개발하지 않는다.** 플러그인과 같은 편의성을 독립 GUI가 갖게 한다. GUI에 필요한 개발 의존성은 PM이 근거를 기록하고 버전을 고정해 추가한다. CLI·엔진의 실행 의존성은 0개로 유지한다 | 결정 DR-20. N-13(VS Code 확장 먼저)과 VX 계열 결정을 대체한다 |
+| Q-4 | 개인정보가 든 표의 원자료 행은 모델로 보내지 않는다. 로컬 집계 도구가 생길 때까지 개인정보 자료 분석은 지원하지 않는다 | GT-D8 (b) 확정 |
+| Q-5, Q-6 | 삭제는 보관함 이동, 자료 분석은 사람 확인이 기본, 바이너리 파일 이동 허용 | GT-D5, GT-D7 확정 |
+| Q-8 | 하드 링크가 없는 드라이브에서는 기본으로 막고, 적용 전 점검에서 위험을 알린 뒤 사용자가 그 실행에 한해 따로 동의하면 옮긴다 | 결정 DR-21. DR-18 (b)를 고친다 |
+| Q-1 | 비밀 검사 훅은 설치하지 않고 커밋마다 수동 검사를 유지한다 | 지금 방식 그대로 |
+
+### 사용자 확인 대기
+
+(위 답으로 Q-1, Q-3~Q-9는 모두 정리됐다. 아래 표는 기록으로 남긴다. 새 질문이 생기면 이 표에 더한다.)
+
+| 번호 | 출처 | 질문 | PM 가정(진행 중) |
+| --- | --- | --- | --- |
+| Q-1 | PM | 비밀 검사 커밋 전 훅 설치가 자동 권한 판단에서 막혔다. 사용자가 직접 설치하거나 허용할지 | 훅이 생길 때까지 모든 커밋 전에 `node scripts/check-secrets.mjs --staged`를 직접 실행한다 |
+
+| Q-2 | PM | `git push origin main`이 거부됐다(이 PC의 SSH 키는 GitHub 계정 gangdonggil로 인증되는데 원격 `gangdonggilstudy/Codaryn`에 쓰기 권한이 없다). 저장소에 그 계정을 협업자로 추가할지, gangdonggilstudy용 키를 등록할지 | **해결(2026-11-12).** 사용자가 권한을 줬고 `b386166` push가 성공했다 |
+
+| Q-3 | P5-A (VX-D4) | VS Code 확장 개발에 개발 의존성 `@types/vscode`를 추가해도 되는가 | 추가하지 않고 VS Code API에 의존하지 않는 확장 코어까지만 구현한다 |
+| Q-4 | P4-G (GT-D8) | 개인정보가 든 표를 분석할 때 원자료 행을 Anthropic API로 보내도 되는가 | 안 된다. 집계 도구가 생기기 전에는 개인정보 자료를 다루지 않는다 |
+| Q-5 | P4-G (GT-D5, D7) | 파일 정리의 "삭제"를 보관함 이동으로 대신하고, 자료 분석은 기본으로 사람 확인을 거치게 해도 되는가 | 둘 다 그렇게 한다 |
+| Q-6 | P4-G | 파일 정리가 이미지·오피스 문서 같은 바이너리 파일을 (내용을 읽지 않고) 옮겨도 되는가 | 된다 |
+| Q-7 | P5-U (PQ-1~3) | 독립 GUI: 코드 서명 비용을 쓸지, 설치 크기가 큰 Electron을 받아들일지, Windows 11 x64만으로 시작할지 | 답을 받기 전에는 GUI 구현을 열지 않는다. 설계 기준은 Electron, Windows 11 x64 우선 |
+
+| Q-8 | G-C, R-5 (DR-18 b) | 하드 링크가 없는 드라이브(FAT·exFAT, 예: USB 메모리)에서는 이동 중 다른 파일을 덮어쓸 작은 가능성이 있다. 그런 드라이브에서 파일 정리를 아예 막을지, 위험을 알리고 허용할지 | 막는다. 첫 항목에서 멈추고 아무것도 바꾸지 않는다. 적용 전 점검에서 미리 알린다. Windows의 읽기 전용 파일도 옮기지 않는다 |
+
+| Q-9 | PM | "Codex 지원"의 뜻: (a) OpenAI Codex 계열 모델을 두 번째 API 제공자로 추가, (b) Codex CLI와의 연동(예: Codex가 Codaryn을 부르거나 그 반대), (c) 둘 다. 그리고 착수 시점 | (a)로 이해하고, 지금은 Anthropic 전용 가정을 새로 넣지 않는 것까지만 한다. 제공자 구현은 확인 뒤 |
+
+### 지침 후보
+
+| 번호 | 출처 | 내용 | 상태 |
+| --- | --- | --- | --- |
+| G-1 | PM | 비밀 검사 훅이 없을 때는 커밋 전에 같은 검사를 직접 실행하고 보고서에 결과를 적는다 | 사용자 확인(2026-11-12). `development-workflow.md` 7절에 추가 |
+| G-2 | w3:pA | 자기 브랜치의 push 전 커밋을 되돌려야 할 때의 규칙(예: `git reset --keep`만 허용, 되돌리기 전에 보고서에 먼저 기록). 지금 지침은 `reset --hard`만 금지한다 | 사용자 확인(2026-11-12). 7절에 추가 |
+| G-3 | PM | 새 모듈은 구현자가 아닌 세션의 교차 검토 결과를 본 뒤 main에 병합한다(지금 절차는 병합 뒤 검토) | 사용자 확인(2026-11-12). 8절에 추가 |
+| G-4 | w3:p9 | 커밋 전 `git diff --cached --check`가 실패하면 커밋하지 않는다(검사 실패에도 커밋이 만들어진 일이 있었다) | 사용자 확인(2026-11-12). 7절에 추가 |
+| G-6 | 사용자 | 원격 push는 오케스트레이터만 한다. 오케스트레이터가 직접 검증한 변경만 올린다 | 사용자 제안(2026-11-12). 8절에 추가 |
+| G-7 | w3:p5 | 시험은 자기가 띄운 자식의 핸들로만 프로세스를 끝낸다. 기록해 둔 pid 번호로 죽이지 않는다(끝난 pid는 다른 프로세스에 다시 주어진다). 통합 시험 규칙을 유닛 시험에도 적용한다 | 사용자 확인(2026-11-12). 7절에 추가 |
+| G-8 | w3:pB | 여러 담당이 계약을 함께 따라가는 구간에는 어느 브랜치도 단독으로 타입 검사를 통과하지 못할 수 있다. 그때는 자기 범위의 시험 통과를 확인하고, 물려받은 오류의 파일 목록을 커밋 메시지나 보고서에 적은 뒤 커밋한다(G-4의 보완) | 사용자 확인(2026-11-12). 7절에 추가 |
+| G-9 | w3:pB, PM | 보고하는 수치는 실제로 올리는 판에서 잰 것이어야 하고 판의 해시를 함께 적는다. 병합하거나 고정 판을 만든 뒤에는 그 판에서 빌드와 시험을 다시 돌린다(PM의 고정 판 포함) | 사용자 확인(2026-11-12). 7절에 추가 |
+| G-10 | w3:p7 | 보고서와 문서에 키 모양으로 보일 수 있는 합성 예시는 문자열을 쪼개 쓰거나 설명으로 적는다(커밋 비밀 검사에 걸린다) | 사용자 확인(2026-11-12). 7절에 추가 |
+| G-11 | w3:pB, w3:p7 | 닿지 않는 주소가 필요한 시험과 탐침은 예약 주소(TEST-NET, `.test`)를 쓰지 않고 `127.0.0.1`의 닫힌 포트를 쓴다. 방어를 일부러 지워 보는 확인은 바깥으로 나갈 수 없는 조건에서만 한다(예약 주소라도 연결 시도와 이름 조회는 컴퓨터 밖으로 나간다) | 사용자 확인(2026-11-12). 7절에 추가 |
+| G-12 | 사용자 | 병합·푸시 단위는 결정 하나 또는 기능 하나(계약·문구·구현·연결)로 한다. 약 1,500줄 이하, 검토 1건, 통과하면 바로 병합·push. 무관한 결정을 섞지 않는다 | 사용자 확인(2026-11-12). 8절에 추가 |
+| G-5 | w3:p5 | TypeScript 7이 정규식 리터럴의 U+2028 이스케이프를 원문자로 내보낸다. 그런 정규식은 문자열로 만든다 | 사용자 확인(2026-11-12). 7절에 추가 |
+
+## 현재 상태 (CP-12, 재개)
+
+**사용자가 2026-11-12에 새 Herdr 세션 w3의 w3:p1에 오케스트레이터를 맡기고 작업을 재개시켰다.**
+
+- 저장소를 새로 받은 상태였다. worktree, `node_modules`, 공용 훅, 정지 전 `.codaryn/` 메모가 없었다.
+  - worktree 5개를 원격 작업 브랜치에서 다시 만들었다.
+  - 설계 작업용 worktree 3개(`claude-general`, `claude-adapter`, `claude-gui`)를 main에서 새로 만들었다.
+  - 저장소 로컬 설정의 작성자를 `gangdonggil <gangdonggilstudy@gmail.com>`으로 맞췄다. 전역 설정의 메일이 달랐다.
+  - 공용 훅 설치는 권한 판단에서 막혀 Q-1로 대기한다.
+- main `34393bd` 기준 검증(PM 실행): `npm ci` 성공, 타입 검사 통과, 유닛 726건 중 725 통과·실패 0·건너뜀 1, 통합 343건 통과·실패 0, `check-secrets --tracked` 발견 없음.
+- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** `tests/live` 점검, Windows 외 OS, OS 수준 격리, 실제 모델로 하는 자기 개발은 모두 미수행이다.
+- 미해결 문제:
+  - 간헐 실패 Z-1: 통합 전체 4회 중 1회, V-2 사례에서 CLI가 빈 stdout으로 끝났다. 원인 미확정. 진단 보강 `688a918`은 `claude/cli-verification`에만 있다. w3:p8(Codex)이 반복 재현을 맡는다.
+  - `models` 통합 사례(`dd638a3`, `832168d`)는 `claude/cli-verification`에만 있다. w3:p4가 main을 병합해 실행한 뒤 PM이 병합한다.
+- 배정: 사용성 개선은 [사용성 개선 지시](work-orders/phase-4-usability.md)의 "재개 배정", 단계 4·5 설계는 [단계 4·5 설계 지시](work-orders/phase-4-5-design.md)를 따른다.
+
+### PM 결정 (CP-4, CP-5)
+
+- 도구가 `workspace.resolve` 거부를 `policy_denied`로 돌려주는 것을 승인했다. 계약에 도구 전용 코드를 추가하지 않는다.
+- 정책의 거부 사유 보고 순서(path, command, network, destructive, restore)와 내장 도구 고정 요구 표와의 합산 판정을 승인했다.
+- Workspace 계약에 `exists`/`stat`을 추가하지 않는다.
+- 실행 기록에는 모델에 돌려준 모든 도구 결과를 `tool_result`로 남긴다. 거부된 호출도 `tool_decision` 뒤에 `ok:false` 결과를 기록한다.
+- 원위치 규칙을 강화한다: `mask(original)`과 `maskedNext`를 줄로 나눠, 토큰이 든 줄의 목록이 내용과 순서 모두 같아야 한다. 토큰이 없는 줄만 자유롭게 바꿀 수 있다. 비밀이 든 줄 자체는 수정할 수 없다.
+- 겹치는 비밀 일치는 구간을 합쳐 하나의 보호 구간으로 만든다. 원문의 `CODARYN_SECRET` 조각은 거부하지 않고 보호 구간으로 가린다(자기 소스 수정이 가능해지도록).
+- 검색은 가림본을 대상으로 한다. 자르기는 가린 뒤 토큰 경계에서 한다. 엔진은 직렬화 전에 문자열 필드별로 가린다.
+- `allowExtraArgs:true`인 명령 규칙은 추가 인자의 경로를 검사하지 않는다. 코드는 바꾸지 않고 알려진 한계로 문서화한다.
+- 설정 결정 C-1~C-8(`docs/work-orders/phase-1b-config.md`): 키는 환경 변수로만, 설정·env 파일은 명시했을 때만, 모델과 출력 상한에 코드 기본값 없음, API 주소는 task로 바꿀 수 없음, 한도 없이는 호출하지 않음.
+- 전송은 SDK 대신 Node 내장 `fetch`를 쓴다. 허용 의존성을 넓히지 않기 위해서이며 architecture와 decisions의 "공식 SDK" 선택과 다르다. 두 문서의 갱신은 Codex 판단에 맡긴다.
+- 1a 자리표시자 `src/model/anthropic.ts`와 그 유닛 2건은 실제 제공자로 대체되어 삭제했다. 같은 동작은 `tests/unit/cli/anthropic-wire.test.ts`와 통합 m02가 확인한다.
+- 알려진 한계로 기록: 파일 해시가 모델과 기록에 노출됨, `CODARYN_SECRET` 리터럴이 든 파일은 수정할 수 없음(자기 개발 단계 전에 완화 여부를 정해야 한다), Windows에서 `.cmd`/`.bat`은 셸 없이 실행되지 않음.
+
+## 세션 (CP-12)
+
+| pane | tab | 작업 | worktree | 브랜치 | 상태 |
+| --- | --- | --- | --- | --- | --- |
+| w3:p1 | MAIN | 오케스트레이터(PM·통합) | main | `main` | 진행 |
+| w3:p2 | WORKING | N-A 계약과 CLI 핵심(역할 1) | `claude-workspace` | `claude/workspace-policy` | 배정 |
+| w3:p4 | WORKING | `models` 통합 사례 정리, 이어서 N-E 통합 | `claude-operations` | `claude/cli-verification` | 배정 |
+| w3:p5 | WORKING | N-B 문구 카탈로그와 언어 선택 | `claude-quality` | `claude/security-core` | 배정 |
+| w3:p6 | WORKING | N-C 사람용 출력과 실행 목록 | `claude-tools` | `claude/core-tools` | 배정 |
+| w3:p7 | WORKING-sub | N-D 체험 예시와 사용 문서 | `claude-store` | `claude/revert-store` | 배정 |
+| w3:p9 | WORKING-sub | P4-G 범용 작업 워크플로 설계 | `claude-general` | `claude/general-tasks` | 배정 |
+| w3:pA | WORKING-sub | P5-A 어댑터 계약과 VS Code 확장 설계 | `claude-adapter` | `claude/adapter-contract` | 배정 |
+| w3:pB | WORKING-sub | P5-U 독립 GUI 설계 | `claude-gui` | `claude/gui-design` | 배정 |
+| w3:p3 | OPTIONAL | Codex 검증: N-A 계약 검토 완료(`docs/reviews/2026-11-12-n-review-usability-contract.md`) | 읽기 전용 | — | 사용 한도로 정지. 15:43 초기화 뒤 다시 배정. 화면의 한도 증액 질문에는 답하지 않는다 |
+| w3:p8 | OPTIONAL-sub | Codex 검증: 반복 실행 4회 완료(실패는 `models` 연결이 없는 커밋 탓, Z-1 아님) | `codex-verify`(분리 HEAD) | — | 사용 한도로 정지. 15:43 초기화 뒤 다시 배정 |
+
+세션 ID는 바뀔 수 있으므로 `herdr agent list`로 실제 상태를 확인한다. 원격에 남은 이전 브랜치 `claude/core-engine`(정지 전 w1:p1)은 worktree 없이 보존한다. 이전 초안 브랜치도 삭제하지 않는다.
+
+## 재개 방법
+
+재개 지시가 오면 다음 순서로 한다. 누가 재개하든(임시 PM, Codex) 같다.
+
+1. `docs/pm-control.json`의 status와 위임 ID를 확인한다.
+2. `git -C D:\project\Codaryn status -sb`와 `git worktree list`로 main이 원격과 같고 worktree가 깨끗한지 확인한다. `herdr agent list`로 세션 상태를 확인한다(세션이 닫혔으면 새 세션에 아래 문서를 읽혀 배정한다).
+3. main에서 `npm ci`, `npm run typecheck`, `npm run test:unit`, `npm run test:integration`을 돌려 기준 상태를 확인한다.
+4. `claude/cli-verification`을 main과 합쳐 `models` 통합 사례와 진단 보강을 실행하고, 통과하면 병합한다. 간헐 실패(Z-1)는 진단이 보강된 상태로 다시 나타나면 종료 코드와 stderr로 원인을 찾는다.
+5. 사용성 개선을 이어 간다(`work-orders/phase-4-usability.md`): p7이 계약을 먼저 커밋 → p5(N-B), p6(N-C) 병렬 → p7 연결 → p8(N-D 체험 예시와 사용 문서) → p4 통합 → 교차 검토.
+6. 그다음 순서: 단계 4 범용 작업 확장 설계와 구현, 어댑터 계약 정의, VS Code 확장(결정 N-13), 독립 GUI 설계 문서. 사용자의 상시 지시(추가 지시가 없으면 끝까지 연속 진행)는 재개 뒤에도 유효하다.
+7. 사용자가 직접 해야 하는 것: 실제 호출 점검(`tests/live/README.md`), p1 세션의 사용 한도 선택.
+
+## 회수 시 인계 방법
+
+1. 이 문서의 마지막 체크포인트와 세션 표를 읽는다.
+2. `git -C D:\project\Codaryn worktree list`와 각 worktree의 `status --short`, `log --oneline -3`로 실제 상태를 확인한다.
+3. 병합되지 않은 작업 브랜치는 그대로 둔다. 진행 중인 작업자는 `herdr agent read <pane>`으로 마지막 보고를 확인한다.

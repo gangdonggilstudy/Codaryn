@@ -7,6 +7,7 @@
 - 범위는 기존 승인된 오프라인 개발·검증·문서·운영이다. 실제 API/키 조회/모델 실행·GU9/DR67 설치 패키지/서명/외부 게시/비용은 이번 인계로 승인되지 않는다. 새 worktree/이력 재작성/force/--no-verify 금지도 유지한다.
 - **사용자 추가 지시: 커밋에 어떤 trailer도 넣지 않는다. Co-authored-by, Signed-off-by, Claude-Session, Reviewed-by 및 기타 자동 귀속 금지.** author/committer는 gangdonggil <gangdonggilstudy@gmail.com>, 푸시 전에 실제 메시지를 확인한다.
 - 원래 통신 helper는 codex-review/w3:p3 전송 identity에 고정이다. 이전 watcher32360은 소유 확인 후 종료했고 로그를 보존했다. 새 PM은 file-only register/dispatch/poll/ack와 명시 worker native prompt를 사용한다. codex-review는 helper worker 허용 목록 밖이므로 별도 수동 기록을 구분한다. 도구나 환경을 위장하지 않는다.
+- 2026-11-15 사용자 결정으로 저장소를 새로 시작했다(pm-status CP-57). 이전 이력과 문서에 적힌 그 이전 커밋 해시는 private `gangdonggilstudy/Codaryn-archive`에 있다.
 - 현재 제품은 CP54까지 승인된 오프라인 인계 완료이고 모든 worker 보고 ACK 후 STOP이다. 준비된 keyless Windows12항목은 전부 NOT_RUN이다. 전체 제품 완료로 올리거나 추측성 추가 작업을 발명하지 않는다.
 
 ---

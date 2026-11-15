@@ -40,6 +40,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-57, 2026-11-15) — 새 저장소로 시작, E-2·E-4(DR-76)·E-3(DR-77) 채택
+
+- **저장소 재시작(사용자 결정):** 이력이 과도하게 많아 지금 상태를 시작점으로 삼았다. 사용자가 기존 GitHub 저장소를 `gangdonggilstudy/Codaryn-archive`(private)로 바꾸고 새 `gangdonggilstudy/Codaryn`을 만들었다. 새 저장소는 GitHub의 첫 커밋 `76620ad5`(LICENSE만, 우리 LICENSE와 같은 blob `261eeb9e`) 위에 `9e28e301`로 시작한다. 그 tree `2638c3e5`는 archive의 main `5b7946cd` tree와 같다. force push·이력 재작성은 하지 않았다. **이 문서와 다른 문서에 적힌 그 이전의 커밋 해시는 모두 `Codaryn-archive`의 이력을 가리킨다.** 로컬에는 fetch 전용 원격 `archive`(push 막음)를 두었고, 원격의 병합된 옛 브랜치 10개는 사용자 지시로 지웠다(이름·SHA는 `.codaryn/pm-tools/evidence/remote-branches-deleted-20261115.txt`). 로컬 브랜치와 worktree의 옛 브랜치는 그대로 두었고, 새 작업 브랜치는 새 main에서 만든다.
+- **E-2 채택(시험 코드만):** GUI 프로세스 시험 도우미 `isolatedEnv`가 자식 환경을 허용 목록(Windows `SystemRoot`·`WINDIR`, 최소 PATH, 시험 폴더 안의 설정·임시 위치)으로만 만든다. codex-loop 구현, codex-sec 독립 검토 H0/M0/L0, GUI 전체 438/438. archive `3ab78fca`.
+- **E-4 채택(DR-76, 사용자 결정):** `data_checks`가 원본·결과표마다 서로 다른 묶음 키 10,000개까지만 담고, 넘으면 그 규칙은 `inconclusive`(넘을 때만 안내). 16MiB 표 상한은 그대로. 측정(codex-probe): 16MiB 안 약 231만 묶음에서 RSS 약 1.63GiB였다. codex-check 구현, codex-audit 독립 검토 H0/M0/L0. archive `586ab6aa`.
+- **E-3 채택(DR-77, 사용자 결정):** 사람용 Markdown 보고서를 한국어가 전달될 때만 한국어로 만든다. CLI `report`는 `CODARYN_LANG` → OS 언어, GUI 보고서 저장은 창 언어, 생략하면 영어다. JSON·기록·종료 코드·기존 영어 출력과 공개 표면(C11/V55)은 그대로다. 1단계(언어별 core·한국어 단어표, codex-loop 구현, codex-probe 독립 검토 H0/M0/L1 → 자기 속성 조회로 보완)는 archive `5b7946cd`, 2단계(연결·문서, 189줄 PM 검토 단위)는 새 저장소 `e14d1a88`.
+- **PM 측정:** 작업자 환경에서는 전체 unit이 멈추거나 integration의 프로세스·시간 시험(A8, A9, F5, n13)이 실패했다. PM 환경에서 같은 프로젝트 스크립트로 base와 후보를 재면 모두 실패 0이었다(예: E-3 2단계 후보 unit 4347/4340 pass/0 fail/6 skip/1 TODO, integration 684/682/0/1/1, GUI 440/440). 작업자 환경의 실패는 그 셸의 프로세스·임시 폴더 권한 문제로 보며 원인을 확정하지는 않았다. 로그는 `.codaryn/pm-tools/evidence/`(e4, e3a, e3b)에 있다.
+- **PM 실수 기록:** E-4 배정 때 codex-check 화면에 사용 한도 선택 창이 떠 있었는데 입력 확인 결과를 전송 조건으로 쓰지 않아, 그 Enter가 모델 전환을 고른 것으로 보인다(이후 GPT-6-Luna). 이후 모든 전송은 입력 줄과 선택 창 부재를 확인한 뒤에만 한다. 한도·모델 선택은 사용자가 처리했다.
+- 남은 것: E-5(GUI 프로필 편집)·E-6(들여쓰기 키)은 사용자 결정으로 보류, E-7은 실제 API 경계. 키 없는 Windows 수동 12항목 NOT_RUN(M-3.17 4단계는 패킷 보완 필요), 실제 API·GU9/DR67·역사적 한계 그대로. Codex 주간 한도 약 6%.
+
 ## 진행 요약 (CP-56, 2026-11-15) — 고도화 검토, E-1 문서 현행화, 라이선스 결정 DR-75 채택
 
 - Claude PM(w3:pG)이 활성화 뒤 기존 Codex 다섯에게 새 PM·STOP 유지·PM 전용 push·무trailer를 직접 통지했고 다섯 모두 확인 응답했다. 키 없는 수동 패킷 4파일 해시가 seal과 일치함을 확인하고 원 점검표 12항목 본문을 읽었다. 패킷의 editor 폴더에 M-3.17 4단계용 `masked.txt`와 가릴 값 설정이 없어 그 단계는 이 패킷으로 실행할 수 없다(NOT_RUN 유지, 보완은 별도 결정).

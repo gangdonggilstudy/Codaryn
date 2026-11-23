@@ -10,7 +10,7 @@
   - 코드: main의 앱 계층 `src/app`(`CodarynApp`, `src/app/types.ts`), 루트 `package.json`, `tsconfig.json`.
 - 상태
   - 형태(Electron), 대상 OS(Windows 11 x64 먼저), 엔진 전용 프로세스가 앱 계층 함수를 직접 부르는 구조는 정해졌다(DR-20, 이 개정 지시).
-  - 구현: GU-1(골격, 14.3)부터 GU-7까지의 화면 단위와 그 뒤의 후속 단위가 main에 있다. 화면마다 된 것과 남은 것은 14.4, 다음 단위는 14.2다. 개발 의존성은 `electron` 45.3.1 하나다(7절).
+  - 구현: GU-1(골격, 14.3)부터 GU-7까지의 화면 단위와 그 뒤의 후속 단위가 main에 있다. 화면마다 된 것과 남은 것은 14.4, 다음 단위는 14.2다. 개발 의존성은 `electron` 45.3.1, `@electron/packager` 20.3.0, `@electron/fuses` 2.1.3이다(7절, GU-9 `1dce881d`). GU-9의 꾸러미 스크립트(`27115387`)와 첫 로컬 꾸러미(CP-64)가 있다.
   - 현행화(U-60): main `604f9e5` 기준으로 설계 대 구현 조사(2026-11-13)에서 낡았다고 본 곳을 고쳤다. PM 결정을 함께 적었다: 실행 목록은 화면 방식 그대로(3.1), 보안 시험은 연기 시험 안(8.1), 프로필 편집은 뒤로(14.4).
   - DR-72(텍스트 보기와 고치기): main `18fc0ef` 기준. 원칙 4·6의 설명, 3.1 표, 3.3, 3.4의 "편집은 없다", 6.4~6.6, 6.8, GUI-D20·GUI-D22를 바꾸고 3.14를 새로 두었다. 앱 계층 읽기·쓰기(U-172)의 계약 전이라 그 이름은 [가정]이다. 저장의 메인 확인(연 파일마다 첫 저장)은 PM이 정했다(U-174). U-174에서 U-172의 이름으로 바꾸고, 사람이 넣은 글의 저장 거부(`text_refused`)와 앱 계층의 열지 않음·읽기 전용 선택을 적었으며, 읽기 전용 보기를 구현했다. 편집·저장(U-184)과 넓히기 대화상자의 쓰기 허용 경로 이름(U-192)까지 main에 있다(병합 `111e25d`). 사용 안내는 [사용 안내](../usage.md) 19절, 사람 점검은 [수동 점검](../manual-checks.md) M-3.12~M-3.17(U-205)이다(U-209).
 - 외부 제품(Electron과 그 도구)에 관한 서술 중 DR-26이 확인한 사실과 GU-1 실행으로 확인한 것(13.2절에 표시) 말고는 공식 문서로 확인하지 않았다. 그런 것은 **[추정]**이다.
@@ -640,7 +640,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 
 - Node 실행 파일(DR-26)
   - 개발: 설치된 Node 26 이상. 메인은 `npm start`가 넘기는 `npm_node_execpath`(절대 경로이고 파일이 있을 때)를 먼저 쓰고, 없으면 `PATH`의 절대 경로 항목에서 `node`를 찾는다. 판은 준비 메시지로 확인한다.
-  - 배포: Node 실행 파일을 함께 묶는 방법은 배포 전에 정한다(DR-26, GUI-D9). 그 전의 패키지 빌드는 Node를 찾지 않고 `node_not_found` 오류 카드를 보인다.
+  - 꾸러미(GU-9, D-7 `9c373178`, D-5b): Windows 꾸러미는 `resources/node/node.exe`(Node 26.13.1, 공식판과 같은 SHA-256)로 `resources/engine/build/src/engine-host/main.js --engine-dir resources/engine/dist/src`를 띄운다. 그 전에 app.asar 안 목록과 파일을 대조하고, 다르면 `engine_integrity_failed`로 엔진을 띄우지 않는다. Windows가 아닌 꾸러미는 지금처럼 `node_not_found`다. 서명·갱신은 GUI-D9(승인 전)다.
 - 실행: `node <gui>/build/src/engine-host/main.js --engine-dir <엔진 디렉터리>`. 셸을 거치지 않고(`shell: false`) 창 없이(`windowsHide`) 띄운다.
   - 엔진 디렉터리는 개발 중에는 루트 빌드 산출 `dist/src`다. 호스트는 그 안의 `app/index.js`와 `i18n/index.js`가 있고 필요한 함수를 내보낼 때만 시작한다.
   - 작업 디렉터리는 사용자 홈이다.
@@ -655,7 +655,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 | `nodeVersion` | 호스트의 Node(26 이상) |
 | 나머지 | Node 기본 구현(CLI와 공용) |
 
-- 배포 때 `installDir`이 GUI 설치 디렉터리 전체를 가리키게 하는 방법은 패키징 단위(GU-9)에서 정한다.
+- 꾸러미의 `installDir`은 꾸러미 폴더 전체다(2026-11-24 사용자 결정). 꾸러미 폴더 맨 위의 `package.json`(이름 `codaryn`, 루트 판, `"type": "module"`)을 엔진이 찾고(`src/app/input/install.ts:31`~`:48`), 그 파일도 시작 때 목록과 대조한다(`27115387`).
 - 키는 OS가 앱에 준 환경 변수로만 들어온다. 메인은 환경을 복사해 넘길 뿐 값을 보지 않고, 화면에는 `process`가 없다(6.2, 연기 시험으로 확인).
 
 ### 4.4 수명과 비정상 종료
@@ -814,11 +814,15 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 ### 6.7 빌드에서 끄는 실행 기능 [추정 E-4]
 
 - 패키지할 때 `@electron/fuses`로 정한다.
+  - 2026-11-24 적용(꾸러미 스크립트 `27115387`, 기록 `.codaryn/pm-tools/evidence/gu9-run/Codaryn-win32-x64.record.json`): 아래 여섯 값, 나머지 셋은 바이너리에서 읽은 Electron 45.3.1 기본값(쿠키 암호화 끔, 브라우저 전용 V8 스냅숏 끔, Wasm trap handlers 켬), `strictlyRequireAllFuses: true`. 적용 뒤 다시 읽어 같음을 확인했다.
 - 꾸러미에는 `build/tests`(연기 시험 진입점)를 넣지 않는다. 그 진입점은 OS 대화상자에 자동으로 답하고(`answerDialog`) 시험 전송을 켠다. 제품 시작 경로(`build/src/main/main.js`)는 이 선택지를 넘기지 않는다(R29-I4).
   - 끔: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments`, `GrantFileProtocolExtraPrivileges`
   - 켬: `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar`
 - 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자, 그 인자를 담은 `NODE_OPTIONS`, 이미 열린 검사기(`inspector.url()`)를 보면 검사기를 닫고 바로 끝낸다[설계, R-10 L-1]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
   - 한계(실행으로 확인): Node가 앱 코드보다 먼저 검사기 포트를 열므로 `--inspect`와 `NODE_OPTIONS`의 포트는 잠깐 열렸다 닫힌다. `--inspect-brk`는 앱 코드 전에 Node가 멈춰 이 검사가 돌지 않는다. 둘 다 fuses(`EnableNodeCliInspectArguments`, `EnableNodeOptionsEnvironmentVariable` 끔, GU-9)만 막는다. 연기 시험이 세 형태의 종료를 확인하고 `--inspect-brk`는 알림으로 보인다.
+  - 꾸러미에서 확인(2026-11-24, PM 자동 점검, `.codaryn/pm-tools/evidence/gu9-check/results.json`): `--inspect`, `--inspect-brk`, `--remote-debugging-port`는 시작 검사가 종료 코드 2로 끝낸다. fuse가 Node의 CLI 검사 인자를 끄므로 `--inspect-brk`도 이제 막힌다.
+    - `NODE_OPTIONS=--inspect`는 fuse가 무시해 앱이 정상 시작한다. 시작 검사는 그 값을 보지 못하지만 검사기 포트는 열리지 않았다(TCP 대기 0).
+    - `ELECTRON_RUN_AS_NODE=1`도 무시되고 앱이 정상 시작했다. `--remote-debugging-pipe`는 자동 점검 대상이 아니었다.
 - 제품 빌드에 시험용 스위치나 숨은 개발 메뉴를 넣지 않는다. 시험은 8.3의 별도 진입점으로 한다.
 - 충돌 보고(`crashReporter`), 자동 업데이트, 원격 측정을 켜지 않는다(GUI-D9).
 
@@ -882,10 +886,12 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 | 패키지 | 쓰임 | 넣는 단위 | 판 | 근거 | 상태 |
 | --- | --- | --- | --- | --- | --- |
 | `electron` | 셸 런타임(Chromium 156, 내장 Node 24.22.2). 개발 실행, 연기 시험 실행기, 패키지의 원본 | GU-1 | **45.3.1**(고정) | DR-20, DR-26 | 추가함(GU-1) |
-| `@electron/fuses` | 패키지 뒤 실행 기능 끄기(6.7) | GU-9 | 그때의 최신 판[추정] | 6.7 | 아직 넣지 않음. 추가 전에 PM 승인 |
-| `@electron/packager` | Windows x64 실행 파일 디렉터리, asar | GU-9 | 그때의 최신 주 버전[추정] | 의존이 가장 적은 공식 패키저[추정] | 아직 넣지 않음. 추가 전에 PM 승인 |
+| `@electron/fuses` | 패키지 뒤 실행 기능 끄기(6.7) | GU-9 | **2.1.3**(고정) | 6.7, D-2 | 추가함(GU-9 `1dce881d`, CP-62) |
+| `@electron/packager` | Windows x64 실행 파일 디렉터리, asar | GU-9 | **20.3.0**(고정) | 의존이 가장 적은 공식 패키저[추정], D-1 | 추가함(GU-9 `1dce881d`, CP-62) |
 
 - 배포용 Node 26 실행 파일: 의존성이 아니라 배포물이다. 묶는 방법(판 고정, 체크섬, 서명)은 배포 전에 정한다(DR-26).
+  - 2026-11-24 정함(D-5b): 꾸러미는 Node 26.13.1 `node.exe`(SHA-256 `f5109dc8…`, 공식 `win-x64/node.exe`와 같음)와 그 LICENSE(`8e603aa8…`)를 `resources/node/`에 묶는다. 판과 해시는 꾸러미 스크립트에 고정돼 있다(`27115387`). 서명은 GUI-D9(승인 전)다.
+- 확인한 사실(GU-9 설치, 2026-11-23~24, CP-62): lock은 53개(새 40개)이고 모두 npm 레지스트리·sha512·설치 스크립트 없음·개발 전용이며, 기존 13개는 그대로다. `npm install --ignore-scripts` 한 번으로 설치했다(`npm ci`는 Electron 실행 파일을 지우므로 쓰지 않음). `npm audit signatures`는 53개 서명·14개 증명을 검증했다. BlueOak-1.0.0 6개(`@electron/asar` 경로)는 PM이 원문을 확인했고, 배포물에 들어가지 않는다.
 - 지금 넣지 않는 것과 이유
   - 설치 파일 도구(electron-builder의 NSIS, WiX 기반 MSI 등): 첫 배포는 실행 파일 디렉터리를 묶은 zip이다. 설치 파일과 서명은 배포 전에 정한다(GUI-D9, DR-20).
   - E2E 도구(Playwright의 Electron 지원[추정]), 접근성 자동 검사(axe-core[추정]): 화면이 생긴 뒤 필요하면 PM 승인으로 넣는다. 그 전에는 8.3의 Electron 실행기 연기 시험과 수동 점검표다.
@@ -905,7 +911,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - 루트와의 관계
   - `gui/`는 npm workspaces가 아닌 독립 패키지다. 루트 `npm ci`는 Electron을 설치하지 않고, 루트 `package-lock.json`이 바뀌지 않는다.
   - 루트 `tsconfig.json`의 `include`는 `src/**`, `tests/**`이므로 `gui/`는 루트 형 검사와 시험에 들어가지 않는다.
-  - 엔진 코드: 개발 중에는 엔진 호스트(Node 26, DR-26)가 루트 빌드 산출 `dist/src`를 그대로 부른다(복사하지 않는다). 배포 때 엔진과 Node 26을 묶는 방법은 GU-9에서 정한다.
+  - 엔진 코드: 개발 중에는 엔진 호스트(Node 26, DR-26)가 루트 빌드 산출 `dist/src`를 그대로 부른다(복사하지 않는다). 꾸러미에서는 엔진(`dist/src`의 `.js`)을 `resources/engine/dist/src`로, Node 26을 `resources/node/`로 복사해 묶는다(GU-9 `27115387`, D-7 `9c373178`).
 
 ```
 gui/                          (U-60에서 실제에 맞추고 U-271에서 다시 맞춤)
@@ -919,7 +925,7 @@ gui/                          (U-60에서 실제에 맞추고 U-271에서 다시
   scripts/
     build/                    build.mjs(화면 금지 API 검사, tsc 네 번, 정적 파일 복사),
                               check-lock.mjs(7절), smoke.mjs(연기 시험 실행과 판정, 가짜 API)
-    package/                  (아직 없음) packager, fuses, zip, Node 26 묶기 (GU-9)
+    package/                  plan.mjs(입력 확인, 허용 목록, 엔진 목록, fuse 값), package.mjs(npm run package: packager, 복사, 시작 확인, fuses, zip, 기록) (GU-9)
   src/
     shared/                   protocol.ts(엔진 호스트 통로), ipc.ts(IPC 채널, 인자 검사, 보기),
                               cleanup.ts(정리 보기), settings-edit.ts(설정 편집 하나)
@@ -958,7 +964,7 @@ gui/                          (U-60에서 실제에 맞추고 U-271에서 다시
 | `gui`에서 `npm ci` | 개발 의존성(7절). Electron 실행 파일은 처음 쓸 때 받는다. 미리 받으려면 `node node_modules/electron/install.js`(승인된 설치 단계) |
 | `gui`에서 `npm run build` | `scripts/build/build.mjs`: 화면 소스의 금지 API 검사, 루트의 `tsc`로 네 설정 컴파일, `index.html`·`styles.css` 복사. 루트 `dist/src`가 없으면 알린다 |
 | `gui`에서 `npm start` | 개발 실행(`electron .`). 개발 서버 없음. 엔진 호스트는 `npm`을 실행한 Node(26 이상)로 뜬다. 개발자 도구는 `CODARYN_GUI_DEVTOOLS=1`일 때만 |
-| `gui`에서 `npm run package` | GU-9: packager로 `out/Codaryn-win32-x64/`, fuses, Node 26 묶기, zip |
+| `gui`에서 `npm run package -- --electron-zip-dir <폴더> --node-exe <node.exe> --node-license <LICENSE>` | GU-9(`27115387`): 루트와 `gui` 빌드가 먼저 있어야 한다(빌드하지 않는다). 세 입력은 로컬 경로이고 SHA-256이 고정값과 같아야 한다. 내려받지 않는다. 산출은 `out/Codaryn-win32-x64/`, `out/Codaryn-win32-x64.zip`, `out/Codaryn-win32-x64.record.json`(끝까지 성공한 실행만 남긴다). 산출이 이미 있으면 멈춘다 |
 
 - 스크립트는 `.mjs`로 쓰고 셸 문법에 기대지 않는다(Windows PowerShell과 POSIX 셸 모두).
 - 정규식은 리터럴 안의 U+2028 이스케이프를 피한다(개발 절차 7절 G-5).
@@ -1039,11 +1045,11 @@ decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날�
 | 번호 | 확인할 것 | 상태 | 쓰는 곳 |
 | --- | --- | --- | --- |
 | E-1 | Electron 안정판의 내장 Node 판 | **확인함(DR-26)**: 45.3.1의 내장 Node는 24.22.2, Node 26은 46 alpha에만 있다. GU-1에서 실행으로 다시 확인했다(Node 24.22.2, Chromium 156.0.8078.96). 그래서 엔진은 별도 Node 26 프로세스다 | 4절, 7절 |
-| E-2 | (처음: `utilityProcess`) → 배포 때 Node 26 실행 파일을 묶는 방법: 판 고정, 체크섬, 서명, 크기, 갱신 | 배포 전에 정함(DR-26). `utilityProcess`는 쓰지 않는다 | 4.3, GUI-D9 |
+| E-2 | (처음: `utilityProcess`) → 배포 때 Node 26 실행 파일을 묶는 방법: 판 고정, 체크섬, 서명, 크기, 갱신 | **일부 정함(2026-11-24, D-5b)**: Node 26.13.1, SHA-256 고정, `resources/node/`에 묶음, 크기 100,089,160 bytes(기록 파일). 서명·갱신은 GUI-D9(승인 전). `utilityProcess`는 쓰지 않는다 | 4.3, 7절, GUI-D9 |
 | E-3 | 보안 설정 이름과 기본값(6.2~6.4), 샌드박스 preload의 모듈 제한, 작업 표시줄 진행 표시 | 이름은 `electron.d.ts`(45.3.1)로 확인했다. 동작은 연기 시험으로 확인했다: 화면에 `process`·`require`·`ipcRenderer` 없음, 바깥 요청·`file://`·새 창·탐색 막힘. 작업 표시줄은 GU-3 | 6절, 3.6 |
-| E-4 | fuses 이름과 기본값, Chromium 원격 디버깅 스위치가 fuses로 막히는지 | 미확인(GU-9). GU-1은 시작 때 스위치를 보고 끝낸다 | 6.7 |
+| E-4 | fuses 이름과 기본값, Chromium 원격 디버깅 스위치가 fuses로 막히는지 | **확인함(2026-11-24, 실행)**: 이름 9개와 Electron 45.3.1의 기본값을 바이너리에서 읽었다(기록 파일 `fuses.before`). `--remote-debugging-port`는 fuse가 아니라 시작 검사로 막힌다(종료 코드 2). asar 무결성은 Windows에서 효과가 있다(바꾼 app.asar를 Electron이 거부). `--remote-debugging-pipe`는 자동 점검 대상이 아니었다(6.7, CP-64) | 6.7 |
 | E-5 | Windows UIA 연결, Narrator·NVDA 동작, forced-colors, 메시지 상자의 낭독 | 미확인(화면 단위) | 10절 |
-| E-6 | 설치 크기, Windows 코드 서명과 SmartScreen, 설치 파일 형식 | 미확인(배포 전) | GUI-D9 |
+| E-6 | 설치 크기, Windows 코드 서명과 SmartScreen, 설치 파일 형식 | 일부 확인(2026-11-24): 로컬 zip 꾸러미의 크기만 쟀다(파일 300개 합 477,778,586 bytes, zip 197,946,337 bytes, 기록 파일). 코드 서명, SmartScreen, 설치 파일 형식은 미확인이고 승인 전이다 | GUI-D9 |
 | E-7 | `electron` 패키지가 실행 파일을 받는 방식과 체크섬 확인 | **실행으로 확인**: 설치 스크립트 없음, 처음 쓸 때 `install.js`가 `@electron/get`으로 받고 패키지의 `checksums.json`과 대조(7절) | 7절, 8.2 |
 | E-8 | Windows에서 사용자 환경 변수를 등록한 뒤 새로 실행한 앱이 그 값을 받는지. macOS Finder 실행 앱의 환경 | 미확인 | 3.10, GUI-D7 |
 | E-9 | `requestSingleInstanceLock`이 Windows와 macOS·Linux에서 쓰는 수단(소켓 여부) | Windows 연기 시험에서 앱의 모든 프로세스에 TCP 대기 소켓과 UDP 끝점이 0개였다. macOS·Linux는 미확인 | 6.9, GUI-D18 |
@@ -1104,8 +1110,10 @@ decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날�
 | 엔진 먼저 | 실행 중 권한 확인(`RunObserver.confirm`) → OS 대화상자(3.6, U-124로 끝남) | 3.6, 5 | 엔진·앱 계층(U-74, U-108) |
 | GU-9 | 패키징(packager, fuses, zip, Node 26 묶기, 사용 안내) | 6.7, 7, 8.2 | 새 의존성과 내려받기는 PM 승인. 서명·설치 파일은 배포 결정(GUI-D9) |
 
+- GU-9 현황(2026-11-24): 의존성(`1dce881d`), 꾸러미 엔진 배치와 시작 확인(`9c373178`), 꾸러미 스크립트(`27115387`)가 main에 있다. 첫 로컬 꾸러미와 PM 자동 점검을 마쳤다(CP-64). 꾸러미 만드는 법은 [사용 안내](../usage.md) 2절에 더했다. `docs/gui-usage.md`는 만들지 않았다.
+  - 남은 것: 사람의 화면 확인([수동 점검](../manual-checks.md) M-3.19), 코드 서명·설치 파일·외부 게시(GUI-D9, 승인 전).
 - 뒤로 미룬 것(PM 결정, U-60): 설정의 프로필 내용 바꾸기(3.10). 앱 계층의 넓히기 판정이 프로필 안의 한도·명령도 잡는지 먼저 확인한다.
-- 이 환경에서 하지 않는 것: macOS·Linux 시험(9절), 낭독기 수동 점검(10절, E-5), 코드 서명·설치 파일(E-6), 외부 문서 확인(E-4).
+- 이 환경에서 하지 않는 것: macOS·Linux 시험(9절), 낭독기 수동 점검(10절, E-5), 코드 서명·설치 파일(E-6), 외부 문서 확인(E-4. E-4 자체는 2026-11-24 실행으로 확인했다, 13.2).
 
 ### 14.3 첫 구현 단위 GU-1
 

@@ -10,7 +10,7 @@
 - [c01 계약시험](../tests/integration/c01-cli-app-contract.test.ts)은 실제 CLI 프로세스와 같은 경로를 쓰는 **인프로세스 앱**의 전체 결과·journal 종류/순서/필드를 비교한다. [GUI bridge](../gui/tests/unit/gsec-host-contract.test.ts)와 [실제 host/CLI 잠금·취소 시험](../gui/tests/unit/gsec-host-process.test.ts)도 있다.
 - [추가 CLI↔별도 host 시험](../gui/tests/unit/cli-host-parity.test.ts)은 같은 대본의 한 문서 사례에서 실제 별도 프로세스 양쪽의 전체 저장 result/journal을 좁은 비결정성 규칙으로 비교하고 IPC 축약 view를 독립 대조한다([CP53 독립 검토](reviews/2026-11-15-cli-host-parity-probe.md)). 새 시험10·관련5와 별도 복사본 검사가 통과했다. 모든 시나리오/OS·실제 API의 동등성이나 단계5 전체 완료를 뜻하지 않는다.
 
-**단계 5·제품 전체 완료는 아니다.** 실제 API·모델 자기 개발, 다른 OS·실제 TTY/OS 대화상자·IME/접근성, 설치·서명·배포는 미검증 또는 별도 범위다. GUI 패키징은 GU-9/DR-67의 미승인 경계를 유지한다.
+**단계 5·제품 전체 완료는 아니다.** 실제 API·모델 자기 개발, 다른 OS·실제 TTY/OS 대화상자·IME/접근성, 설치·서명·배포는 미검증 또는 별도 범위다. GUI는 이 PC에서 만든 로컬 zip 꾸러미까지 있다(GU-9, CP-64). 코드 서명·설치 파일·외부 게시는 GUI-D9·DR-67의 미승인 경계로 남는다.
 U333 최초 u22 원인, U321 부모 교체/마지막 검사 뒤 hard-link 경합, historical JSON narrow-pin scope도 해결로 처리하지 않는다. CP51의 기존 전체 검사·그래프 수치는 그 판의 실행 결과이며 이 문서 작업의 새 시험 결과가 아니다.
 
 ## 이전 판의 상태·검증 기록
@@ -35,7 +35,7 @@ U333 최초 u22 원인, U321 부모 교체/마지막 검사 뒤 hard-link 경합
 | 2 | 코드 수정·검증 반복 | 오프라인 구현과 검증 완료(2026-11-12, main `4074d5c`). 실 API 기준은 확인하지 않았다. 그 기준이 말하는 연습 과제 묶음과 합격 기준은 testing.md에 아직 정해지지 않았다 |
 | 3 | 자기 소스 후보 개발 | 오프라인 기구(무결성 확인, 설치 위치 거부, `report`, `doctor`, 후보 스크립트)와 대본 모델 예행(통합 `k03`)까지다. 실제 모델의 자기 개발은 확인하지 않았다. 입력 조건(단계 2 실 API 통과)을 충족하지 않았고 과제별 한도 값도 정하지 않아 완료가 아니다 |
 | 4 | 범용 작업 확장 | P0 구현(main `d7f8381`부터): 작업 종류 다섯, 계획 확인 → 승인·적용 → 되돌리기, 사람 확인. 완료 기준 셋을 충족했다(통합 n06~n08). P1 묶음 가운데 `markdown` 규칙(`markdown_headings`, `markdown_links`)은 있다(U-116 `4df5be8`). `query_table`, `analyze-private`, `plan:"run"`, 읽기 제외 경로는 없다 |
-| 5 | GUI·IDE | 독립 GUI 구현(DR-20 Electron, DR-26 엔진 전용 Node 프로세스, `gui/`). VS Code 확장은 만들지 않는다(DR-20). 실행 중 권한 확인(DR-3)은 엔진·앱 계층·CLI까지 들어왔다(U-74 `08bee85`, U-108 `7f2de4c`, U-109·U-110 `15e49a4`, U-137 `118338d`). GUI는 메인 프로세스의 OS 대화상자로 묻는다(U-124 `aa723d2`). 완료가 아니다: CLI의 앱 계층 이행이 덜 됐고(AC-D16, DR-65), CLI와 비교하는 계약 층 시험과 설치 패키지(GU-9, DR-67)가 없다 |
+| 5 | GUI·IDE | 독립 GUI 구현(DR-20 Electron, DR-26 엔진 전용 Node 프로세스, `gui/`). VS Code 확장은 만들지 않는다(DR-20). 실행 중 권한 확인(DR-3)은 엔진·앱 계층·CLI까지 들어왔다(U-74 `08bee85`, U-108 `7f2de4c`, U-109·U-110 `15e49a4`, U-137 `118338d`). GUI는 메인 프로세스의 OS 대화상자로 묻는다(U-124 `aa723d2`). 완료가 아니다: CLI의 앱 계층 이행이 덜 됐고(AC-D16, DR-65), CLI와 비교하는 계약 층 시험이 없다. GUI는 로컬 zip 꾸러미까지 만들었고(GU-9, CP-64), 코드 서명·설치 파일·외부 게시는 승인 전이다(GUI-D9, DR-67) |
 
 ## 단계 0. 문서와 설계
 

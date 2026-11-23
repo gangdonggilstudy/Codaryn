@@ -147,6 +147,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "error.node_not_found": "Node 26 or later was not found. Install Node 26 or later and start the app again.",
   "error.node_too_old": "The engine runs on Node 26 or later only. Update Node and start the app again.",
   "error.engine_not_built": "The engine is not built. Run npm run build in the repository root.",
+  "error.engine_integrity_failed": "The engine files that came with the app have changed or are missing, so the engine was not started. Install the app again.",
   "error.host_not_started": "The engine process could not be started.",
   "error.ready_timeout": "The engine process was not ready in time.",
   "error.protocol_violation": "The engine process broke the message format and was stopped.",

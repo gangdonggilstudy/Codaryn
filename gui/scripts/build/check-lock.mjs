@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const APPROVED = { electron: "45.3.1" };
+const APPROVED = { "@electron/fuses": "2.1.3", "@electron/packager": "20.3.0", electron: "45.3.1" };
 const REGISTRY = "https://registry.npmjs.org/";
 
 const gui = fileURLToPath(new URL("../../", import.meta.url));

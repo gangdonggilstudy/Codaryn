@@ -2,27 +2,34 @@
 
 ## 2026-11-15 Claude PM 인계 시 운영
 
-사용자 최신 지시로 `pm-20261115-claude-01` active 기간에는 Claude w3:pG가 PM이고 codex-review w3:p3는 일반 작업자다. 아래 원래 도구의 이름·pane·전송 제한은 변경하지 않았다. 전체 절차와 소유권은 [현재 인계](../operations/pm-handoff-2026-11-15.md)와 main `docs/pm-control.json`을 따른다.
+2026-11-15 인계 당시 사용자 지시로 `pm-20261115-claude-01` active 기간의 PM은 Claude w3:pG였고 codex-review w3:p3는 일반 작업자로 전환됐다. 당시 원래 도구의 이름·pane·전송 제한은 변경하지 않았다. 아래 항목은 그 인계 당시의 운영 기록이다.
 
-- 기존 `dispatch --send`, `poll/watch --notify`, `checkPM`은 codex-review/w3:p3/Codex identity에 고정돼 있다. Claude가 그 이름이나 pane/환경을 위장해 사용하지 않는다. 이전 notifier PID32360은 인계자가 소유 검증 후 종료하고 로그·종료 기록을 보존했다. 재시작하거나 중복 감시기를 띄우지 않는다.
-- canonical main cwd에서 file-only `register` → `dispatch`(send 없음) → 실제 worker get/visible 확인 후 명시 Herdr native prompt 1회 → worker STARTED/READY → `poll`(notify 없음) → PM 본문 전체/해시/proof 확인 → `ack --read`를 사용한다. 전송은 새 PM이 직접 담당하고 자동 알림은 없으므로 새 PM이 필요한 주기로 file-only poll을 회수한다. 전달 accepted는 착수/완료가 아니다.
-- worker 허용 목록은 기존 다섯 Codex 그대로다. former PM codex-review는 register 허용 worker가 아니므로 검토된 도구 변경 전에는 별도 수동 task/report/receipt/READ/hash/ACK 기록을 구분해 사용한다. 기존 canonical receipt를 위조하지 않는다. 현재 former PM의 활성 배정은 없다.
-- 인계 시 기존 등록 보고는 모두 ACK CLOSED다. 폐기/보존한 `comm-live-loop-01`의 예상 CHECKOUT_MISMATCH만 예외이며 재전송하지 않는다. task·registry·receipt·실패 증거는 불변으로 보존한다. 실제 API/키 조회/한도·크레딧 선택/승인 UI 응답은 여전히 제외다.
+- 당시 `dispatch --send`, `poll/watch --notify`, `checkPM`은 codex-review/w3:p3/Codex identity에 고정돼 있었다. Claude는 그 이름이나 pane/환경을 위장하지 않고 운영했다. 이전 notifier PID32360은 인계자가 소유 검증 후 종료하고 로그·종료 기록을 보존했으며, 재시작하거나 중복 감시기를 띄우지 않기로 했다.
+- 당시 canonical main cwd에서 file-only `register` → `dispatch`(send 없음) → 실제 worker get/visible 확인 후 명시 Herdr native prompt 1회 → worker STARTED/READY → `poll`(notify 없음) → PM 본문 전체/해시/proof 확인 → `ack --read` 방식으로 운영했다. 전송은 새 PM이 직접 담당했고 자동 알림이 없어 필요한 주기로 file-only poll을 회수했다. 전달 accepted는 착수/완료를 뜻하지 않았다.
+- 당시 worker 허용 목록은 기존 다섯 Codex 그대로였다. former PM codex-review는 register 허용 worker가 아니어서 검토된 도구 변경 전에는 별도 수동 task/report/receipt/READ/hash/ACK 기록을 구분해 사용하고 기존 canonical receipt를 위조하지 않기로 했다. 인계 당시 former PM의 활성 배정은 없었다.
+- 인계 시 기존 등록 보고는 모두 ACK CLOSED였다. 폐기/보존한 `comm-live-loop-01`의 예상 CHECKOUT_MISMATCH만 예외였으며 재전송하지 않기로 했다. task·registry·receipt·실패 증거는 불변으로 보존하고, 실제 API/키 조회/한도·크레딧 선택/승인 UI 응답은 계속 제외한 운영이었다.
 
-## 원래 Codex PM 전용 도구 계약과 이력
+## 2026-11-22 작업자 변경
 
-현재 w3의 Codex 다섯 worker와 PM만을 위한 운영 도구다. 제품 엔진이나 범용 agent framework가 아니다. PM은 canonical 관리 main cwd에서 `node scripts/pm-session-comms.mjs --help`로 안내를 보고, 시험은 `node --test scripts/pm-session-comms.test.mjs`로 실행한다. worker의 실행 경로는 아래 절대 main 스크립트 계약을 따른다. Node의 표준 모듈만 사용한다.
+사용자 결정으로 현재 작업자는 codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude) 둘이다. codex-review를 포함한 옛 Codex 세션은 지금 없다. 전체 절차와 소유권은 [현재 인계](../operations/pm-handoff-2026-11-15.md)와 main `docs/pm-control.json`을 따른다.
 
-| 역할 | 허용 이름 | 고정 pane |
-| --- | --- | --- |
-| PM | codex-review | w3:p3 |
-| worker | codex-check | w3:pD |
-| worker | codex-loop | w3:p8 |
-| worker | codex-sec | w3:pC |
-| worker | codex-audit | w3:pE |
-| worker | codex-probe | w3:pF |
+- 새 등록과 작업 재개는 아래 두 worker만 받는다. 옛 이름 codex-check/w3:pD, codex-loop/w3:p8, codex-sec/w3:pC, codex-audit/w3:pE, codex-probe/w3:pF는 닫힌 기록 확인용으로만 보존한다. ACK된 기록은 기존 registry/inbox/ack 검증으로 계속 closed를 반환하고, 폐기된 `comm-live-loop-01`의 checkout 불일치는 계속 `CHECKOUT_MISMATCH`로 표시한다.
+- PM 전송 경로의 고정 신원(codex-review/w3:p3)과 Codex 전용 입력 줄 판정은 변경하지 않았다. 현재 Claude PM은 file-only 운영과 별도 명시 native prompt를 사용하며 고정 신원이나 pane/환경을 위장하지 않는다.
+- Claude worker에게 `dispatch --send`를 사용하지 않는다. 현재 코드는 어느 경로에서도 Claude worker에게 prompt를 보내지 않는다. Codex 전용 입력 줄 검사까지 도달하면 화면 내용과 관계없이 `VISIBLE_UNCONFIRMED`로 보류하지만, 그 전에 PM 신원 확인에서 실패하거나 작업자 상태에 따라 먼저 보류될 수도 있다. Claude worker의 file-only dispatch와 STARTED/READY는 지원한다.
 
-다른 프로젝트/Claude pane, 서버 설정, 권한 설정, raw keys, agent start/close, Git 변경, merge/push와 승인 응답 기능은 없다. 실제 메시지 전송은 PM이 인수 후 실행한다. Herdr는 설치된 `--skill`, `agent` 도움말과 실제 `agent get`의 `result.type=agent_info`, `result.agent` 형식을 기준으로 연결했다. 발견에 `agent list`나 UI focus를 사용하지 않는다.
+## 현재 작업자와 원래 Codex PM 전송 계약
+
+현재 w3의 두 worker와 고정된 PM 전송 경로를 위한 운영 도구다. 제품 엔진이나 범용 agent framework가 아니다. PM은 canonical 관리 main cwd에서 `node scripts/pm-session-comms.mjs --help`로 안내를 보고, 시험은 `node --test scripts/pm-session-comms.test.mjs`로 실행한다. worker의 실행 경로는 아래 절대 main 스크립트 계약을 따른다. Node의 표준 모듈만 사용한다.
+
+| 역할 | 허용 이름 | 고정 pane | agent 종류 |
+| --- | --- | --- | --- |
+| PM 전송 신원(현재 PM은 위 절 참고) | codex-review | w3:p3 | codex |
+| worker | codex-worker | w3:pJ | codex |
+| worker | claude-worker | w3:pH | claude |
+
+이름마다 agent 종류·pane을 확인하고, 제공된 agent_session은 digest로 고정한다.
+
+다른 프로젝트/미등록 pane, 서버 설정, 권한 설정, raw keys, agent start/close, Git 변경, merge/push와 승인 응답 기능은 없다. 실제 메시지 전송은 PM이 인수 후 실행한다. Herdr는 설치된 `--skill`, `agent` 도움말과 실제 `agent get`의 `result.type=agent_info`, `result.agent` 형식을 기준으로 연결했다. 발견에 `agent list`나 UI focus를 사용하지 않는다.
 
 ## 파일 계약과 상태
 
@@ -56,7 +63,7 @@ visible 응답이 돌아온 뒤 claim 직전에도 dispatch는 고정 worker ide
 PM은 canonical 관리 main인 `D:/project/Codaryn` cwd에서 task 파일을 작성하고 SHA256을 확인한 뒤 다음과 같이 상대 스크립트 경로로 등록할 수 있다. SHA는 실제 task bytes의 digest로 바꾼다. Windows PowerShell 줄 연결 대신 한 줄씩 실행하면 된다.
 
 ```text
-node scripts/pm-session-comms.mjs register --pm D:/project/Codaryn --id ops-example --worker codex-check --pane w3:pD --worktree D:/project/Codaryn/.worktrees/claude-store --task-file .codaryn/pm-tools/ops-example.md --task-sha <SHA256> --report .codaryn/session-comms/ops-example/report.md --receipt .codaryn/session-comms/ops-example/ready.json
+node scripts/pm-session-comms.mjs register --pm D:/project/Codaryn --id ops-example --worker codex-worker --pane w3:pJ --worktree D:/project/Codaryn/.worktrees/claude-adapter --task-file .codaryn/pm-tools/ops-example.md --task-sha <SHA256> --report .codaryn/session-comms/ops-example/report.md --receipt .codaryn/session-comms/ops-example/ready.json
 node scripts/pm-session-comms.mjs dispatch --pm D:/project/Codaryn --id ops-example
 ```
 
@@ -69,8 +76,8 @@ worker는 **본인의 지정 worktree cwd를 유지하면서 반드시 canonical
 기본 사용은 비대화식이다. 모든 작업/검증을 마친 뒤 등록된 `.codaryn/session-comms/ops-example/report.md`를 worker cwd 안에 완전히 작성하고, `--stdin` 없이 `ready`를 실행한다. 지정 report bytes를 읽어 같은 내용과 receipt를 공개하며 stdin 입력을 기다리지 않는다. READY 후에는 명령을 정지한다.
 
 ```text
-node D:/project/Codaryn/scripts/pm-session-comms.mjs started --pm D:/project/Codaryn --worktree D:/project/Codaryn/.worktrees/claude-store --id ops-example --worker codex-check
-node D:/project/Codaryn/scripts/pm-session-comms.mjs ready --pm D:/project/Codaryn --worktree D:/project/Codaryn/.worktrees/claude-store --id ops-example --worker codex-check
+node D:/project/Codaryn/scripts/pm-session-comms.mjs started --pm D:/project/Codaryn --worktree D:/project/Codaryn/.worktrees/claude-adapter --id ops-example --worker codex-worker
+node D:/project/Codaryn/scripts/pm-session-comms.mjs ready --pm D:/project/Codaryn --worktree D:/project/Codaryn/.worktrees/claude-adapter --id ops-example --worker codex-worker
 ```
 
 선택 기능 `ready --stdin`만 stdin의 UTF-8 보고 bytes를 받아 EOF까지 기다린다. 이를 사용할 때는 보고 bytes를 pipe하고 stdin을 닫거나 명시적으로 EOF를 전달한다. 기본 복사 실행 예제에는 쓰지 않는다. 빈 보고/2MiB 초과는 거부하며 재시도는 같은 bytes만 허용한다. worker에는 직접 Herdr 전송 기능이 없어 PermissionDenied가 파일 완료 계약을 실패시키지 않는다.
@@ -97,4 +104,4 @@ ACK된 job은 PM의 불변 registry/inbox/ack 일치만으로 closed를 반환�
 
 부분 JSON, 불일치 SHA/ID/subject/등록 branch, 알려진 identity 변경은 REJECTED로 보여 준다. 재시작했다고 실패 파일을 성공으로 덮지 않는다. NTFS 등 exclusive hard-link를 지원하는 로컬 파일시스템이 필요하다. OS 전체 전원 장애나 파일시스템 손상까지 보장하지 않는다. 일부 디스크/ACL 오류는 실패 후 원본 보존·운영자 점검이 필요하다.
 
-실제 `agent get`에 agent_session이 없으면 name/pane/Codex/terminal까지 고정하며 `sessionBound=false`를 노출한다. 같은 terminal의 새 세션을 그 metadata만으로 항상 구분할 수는 없다. agent_session이 있으면 digest를 고정하고 변경/소실을 거부한다. Herdr idle/done 판정은 report의 READY와 별개이며 알려지지 않은 UI를 완전히 증명하지 않는다. 경로/realpath 검사도 동일 사용자에 의한 악의적인 동시 경로 교체를 막는 OS sandbox는 아니다. 실제 session live 시험과 독립 검토는 PM/AUDIT가 수행한다.
+실제 `agent get`에 agent_session이 없으면 name/pane/기대 agent 종류/terminal까지 고정하며 `sessionBound=false`를 노출한다. 같은 terminal의 새 세션을 그 metadata만으로 항상 구분할 수는 없다. agent_session이 있으면 digest를 고정하고 변경/소실을 거부한다. Herdr idle/done 판정은 report의 READY와 별개이며 알려지지 않은 UI를 완전히 증명하지 않는다. 경로/realpath 검사도 동일 사용자에 의한 악의적인 동시 경로 교체를 막는 OS sandbox는 아니다. 실제 session live 시험과 독립 검토는 PM/AUDIT가 수행한다.

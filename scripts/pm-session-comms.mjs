@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Codaryn's six existing Codex panes only. Durable files are the contract; Herdr is optional delivery. */
+/** Codaryn's current workers and fixed Codex PM transport. Durable files are the contract. */
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
@@ -10,8 +10,12 @@ import { fileURLToPath } from 'node:url';
 
 const execute = promisify(execFile);
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const PANES = Object.freeze({ 'codex-review': 'w3:p3', 'codex-check': 'w3:pD',
-  'codex-loop': 'w3:p8', 'codex-sec': 'w3:pC', 'codex-audit': 'w3:pE', 'codex-probe': 'w3:pF' });
+export const PANES = Object.freeze({ 'codex-review': 'w3:p3', 'codex-worker': 'w3:pJ', 'claude-worker': 'w3:pH' });
+const WORKER_AGENTS = Object.freeze({ 'codex-worker': 'codex', 'claude-worker': 'claude' });
+// Historical names validate immutable records only; they cannot register or resume work.
+const RECORD_PANES = Object.freeze({ 'codex-check': 'w3:pD', 'codex-loop': 'w3:p8',
+  'codex-sec': 'w3:pC', 'codex-audit': 'w3:pE', 'codex-probe': 'w3:pF', ...PANES });
+const currentWorker = name => Object.hasOwn(WORKER_AGENTS, name);
 const digest = value => createHash('sha256').update(value).digest('hex');
 const ordered = value => Array.isArray(value) ? value.map(ordered) : value !== null && typeof value === 'object'
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, ordered(value[key])])) : value;
@@ -172,7 +176,8 @@ export function createComms({ projectRoot = project, cwd = process.cwd(), transp
     let response;
     try { response = await transport.get(name); } catch { fail('IDENTITY_UNAVAILABLE'); }
     const agent = response?.result?.agent;
-    expect(response?.result?.type === 'agent_info' && agent?.agent === 'codex' && agent.name === name
+    const kind = name === 'codex-review' ? 'codex' : WORKER_AGENTS[name];
+    expect(Object.hasOwn(PANES, name) && response?.result?.type === 'agent_info' && agent?.agent === kind && agent.name === name
       && agent.pane_id === PANES[name] && typeof agent.terminal_id === 'string' && agent.terminal_id.length > 0, 'IDENTITY_MISMATCH');
     const sessionSHA = agent.agent_session ? digest(bytes(agent.agent_session)) : null;
     if (expected) expect(agent.terminal_id === expected.terminal && agent.pane_id === expected.pane
@@ -188,6 +193,8 @@ export function createComms({ projectRoot = project, cwd = process.cwd(), transp
     catch { fail('AGENT_CWD_UNCONFIRMED'); }
   }
   async function inputReady(name) {
+    // The visible-footer parser is Codex-only, even if a Claude screen quotes that footer.
+    if (WORKER_AGENTS[name] === 'claude') return false;
     try { return normalCodexPrompt(await transport.visible(name)); }
     catch { return false; }
   }
@@ -199,10 +206,10 @@ export function createComms({ projectRoot = project, cwd = process.cwd(), transp
   const local = id => '.codaryn/session-comms/' + idOf(id);
   function jobShape(job) {
     expect(keys(job, ['version', 'id', 'pm', 'worker', 'identity', 'worktree', 'subject', 'checkout', 'report', 'receipt', 'taskFile', 'taskSHA'])
-      && job.version === 1 && job.id === idOf(job.id) && job.worker !== 'codex-review' && PANES[job.worker]
+      && job.version === 1 && job.id === idOf(job.id) && job.worker !== 'codex-review' && Object.hasOwn(RECORD_PANES, job.worker)
       && (keys(job.identity, ['name', 'pane', 'terminal', 'sessionSHA', 'cwd'])
         || keys(job.identity, ['name', 'pane', 'terminal', 'sessionSHA']))
-      && job.identity?.name === job.worker && job.identity.pane === PANES[job.worker]
+      && job.identity?.name === job.worker && job.identity.pane === RECORD_PANES[job.worker]
       && typeof job.identity.terminal === 'string' && job.identity.terminal.length > 0
       && (job.identity.sessionSHA === null || hash(job.identity.sessionSHA)), 'REGISTRY_INVALID');
     if ('cwd' in job.identity) expect(typeof job.identity.cwd === 'string' && path.isAbsolute(job.identity.cwd)
@@ -218,6 +225,12 @@ export function createComms({ projectRoot = project, cwd = process.cwd(), transp
     const job = await json(pm, registry(id)); jobShape(job);
     expect(job.id === id && canonical(job.pm) === canonical(pm), 'ASSIGNMENT_MISMATCH');
     if (active) {
+      if (!currentWorker(job.worker)) {
+        // Preserve the abandoned comm-live-loop-01 checkout failure without querying old panes.
+        await worktree(job.worktree);
+        await checkout(job);
+        fail('WORKER_NOT_ALLOWED');
+      }
       expect(typeof job.identity.cwd === 'string', 'IDENTITY_CWD_REQUIRED');
       await worktree(job.worktree);
       await confined(job.worktree, job.report); await confined(job.worktree, job.receipt);
@@ -312,7 +325,7 @@ export function createComms({ projectRoot = project, cwd = process.cwd(), transp
     },
     async register(pmPath, spec) {
       const pm = await worktree(pmPath); await pmContext(pm);
-      const id = idOf(spec.id); expect(spec.worker !== 'codex-review' && typeof PANES[spec.worker] === 'string' && PANES[spec.worker] === spec.pane, 'WORKER_NOT_ALLOWED');
+      const id = idOf(spec.id); expect(currentWorker(spec.worker) && PANES[spec.worker] === spec.pane, 'WORKER_NOT_ALLOWED');
       {
         expect(await json(pm, registry(id), true) === null, 'ID_ALREADY_REGISTERED');
         const workerWT = await worktree(spec.worktree);

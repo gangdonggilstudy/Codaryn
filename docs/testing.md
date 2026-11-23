@@ -81,6 +81,7 @@
 - 실제 응답은 실행마다 다르다. 판정은 관찰 가능한 결과로 한다.
 - 실제 호출에서 확인할 항목: 503 분류, `retry-after` 형식, 빈 `tool_result`, thinking 블록, 시간 초과 뒤 재전송, `anthropic-version` 값, `anthropic-workspace-id` 필요 여부(decisions.md O-13).
 - [미정] 사용할 모델, 비용 한도 값, 실행 주기.
+- 사용자가 직접 실행할 순서, 결과 기록 형식, 실행 전에 사용자가 정할 값은 [실제 API 실행 계획](acceptance/live-api-plan.md)에 모았다.
 
 ## 5. 보호된 검증과 후보
 

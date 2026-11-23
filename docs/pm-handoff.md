@@ -2,6 +2,7 @@
 
 2026-11-15 사용자가 기존 Claude에게 오케스트레이터를 인계하고 codex-review를 일반 작업자로 전환하라고 직접 지시했다. 현재 위임 ID는 **pm-20261115-claude-01**, 수신자는 **Claude w3:pG**(session9d6ad963-02c1-4d06-848f-f3c59b3a04e9, 관리 main)다. 아래 2026-11-12 위임과 11월 14일 회수는 보존한 이력이며 현재 미완료 목록이나 현재 담당 pane으로 읽지 않는다.
 
+- 2026-11-22 이후 바뀐 점(pm-status CP-59): 작업자는 codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude Code) 둘이고 옛 Codex 세션(codex-review 포함)은 없다. 아래 줄의 "기존 Codex 세션에 배정"과 "codex-review는 helper worker 허용 목록 밖" 설명은 당시 것이다. 통신 도구는 두 작업자만 받도록 채택했다(`1c6f5751`).
 - [2026-11-15 전체 업무 인계](operations/pm-handoff-2026-11-15.md): 권한/회수, CP51~54 완료, 실제 검증/미실행, 실패·위험, 세션과 worktree, 통신·watcher, Git·승인, 다음 수동 행동과 원문 증거 경로를 포함한다.
 - 권한 기준은 canonical main의 pm-control.json이다. **active 및 위임 ID/실제 owner 일치 이후 새 PM만 배정·통합·커밋·푸시**한다. Codex는 회수 권한을 유지하되 codex-review는 인계 완료 후 일반 작업자로서 PM 배정 없이 main을 바꾸거나 푸시하지 않는다. 구현/분석/문서/검증은 기존 Codex 세션에 배정한다.
 - 범위는 기존 승인된 오프라인 개발·검증·문서·운영이다. 실제 API/키 조회/모델 실행·GU9/DR67 설치 패키지/서명/외부 게시/비용은 이번 인계로 승인되지 않는다. 새 worktree/이력 재작성/force/--no-verify 금지도 유지한다.

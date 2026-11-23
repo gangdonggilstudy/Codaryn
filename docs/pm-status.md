@@ -1,6 +1,6 @@
 # PM 상태
 
-현재 운영자: 2026-11-15 사용자 재위임(CP55)의 Claude w3:pG. canonical main pm-control.json의 pm-20261115-claude-01 active를 기준으로 하며 codex-review는 인계 후 일반 작업자다. 아래 이전 위임 표와 CP54까지의 Codex PM 표기는 당시 이력이다.
+현재 운영자: 2026-11-15 사용자 재위임(CP55)의 Claude w3:pG. canonical main pm-control.json의 pm-20261115-claude-01 active를 기준으로 하며 codex-review는 인계 후 일반 작업자다. 2026-11-22부터 작업자는 codex-worker(w3:pJ)와 claude-worker(w3:pH)이고 옛 Codex 세션은 없다(CP-59). 아래 이전 위임 표와 CP54까지의 Codex PM 표기는 당시 이력이다.
 
 PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로 codex-review(w3:p3)가 PM과 통합을 회수했다. 아래 임시 위임 기록과 active 조건은 Claude 임시 PM에게 적용되며, 회수 후 Codex의 원래 관리 권한을 중단시키지 않는다. 작업별 상세는 [개발 진행 현황](progress.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 둔다.
 
@@ -39,6 +39,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
+
+## 진행 요약 (CP-59, 2026-11-22~23) — 새 작업자 둘과 교육, 문서 현행화·통신 도구 채택
+
+- **작업자 교체(사용자 결정, 2026-11-22):** 세션 재시작 뒤 사용자가 Claude w3:pG의 오케스트레이터 역할을 다시 확인했다. 새 세션 둘을 작업자로 쓴다: codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude Code). codex-review를 포함한 옛 Codex 세션 여섯은 없다. 통합·커밋·푸시는 계속 현재 PM만 한다. PM이 w3:pJ에 Herdr 이름 `codex-worker`를 붙였다(w3:pH는 이미 `claude-worker`).
+- **사전 교육:** 교육 자료 `.codaryn/pm-tools/onboarding-20261122.md`(지침·절차 문서 목록, 금지 규칙, 이해 확인 질문 14개). 두 작업자 모두 14개 답이 정확해 통과했다(codex-worker 보고 `9e24382f…`, claude-worker 보고 `b307a36d…`, 수동 ACK). 질문 14에서 찾은 낡은 현재형 문장은 아래 문서 현행화로 넘겼다.
+- **문서 현행화 채택:** `AGENTS.md`, `docs/README.md`, `docs/development-workflow.md`, `docs/operations/pm-handoff-2026-11-15.md`, `docs/personas.md`, `docs/unit-test-plan.md`의 현재형 문장을 지금 사실(active 위임 PM, 두 작업자, 최신 체크포인트)로 맞추고 날짜 붙은 기록은 그대로 두었다. claude-worker 구현, codex-worker 독립 검토 H0/M0/L0(정보 4: 일부러 남긴 문장의 판단이 타당). worker `a4890e31`, 채택 `a6b212c3`(tree `13fa8982` 일치). 깨진 상대 링크는 49개 그대로(새 링크 2).
+- **세션 통신 도구 채택:** `scripts/pm-session-comms.mjs`의 새 등록·재개를 codex-worker(w3:pJ, agent codex)와 claude-worker(w3:pH, agent claude)만 받게 했다. 옛 다섯 이름은 닫힌 기록 확인용으로만 남고, 옛 이름 기록은 git을 부르기 전에 작업 공간 범위를 검사한다. PM 전송 신원(codex-review/w3:p3)은 그대로이고 Claude 작업자에게는 어느 경로에서도 prompt를 보내지 않는다. codex-worker 구현, claude-worker 독립 검토 H0/M0/L2(L1 검사 순서, L2 문서 시제) → codex-worker 보완(회귀 시험 5개 추가) → PM이 보완분을 읽고 PM 환경에서 111/111 통과를 확인했다. worker `33749851`, 채택 `1c6f5751`(main에 놓인 patch가 검토한 patch `2705b6c7`과 같다). 채택 뒤 실제 file-only poll: 등록 43건 중 ACK closed 42건, 폐기된 `comm-live-loop-01`은 예상대로 `CHECKOUT_MISMATCH`. 첫 실제 등록·dispatch(codex-worker의 `live-plan-review-codex-01`)가 성공했다. 결과는 `.codaryn/pm-tools/evidence/poll-after-comms-adopt.json`.
+- **운영 메모:** Codex 샌드박스는 다른 작업 공간에 git을 쓸 때 소유권 검사로 승인 창을 띄운다. 이후 검토 작업은 PM이 후보 사본을 검토자 자기 작업 공간의 `.codaryn/review-packets/`에 둔다. 작업자 화면의 승인·한도 창에는 PM이 답하지 않고 사용자가 처리한다.
+- **진행 중:** 실제 API 실행 계획 초안 `docs/acceptance/live-api-plan.md`(claude-worker 작성, 사용자 결정 D-1~D-11 포함, codex-worker 검토 중). GU-9 설치 꾸러미 승인 제안서(claude-worker 작성 중; 2026-11-23 사용자가 버전·체크섬 메타데이터의 웹 조회만 승인했고, 설치·내려받기·꾸러미 만들기는 여전히 미승인).
+- 남은 것: E-5·E-6 보류, E-7은 실제 API 경계. 키 없는 Windows 수동 12항목 NOT_RUN(패킷 v2 준비됨), 실제 API·GU9/DR67 설치·서명·게시·역사적 한계(U333 u22, U321 경합, JSON pin) 그대로.
 
 ## 진행 요약 (CP-58, 2026-11-15) — 저장소 정리, CLAUDE.md 현행화, 수동 점검 패킷 v2
 

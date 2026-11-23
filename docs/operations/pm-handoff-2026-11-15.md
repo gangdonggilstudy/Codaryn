@@ -6,7 +6,7 @@
 
 - 작업자 세션은 codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude Code) 둘이다(2026-11-22 사용자 결정, 둘 다 사전 교육 통과). 아래 "세션·worktree 소유권" 표의 Codex 세션(codex-review 포함)은 지금 없다. 통합·커밋·푸시는 계속 현재 PM만 한다.
 - 키 없는 Windows 수동 점검 패킷은 v2 `D:/project/Codaryn/.codaryn/manual-packet-v2/packet.md`다(pm-status CP-58). 아래의 v1 temp 패킷 경로는 당시 것이다. 12항목은 여전히 모두 NOT_RUN이다.
-- 세션 통신 도구 `scripts/pm-session-comms.mjs`는 새 작업자 이름을 받도록 고치는 중이다. 그 전까지 작업자 보고는 수동(report.md와 ready-manual.json)으로 하며, 고쳐지면 PM이 기록한다.
+- 세션 통신 도구 `scripts/pm-session-comms.mjs`는 2026-11-23에 두 작업자만 받도록 고쳐 채택했다(main `1c6f5751`, pm-status CP-59). 새 작업은 register → dispatch(전송 없음) → PM의 명시 Herdr prompt → 작업자 started/ready → poll → ack 순서다. Claude 작업자에게 `--send`를 쓰지 않는다. 그 전의 수동 보고(report.md와 ready-manual.json)는 도구가 실패할 때의 대체 방법으로만 쓴다.
 
 이 문서는 사용자 직접 지시로 준비한 현재 운영 인계다. 과거 Claude 토큰 부족·배정 금지와 11월 14일 회수 기록은 당시 이력이다. 사용자가 이번에 기존 Claude를 찾아 오케스트레이터를 인계하고 codex-review를 일반 작업자로 전환하라고 지시했다. 제품 범위·실행 권한을 새로 확장하는 지시는 아니다. **커밋에 trailer를 넣지 말라는 추가 사용자 지시도 받았다.**
 

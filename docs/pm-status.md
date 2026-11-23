@@ -40,6 +40,12 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-61, 2026-11-23) — GU-9 꾸러미 승인 제안서 채택
+
+- **제안서 채택:** [`docs/design/gu9-packaging-proposal.md`](design/gu9-packaging-proposal.md). 사용자가 승인한 메타데이터 조회(curl 25회: npm 레지스트리, nodejs.org, README 원문)로 `@electron/packager` 20.3.0(BSD-2-Clause, 직접 의존성 17, 설치 스크립트 없음)·`@electron/fuses` 2.1.3(MIT, 의존성 0)의 sha512·tarball 주소, Node v26.13.1 win-x64 zip SHA-256 `e2edda75…`, 명령·산출·검증·비용·DR-75 고지, 사용자 결정을 적었다. Electron zip의 기본 주소·캐시 위치·체크섬 대조는 설치된 `@electron/get` 소스로 확인했고, packager의 내려받기 동작은 미확인이라 "승인 전 확인 단계"로 분리했다. claude-worker 작성, codex-worker 독립 검토 H0/M1/L2/정보4(값 173건 중 172 일치) → 보완 → 재검토 H0/M0/L1(구현 보고서의 집계 21→20 오기만, 제안서 본문 영향 없음). PM이 원문 대조(해시·integrity·Node SHA·캐시 폴더 해시)를 따로 했다. worker `f46c2e4e`, 채택 `01cbe538`(main 위 patch가 검토한 patch `89b3618a`와 같다). PM 후속: pm-status 줄 인용을 체크포인트 이름(CP-54)으로 바꾸고 설계 색인에 넣었다.
+- **설치·내려받기·꾸러미 만들기·서명·게시는 여전히 미승인이다.** 승인 질문은 제안서 11절 순서대로 하나씩 묻는다. 먼저 lock에 올 패키지와 라이선스를 보려면 D-1·D-2(의존성 추가) → D-3a(lock 해석) 순서다.
+- **통신 도구 기록:** `gu9-rereview-codex-01`은 READY 뒤 Herdr가 w3:pJ의 Codex agent_session을 새 값으로 보고하고(같은 terminal, 화면 대화는 이어짐) pane 이름을 지워, 도구가 ACK를 거부했다(`ACK_NOT_READY`, identityVerified false). assignment·started·ready는 모두 등록된 session digest로 남았다. PM은 도구를 우회하지 않고 보고 본문·해시를 확인한 수동 ACK를 `.codaryn/pm-tools/receipts/gu9-rereview-codex-01-manual-ack.json`에 남겼고, 이름을 다시 붙였다. 다음 codex-worker 작업은 새 session으로 등록된다.
+
 ## 진행 요약 (CP-60, 2026-11-23) — 실제 API 실행 계획 채택과 첫 사용자 결정, 문서 사실 보정
 
 - **통신 도구 실제 사용:** 채택한 도구로 두 작업자의 작업 6건을 register → dispatch → 명시 prompt → started/ready → poll → ack 순서로 돌렸다. 모두 identityVerified·sessionBound였다.

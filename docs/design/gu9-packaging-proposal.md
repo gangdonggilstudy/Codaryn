@@ -136,7 +136,7 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
 | 대안: `node.exe`만 | `https://nodejs.org/dist/v26.13.1/win-x64/node.exe`, SHA-256 `f5109dc868ec38703ad8f305e0aceece717cb60d4889873f434017af4e96cccb` | SHASUMS256.txt:31 |
 | 크기 | 미확인(index와 SHASUMS에 크기가 없다) | — |
 | 라이선스 | 미확인(허용 주소에 원문이 없다) | 10절 |
-| 기존 사용 | CP-54 패킷이 이미 Node 26.13.1 실행 파일을 핀으로 고정해 썼다 | `docs/pm-status.md:90` |
+| 기존 사용 | CP-54 패킷이 이미 Node 26.13.1 실행 파일을 핀으로 고정해 썼다 | `docs/pm-status.md` CP-54 |
 
 - 권고[설계 제안]: zip을 받아 `node.exe`와 `LICENSE`만 묶는다. 라이선스 원문을 확인하기 전에는 묶지 않는다(D-5a → D-5b).
   - zip에는 라이선스 원문이 함께 있다[추정]. `node.exe`만 받으면 라이선스 원문을 따로 구해야 한다.
@@ -296,7 +296,7 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
 | D-3b | 해석된 판의 검토 결과와 설치(`npm ci`) | D-3a 보고를 보고 다시 묻는다. 허용 목록 밖 라이선스(예: `graceful-fs`가 4.2.12로 해석되면 BlueOak-1.0.0)는 DR-75 판단 없이 넘기지 않는다. 검증 명령(`npm audit signatures` 등)의 네트워크 주소·시점·허용 범위도 함께 정한다 | `development-workflow.md:123`, 3절, 8절 5항 |
 | D-4a | 기존 Electron zip의 명시 위치와 SHA-256 확인 | 사용자가 5.1의 기본 캐시 경로(또는 GU-1 때 쓴 `electron_config_cache`)에서 `electron-v45.3.1-win32-x64.zip`을 찾아 `Get-FileHash -Algorithm SHA256`으로 재고, `d92d1aa4…`와 같은지 알린다. 지금 물을 수 있다 | 5.1(`get/Cache.js:8`~`:25`, `env-paths/index.js:29`), `checksums.json:40` |
 | D-4b | 다시 받기, 자동 내려받기가 일어날 수 있는 실행 | 지금 묻지 않는다. 5.2의 승인 전 확인으로 packager의 인자와 주소를 정한 뒤 다시 묻는다 | 5.2, 인계 문서 65줄 |
-| D-5a | Node 26.13.1 zip 내려받기와 라이선스 확인 | 승인. 주소와 SHA-256은 4절 값으로 고정한다. 받은 뒤 `LICENSE` 원문을 DR-75대로 판단한다. `.asc` 서명 확인을 할지도 정한다 | 4절. 같은 판이 이미 CP-54 핀이다(`pm-status.md:90`) |
+| D-5a | Node 26.13.1 zip 내려받기와 라이선스 확인 | 승인. 주소와 SHA-256은 4절 값으로 고정한다. 받은 뒤 `LICENSE` 원문을 DR-75대로 판단한다. `.asc` 서명 확인을 할지도 정한다 | 4절. 같은 판이 이미 CP-54 핀이다(`pm-status.md` CP-54) |
 | D-5b | Node 묶기 | D-5a 결과를 보고 다시 묻는다. 라이선스가 미확인인 채로 묶기를 허가하지 않는다 | 10절, `development-workflow.md:125` |
 | D-6 | fuses 값과 순서 | 6.7의 여섯 값은 그대로. `strictlyRequireAllFuses: true`로 빠진 fuse를 막고, 나머지 셋은 하나씩 정한다: `LoadBrowserProcessSpecificV8Snapshot`은 끔, `EnableCookieEncryption`과 `WasmTrapHandlers`는 사용자 결정. 순서는 Node·엔진 복사(6단계) 뒤에 바꾸고 바로 읽은 다음 zip으로 묶는다 | `strictlyRequireAllFuses`(`raw/fuses-v2.1.3-README.md:64`~`:71`), "all files in place"(`:16`~`:18`). 로컬 `dist`에는 `browser_v8_context_snapshot.bin`이 없다(그 fuse를 켰을 때 영향은 [추정]) |
 | D-7 | 꾸러미 앱의 엔진 배치와 asar 밖 파일의 보호 | GU-1 소유자가 `app.ts`의 세 값(엔진 경로 `:121`, `nodePath` `:122`, `hostScript` `:127`)을 asar 밖 배치(`resources/engine`, `resources/node`)에 맞춘다. SHA-256 목록을 확인한다면 목록을 둘 신뢰 위치와, 맞지 않을 때 호스트 시작을 거부할지를 함께 정한다. asar 안에 두면 asar 무결성 fuse에 기대는데, Windows에서의 효과는 미확인이다. 목록과 파일을 함께 바꿀 수 있으면 악의적 변조를 막는다고 입증하지 못한다. 이것은 남는 경계로 기록한다 | 1.1절, `app.ts:121`~`:127`, `standalone-gui.md:1071` |

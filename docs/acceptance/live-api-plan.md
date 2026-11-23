@@ -1,6 +1,6 @@
 # 실제 API 실행 계획 (초안)
 
-> **초안이다. 독립 검토(live-plan-review-codex-01)의 지적을 반영했고, PM 채택 전이며, 아무것도 실행하지 않았다.** 이 저장소에서 실제 Anthropic API와 실제 OpenAI API는 아직 한 번도 호출되지 않았다([tests/live/README.md](../../tests/live/README.md) 3줄, [pm-status](../pm-status.md) CP-59 51줄). 이 문서는 사용자가 직접 실행할 순서와, 실행 전에 사용자가 정할 값을 모은다.
+> **독립 검토(live-plan-review-codex-01)의 지적을 반영해 PM이 채택했다(2026-11-23, main `a82f8a19`). 아무것도 실행하지 않았다.** 이 저장소에서 실제 Anthropic API와 실제 OpenAI API는 아직 한 번도 호출되지 않았다([tests/live/README.md](../../tests/live/README.md) 3줄, [pm-status](../pm-status.md) CP-59의 "남은 것" 줄과 CP-60). 이 문서는 사용자가 직접 실행할 순서와, 실행 전에 사용자가 정할 값을 모은다.
 
 - 작성: 2026-11-22, claude-worker(작업 지시 live-api-plan-claude-01), 기준 main `a91cf12a`.
 - 보완: 2026-11-23, claude-worker(작업 지시 live-plan-fix-claude-01), 기준 main `6643d54c`. 검토의 L1·L2와 정보 I1~I3을 반영하고 인용 줄을 이 판에 다시 맞췄다.
@@ -203,11 +203,11 @@ node <실행본>\dist\src\cli\main.js report --workspace <후보 디렉터리> -
 
 | 번호 | 항목 | 권고(초안) | 근거 |
 | --- | --- | --- | --- |
-| D-1 | 이번에 실행할 범위 | 3.1(Anthropic)만 먼저. 결과를 본 뒤 3.2, 그 뒤 3.3 | roadmap.md:92(단계 3 입력이 단계 2 통과) |
+| D-1 | 이번에 실행할 범위 | **사용자 결정(2026-11-23): 3.1(Anthropic)만 먼저.** 결과를 본 뒤 3.2, 그 뒤 3.3을 다시 묻는다 | roadmap.md:92(단계 3 입력이 단계 2 통과) |
 | D-2 | 실행 판과 체크아웃 위치 | PM이 지정한 채택 커밋. 관리용 main 작업 트리에 빌드 산출물을 만들지 여부 포함 | development-workflow.md:113(G-9) |
 | D-3 | 모델(Anthropic, OpenAI) | 문서는 정하지 않는다. `models`로 고르고 결과에 id를 적는다 | testing.md:83, usage.md:264 |
-| D-4 | OpenAI 점검 포함 여부 | 선택. 하면 점검 3을 위해 추론 모델 | tests/live/README.md:34·67 |
-| D-5 | 토큰·호출·비용 상한 | 2.4의 기존 값으로 시작. 금액 한도는 사용자가 정함 | testing.md:83, usage.md:452 |
+| D-4 | OpenAI 점검 포함 여부 | **사용자 결정(2026-11-23): 이번에는 빼고 Anthropic 결과를 먼저 본다.** 나중에 하면 점검 3을 위해 추론 모델 | tests/live/README.md:34·67 |
+| D-5 | 토큰·호출·비용 상한 | **사용자 결정(2026-11-23): 코드에 고정된 점검 상한(2.4) 그대로.** 금액 한도는 따로 두지 않고, 제공자 쪽 사용량은 사용자가 본다 | testing.md:83, usage.md:452 |
 | D-6a | 단계 2 과제 수와 합격 기준 | `code-task.json` 1개로 시작한다. 기준은 "done 또는 정해진 상태로 멈춤 + 보호 파일 불변"으로 두고 testing.md에 정식으로 정한다 | roadmap.md:35·84 |
 | D-6b | 실제 모델의 "실패 → 실패 근거 → 재수정" 관찰을 단계 2 판정의 필수로 할지 | 필수로 하지 않는다. 판정은 D-6a 기준으로 하고, `repairAttempts`가 0이면 2-R 행은 NOT_RUN으로 둔다. 단계 3 진입(roadmap.md:92)은 이와 별개로 PM이 기록을 보고 판단하며, 2-R이 NOT_RUN이면 남은 경계로 함께 적는다. 필수로 정하면 첫 검증에서 실패하는 과제가 필요하다 → 기준 필요 | 실 API 기준은 통과 또는 이유 있는 멈춤(roadmap.md:84). 실패 → 재수정 → 통과는 오프라인 기준이 재현한다(:83). 단계 2가 더하는 반복(:74·78). 실제 모델이 같은 결과를 내는지는 입증하지 않는다(tests/live/README.md:78) |
 | D-7 | 단계 2 선택 관찰 | 취소와 한도 초과 각 1회(한도 초과는 3.2의 절차대로 task와 설정을 함께 낮춤). 보호 경로 유도는 선택 | roadmap.md:85–86 |

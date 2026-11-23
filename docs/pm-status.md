@@ -40,6 +40,14 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-60, 2026-11-23) — 실제 API 실행 계획 채택과 첫 사용자 결정, 문서 사실 보정
+
+- **통신 도구 실제 사용:** 채택한 도구로 두 작업자의 작업 6건을 register → dispatch → 명시 prompt → started/ready → poll → ack 순서로 돌렸다. 모두 identityVerified·sessionBound였다.
+- **문서 사실 보정(PM 검토 작은 단위):** `docs/roadmap.md:34`·`docs/testing.md` 1절·4절이 실제 API 점검을 문서 작업 하나와 HTTP 8회로 적고 OpenAI 점검을 빠뜨렸던 것을 지금 파일(Anthropic 작업 둘 최대 16회·60,000토큰, OpenAI 점검 셋 최대 10회·40,000토큰)에 맞췄다. `docs/development-workflow.md:105–106`은 공용 pre-commit 훅이 설치된 것처럼 적었으나 공용 hooks 폴더에는 샘플만 있어(PM 확인) "설치하면"과 "훅이나 PM의 staging 검사에서 거부"로 고쳤다. claude-worker 구현, PM이 소스·README·package 스크립트와 대조. 채택 `4f0922c1`(tree `3377d0ed`), `6643d54c`(tree `ca4d1947`).
+- **실제 API 실행 계획 채택:** [`docs/acceptance/live-api-plan.md`](acceptance/live-api-plan.md). 단계 1b·2·3에서 사용자가 직접 할 명령, 연습 폴더 격리, 상한, 결과를 돌려줄 형식(PASS/FAIL/NOT_RUN), 사용자 결정 D-1~D-11. claude-worker 작성, codex-worker 독립 검토 H0/M0/L2/정보3(인용 139곳 위치 전부 맞음) → 보완(한도 초과 관찰은 task와 설정을 함께 낮춤, `run --json`, D-6을 D-6a·D-6b로, 단계 3은 D-8 전 미실행) → PM이 보완분 전부 읽음. 채택 `a82f8a19`(tree `5a11343b`). 아무것도 실행하지 않았다.
+- **사용자 결정(2026-11-23):** D-1 이번 실행 범위는 3.1(Anthropic 점검)만 먼저, D-4 OpenAI 점검은 이번에 뺌, D-5 상한은 코드에 고정된 점검 상한 그대로(금액 한도 없음). 나머지 D-2·D-3·D-6~D-11은 3.1 결과 뒤 또는 실행 직전에 묻는다. 실제 실행은 사용자가 한다.
+- **진행 중:** GU-9 꾸러미 승인 제안서는 codex-worker 독립 검토 H0/M1/L2/정보4(값 173건 중 172 일치)를 받아 claude-worker가 보완 중이다. M1은 Electron zip 재다운로드 주소와 packager 캐시·체크섬 동작이 미확인인 채 실행 승인을 묻던 점이다. 설치·내려받기·꾸러미 만들기는 여전히 미승인이다.
+
 ## 진행 요약 (CP-59, 2026-11-22~23) — 새 작업자 둘과 교육, 문서 현행화·통신 도구 채택
 
 - **작업자 교체(사용자 결정, 2026-11-22):** 세션 재시작 뒤 사용자가 Claude w3:pG의 오케스트레이터 역할을 다시 확인했다. 새 세션 둘을 작업자로 쓴다: codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude Code). codex-review를 포함한 옛 Codex 세션 여섯은 없다. 통합·커밋·푸시는 계속 현재 PM만 한다. PM이 w3:pJ에 Herdr 이름 `codex-worker`를 붙였다(w3:pH는 이미 `claude-worker`).

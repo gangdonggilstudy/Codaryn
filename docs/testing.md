@@ -32,7 +32,7 @@
 | 엔진 대역 | 엔진과 계약 | 모델, 가림 게이트, 정책, 도구, 검증기, journal, 시계 대역(`tests/unit/engine/fakes.ts`) | `tests/unit/engine/` | 구현 |
 | 프로세스 통합 | 빌드한 CLI(`dist/src/cli/main.js`) 실제 프로세스, 실제 파일 시스템, 실제 자식 프로세스 | 모델은 대본 제공자 | `tests/integration/` | 구현 |
 | 모의 API | 위와 같음 + 127.0.0.1의 가짜 Messages API 서버 | 실제 API | `tests/integration/m01`~`m03`, `p05`, `s01` 등 | 구현. 시험 이름에 `[모의 API·실제 API 아님]` |
-| 실제 API | Anthropic API | 없음 | `tests/live/anthropic-live.ts` | 작성됨, **미실행** |
+| 실제 API | Anthropic API, OpenAI API | 없음 | `tests/live/anthropic-live.ts`(작업 둘), `tests/live/openai-live.ts`(점검 셋) | 작성됨, **미실행** |
 | 자기 개발 예행 | 후보 준비 스크립트, 보호 경로, 무결성 확인, 대본 모델 | 실제 모델 | `tests/integration/k03` | 구현. 실제 자기 개발의 증거가 아니다 |
 
 - 유닛, 통합, 모의 API는 API 키 없이 돈다. 통합의 자식 환경에는 허용된 변수만 넘기고, 키는 실제 키와 구별되는 가짜 값만 쓴다(`tests/support/cli.ts`의 `cliEnv`, `fakeApiKey`).
@@ -73,7 +73,7 @@
 - `tests/live/anthropic-live.ts`의 실행 조건과 상한 **구현(미실행)**
   - 세 조건(`CODARYN_LIVE`, `ANTHROPIC_API_KEY`, `CODARYN_MODEL`)이 모두 있을 때만 돈다. 아니면 건너뛴다.
   - 파일 이름이 `.test.ts`로 끝나지 않으므로 npm 스크립트에 들어가지 않는다.
-  - 상한은 턴 4, 도구 4, 재시도 1, 출력 토큰 1,024, 총 토큰 30,000, 3분, HTTP 요청 8회다.
+  - 상한은 작업마다 턴 4, 도구 4, 재시도 1, 출력 토큰 1,024, 총 토큰 30,000, 3분이고, HTTP 요청은 작업마다 최대 8회다. 작업이 둘(문서·코드)이라 합쳐 요청 최대 16회, 토큰 최대 60,000이다. OpenAI 점검 `tests/live/openai-live.ts`의 상한은 턴 4, 도구 4, 재시도 1, 출력 토큰 4,096(추론 토큰 포함), 총 토큰 40,000, 3분이고, HTTP 요청은 점검 셋을 합쳐 최대 10회다(실행 조건은 `tests/live/README.md`).
 - 실행 전 확인
   - 키는 로컬 환경에만 있다. 출력과 기록에 없다.
   - 모델은 설정에 명시하고 결과에 기록한다.

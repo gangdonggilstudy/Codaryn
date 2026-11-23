@@ -19,7 +19,9 @@ async function fixture(t, options = {}) {
   t.after(async () => { assert(path.resolve(temp).startsWith(path.resolve(scratch) + path.sep)); await fs.rm(temp, { recursive: true, force: true }); });
   const pm = path.join(temp, 'project'), worker = path.join(pm, '.worktrees/check');
   await fs.mkdir(worker, { recursive: true });
-  const agents = Object.fromEntries(Object.entries(PANES).map(([name, pane]) => [name, { agent: 'codex', name,
+  const agents = Object.fromEntries(Object.entries(PANES).map(([name, pane]) => [name, {
+    agent: name === 'claude-worker' ? 'claude' : 'codex', name,
+    ...(name === 'claude-worker' ? { agent_session: { agent: 'claude', kind: 'id', source: 'herdr:claude', value: 'claude-session-one' } } : {}),
     pane_id: pane, terminal_id: 'terminal-' + name, agent_status: 'idle', cwd: pm }]));
   const calls = [], config = { getError: null, promptError: null, visibleError: null, visibleText: '› Ask Codex to do anything\n? for shortcuts', checkout: { head: 'c'.repeat(40), branch: 'ops/test' }, gitCalls: 0 };
   const transport = {
@@ -33,18 +35,172 @@ async function fixture(t, options = {}) {
   const api = make(pm), author = make(worker);
   const write = async (wt, rel, value) => { const file = path.join(wt, rel); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, typeof value === 'string' ? value : JSON.stringify(value)); };
   const read = async (wt, rel) => JSON.parse(await fs.readFile(path.join(wt, rel), 'utf8'));
-  const spec = id => ({ id, worker: 'codex-check', pane: PANES['codex-check'], worktree: worker, subject,
+  const spec = id => ({ id, worker: 'codex-worker', pane: PANES['codex-worker'], worktree: worker, subject,
     taskFile: '.codaryn/pm-tools/' + id + '.md', taskSHA: sha('DO-NOT-LOG-CONTENT'),
     report: local(id) + '/report.md', receipt: local(id) + '/ready.json' });
   async function register(id = 'job', patch = {}) {
     const job = { ...spec(id), ...patch }; await write(pm, job.taskFile, 'DO-NOT-LOG-CONTENT'); await api.register(pm, job); return job;
   }
   const dispatch = (id = 'job', settings) => api.dispatch(pm, id, settings);
-  const started = (id = 'job') => author.worker('STARTED', pm, worker, id, 'codex-check');
-  const ready = (id = 'job', text = '# Report\n') => author.worker('READY', pm, worker, id, 'codex-check', text);
+  const started = (id = 'job') => author.worker('STARTED', pm, worker, id, 'codex-worker');
+  const ready = (id = 'job', text = '# Report\n') => author.worker('READY', pm, worker, id, 'codex-worker', text);
   async function completed() { await register(); await dispatch(); await started(); return ready(); }
   return { pm, worker, api, author, make, agents, config, calls, spec, write, read, register, dispatch, started, ready, completed };
 }
+
+const historicalWorkers = { 'codex-check': 'w3:pD', 'codex-loop': 'w3:p8', 'codex-sec': 'w3:pC',
+  'codex-audit': 'w3:pE', 'codex-probe': 'w3:pF' };
+// External v1 record fixture: deliberately never register historical jobs with the new API.
+async function historicalRecord(f, name, { id = 'archived-job', closed = true, cwd = true } = {}) {
+  const job = { version: 1, id, pm: f.pm, worker: name,
+    identity: { name, pane: historicalWorkers[name], terminal: 'old-terminal', sessionSHA: null, ...(cwd ? { cwd: f.pm } : {}) },
+    worktree: f.worker, subject, checkout: { ...f.config.checkout },
+    report: local(id) + '/report.md', receipt: local(id) + '/ready.json',
+    taskFile: '.codaryn/pm-tools/' + id + '.md', taskSHA: sha('historical task') };
+  const sorted = value => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])])) : value;
+  const stamp = { version: 1, id, registrationSHA: sha(JSON.stringify(sorted(job), null, 2) + '\n'),
+    worker: name, identity: job.identity, worktree: f.worker, subject, checkout: job.checkout, report: job.report, receipt: job.receipt };
+  const reportSHA = sha('historical report');
+  const ready = { ...stamp, state: 'READY', reportSHA };
+  const records = [[`.codaryn/pm-comms/registry/${id}.json`, job]];
+  if (closed) records.push([`.codaryn/pm-comms/inbox/${id}.started.json`, { ...stamp, state: 'STARTED' }],
+    [`.codaryn/pm-comms/inbox/${id}.${reportSHA}.ready.json`, ready],
+    [`.codaryn/pm-comms/ack/${id}.${reportSHA}.json`, { ...ready, state: 'ACK' }]);
+  const snapshots = [];
+  for (const [relative, record] of records) {
+    await f.write(f.pm, relative, record);
+    snapshots.push([relative, await fs.readFile(path.join(f.pm, relative))]);
+  }
+  return { id, reportSHA, snapshots };
+}
+
+for (const [worker, pane, kind] of [['codex-worker', 'w3:pJ', 'codex'], ['claude-worker', 'w3:pH', 'claude']]) {
+  test('current worker ' + worker + ' completes file-only STARTED/READY/ACK with its expected agent kind', async t => {
+    const f = await fixture(t); assert.equal(f.agents[worker].agent, kind);
+    await f.register('job', { worker, pane }); await f.dispatch();
+    await f.author.worker('STARTED', f.pm, f.worker, 'job', worker);
+    const ready = await f.author.worker('READY', f.pm, f.worker, 'job', worker, '# Current worker\n');
+    const row = (await f.api.poll(f.pm))[0];
+    assert.equal(row.state, 'READY'); assert.equal(row.acceptanceReady, true);
+    assert.equal(row.sessionBound, worker === 'claude-worker');
+    assert.equal((await f.read(f.pm, '.codaryn/pm-comms/registry/job.json')).identity.pane, pane);
+    assert.equal((await f.api.ack(f.pm, 'job', ready.reportSHA, true)).state, 'ACK');
+    assert.equal((await f.api.poll(f.pm))[0].closed, true);
+    assert.equal(f.calls.filter(call => call[0] === 'prompt').length, 0);
+  });
+  for (const field of ['agent', 'pane_id']) test('current worker ' + worker + ' rejects wrong ' + field + ' at registration and dispatch', async t => {
+    const f = await fixture(t), wrong = field === 'agent' ? (kind === 'codex' ? 'claude' : 'codex') : 'w3:p9';
+    const original = f.agents[worker][field]; f.agents[worker][field] = wrong;
+    await assert.rejects(f.register('job', { worker, pane }), failure('IDENTITY_MISMATCH'));
+    f.agents[worker][field] = original; await f.register('job', { worker, pane });
+    f.agents[worker][field] = wrong;
+    await assert.rejects(f.dispatch('job', { send: true }), failure('IDENTITY_MISMATCH'));
+    assert.equal((await f.api.poll(f.pm))[0].error, 'IDENTITY_MISMATCH');
+    assert.equal(f.calls.filter(call => call[0] === 'prompt').length, 0);
+  });
+}
+
+test('Claude session identity is pinned and a changed or missing session cannot be accepted', async t => {
+  const f = await fixture(t); await f.register('job', { worker: 'claude-worker', pane: 'w3:pH' });
+  await f.dispatch(); await f.author.worker('STARTED', f.pm, f.worker, 'job', 'claude-worker');
+  const ready = await f.author.worker('READY', f.pm, f.worker, 'job', 'claude-worker', '# Claude\n');
+  assert.equal((await f.api.poll(f.pm))[0].sessionBound, true);
+  f.agents['claude-worker'].agent_session.value = 'claude-session-two';
+  assert.equal((await f.api.poll(f.pm))[0].error, 'IDENTITY_MISMATCH');
+  await assert.rejects(f.api.ack(f.pm, 'job', ready.reportSHA, true), failure('IDENTITY_MISMATCH'));
+  delete f.agents['claude-worker'].agent_session;
+  await assert.rejects(f.dispatch(), failure('IDENTITY_MISMATCH'));
+  assert.equal((await f.api.poll(f.pm))[0].error, 'IDENTITY_MISMATCH');
+});
+
+test('Claude --send is refused even when its visible screen quotes a normal Codex footer', async t => {
+  const f = await fixture(t); await f.register('job', { worker: 'claude-worker', pane: 'w3:pH' });
+  for (const visible of ['> Ask Claude', '› Ask Codex to do anything\n? for shortcuts']) {
+    f.config.visibleText = visible;
+    assert.deepEqual(await f.dispatch('job', { send: true }), { id: 'job', state: 'ASSIGNED', delivery: 'queued', error: 'VISIBLE_UNCONFIRMED' });
+  }
+  assert.equal(f.calls.filter(call => call[0] === 'prompt' || call[0] === 'visible').length, 0);
+  await assert.rejects(fs.stat(path.join(f.pm, pmRel('job', 'dispatch.claim'))), error => error.code === 'ENOENT');
+  await f.author.worker('STARTED', f.pm, f.worker, 'job', 'claude-worker');
+  await f.author.worker('READY', f.pm, f.worker, 'job', 'claude-worker', '# File-only still works\n');
+  assert.equal((await f.api.poll(f.pm))[0].state, 'READY');
+});
+
+for (const [worker, pane] of [...Object.entries(historicalWorkers), ['codex-review', 'w3:p3']]) {
+  test('historical worker or PM ' + worker + ' cannot register a new job', async t => {
+    const f = await fixture(t);
+    await assert.rejects(f.register('job', { worker, pane }), failure('WORKER_NOT_ALLOWED'));
+    assert.equal(f.calls.length, 0);
+    await assert.rejects(fs.stat(path.join(f.pm, '.codaryn/pm-comms/registry/job.json')), error => error.code === 'ENOENT');
+  });
+}
+
+for (const worker of Object.keys(historicalWorkers)) for (const cwd of [true, false]) {
+  test('historical closed ' + worker + ' with cwd=' + cwd + ' stays ACK without live queries or record writes', async t => {
+    const f = await fixture(t), old = await historicalRecord(f, worker, { cwd });
+    f.config.getError = Object.assign(new Error('old session absent'), { code: 'ENOENT' });
+    f.config.checkout.head = 'e'.repeat(40);
+    assert.deepEqual(await f.api.poll(f.pm, { notify: true }), [{ id: old.id, state: 'ACK', closed: true, reportSHA: old.reportSHA }]);
+    assert.equal((await f.api.ack(f.pm, old.id, old.reportSHA, true)).closed, true);
+    for (const [relative, original] of old.snapshots) assert.deepEqual(await fs.readFile(path.join(f.pm, relative)), original);
+    assert.equal(f.calls.length, 0); assert.equal(f.config.gitCalls, 0);
+  });
+}
+
+for (const part of ['registry', 'inbox', 'ack']) test('historical closed records still reject corrupt ' + part, async t => {
+  const f = await fixture(t), old = await historicalRecord(f, 'codex-loop');
+  const relative = old.snapshots.find(([name]) => name.includes('/' + part + '/') && !name.endsWith('.started.json'))[0];
+  const record = await f.read(f.pm, relative);
+  if (part === 'registry') record.identity.pane = 'w3:pJ'; else record.subject = { base: null, target: null };
+  await f.write(f.pm, relative, record);
+  assert.equal((await f.api.poll(f.pm))[0].state, 'REJECTED');
+  await assert.rejects(f.api.ack(f.pm, old.id, old.reportSHA, true));
+  assert.equal(f.calls.length, 0);
+});
+
+test('abandoned historical comm-live-loop-01 preserves CHECKOUT_MISMATCH before legacy rejection', async t => {
+  const f = await fixture(t); await historicalRecord(f, 'codex-loop', { id: 'comm-live-loop-01', closed: false });
+  f.config.checkout.head = 'e'.repeat(40);
+  assert.deepEqual(await f.api.poll(f.pm), [{ id: 'comm-live-loop-01', state: 'REJECTED', error: 'CHECKOUT_MISMATCH' }]);
+  assert.equal(f.calls.length, 0);
+});
+
+for (const location of ['outside', 'missing', 'linked']) test('L1 regression: historical ' + location + ' worktree is rejected before any Git query', async t => {
+  const f = await fixture(t), old = await historicalRecord(f, 'codex-loop', { closed: false });
+  const relative = `.codaryn/pm-comms/registry/${old.id}.json`, job = await f.read(f.pm, relative);
+  job.worktree = location === 'outside' ? path.dirname(f.pm) : path.join(f.pm, '.worktrees', location);
+  if (location === 'linked') await fs.symlink(f.worker, job.worktree, process.platform === 'win32' ? 'junction' : 'dir');
+  await f.write(f.pm, relative, job);
+  const code = location === 'outside' ? 'WORKTREE_SCOPE' : location === 'missing' ? 'ENOENT' : 'WORKTREE_LINK';
+  assert.deepEqual(await f.api.poll(f.pm), [{ id: old.id, state: 'REJECTED', error: code }]);
+  await assert.rejects(f.dispatch(old.id, { send: true }), failure(code));
+  for (const state of ['STARTED', 'READY']) await assert.rejects(
+    f.author.worker(state, f.pm, f.worker, old.id, 'codex-loop', '# Rejected path\n'), failure(code));
+  await assert.rejects(f.api.ack(f.pm, old.id, old.reportSHA, true), failure(code));
+  assert.equal(f.config.gitCalls, 0); assert.equal(f.calls.length, 0);
+});
+
+for (const [worker, pane] of [['claude-worker', 'w3:pJ'], ['codex-worker', 'w3:pH']]) {
+  test('I4 regression: ' + worker + ' cannot register with the other current worker pane ' + pane, async t => {
+    const f = await fixture(t);
+    await assert.rejects(f.register('job', { worker, pane }), failure('WORKER_NOT_ALLOWED'));
+    assert.equal(f.calls.length, 0); assert.equal(f.config.gitCalls, 0);
+    await assert.rejects(fs.stat(path.join(f.pm, '.codaryn/pm-comms/registry/job.json')), error => error.code === 'ENOENT');
+  });
+}
+
+test('unclosed historical jobs cannot dispatch, STARTED, READY or acquire a new ACK', async t => {
+  const f = await fixture(t), old = await historicalRecord(f, 'codex-loop', { closed: false });
+  await assert.rejects(f.dispatch(old.id), failure('WORKER_NOT_ALLOWED'));
+  for (const state of ['STARTED', 'READY']) await assert.rejects(
+    f.author.worker(state, f.pm, f.worker, old.id, 'codex-loop', '# No new work\n'), failure('WORKER_NOT_ALLOWED'));
+  await assert.rejects(f.api.ack(f.pm, old.id, old.reportSHA, true), failure('WORKER_NOT_ALLOWED'));
+  assert.deepEqual(await f.api.poll(f.pm), [{ id: old.id, state: 'REJECTED', error: 'WORKER_NOT_ALLOWED' }]);
+  assert.equal(f.calls.length, 0);
+  await assert.rejects(fs.stat(path.join(f.pm, pmRel(old.id, 'assignment'))), error => error.code === 'ENOENT');
+  await assert.rejects(fs.stat(path.join(f.worker, local(old.id))), error => error.code === 'ENOENT');
+});
 
 test('files-first assignment, STARTED, READY, collection and explicit read ACK are separate', async t => {
   const f = await fixture(t); await f.register();
@@ -109,9 +265,9 @@ test('dispatch admission is not STARTED; timeout claim survives restart with no 
 });
 
 test('successful dispatch means accepted only and a blocked worker is never prompted', async t => {
-  const f = await fixture(t); await f.register(); f.agents['codex-check'].agent_status = 'blocked';
+  const f = await fixture(t); await f.register(); f.agents['codex-worker'].agent_status = 'blocked';
   assert.equal((await f.dispatch('job', { send: true })).delivery, 'queued');
-  f.agents['codex-check'].agent_status = 'idle';
+  f.agents['codex-worker'].agent_status = 'idle';
   assert.equal((await f.dispatch('job', { send: true })).delivery, 'accepted');
   assert.equal((await f.api.poll(f.pm))[0].state, 'ASSIGNED');
   assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 1);
@@ -173,7 +329,7 @@ test('report tampering or stale task digest cannot be collected or ACKed', async
 
 for (const [field, value] of [['pane_id', 'w3:p9'], ['agent', 'claude'], ['terminal_id', 'replacement'], ['name', 'other']]) {
   test('changed live identity ' + field + ' is rejected without messaging', async t => {
-    const f = await fixture(t); await f.completed(); f.agents['codex-check'][field] = value;
+    const f = await fixture(t); await f.completed(); f.agents['codex-worker'][field] = value;
     assert.equal((await f.api.poll(f.pm, { notify: true }))[0].error, 'IDENTITY_MISMATCH');
     assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
   });
@@ -203,7 +359,7 @@ test('static directory junction/symlink and hard-link report escape are refused'
   const outside = path.join(f.pm, '.codaryn/outside'); await fs.mkdir(outside); await fs.writeFile(path.join(outside, 'report.md'), 'outside');
   const report = path.join(f.worker, local('job'), 'report.md');
   await fs.link(path.join(outside, 'report.md'), report);
-  await assert.rejects(f.author.worker('READY', f.pm, f.worker, 'job', 'codex-check'), failure('FILE_UNSAFE'));
+  await assert.rejects(f.author.worker('READY', f.pm, f.worker, 'job', 'codex-worker'), failure('FILE_UNSAFE'));
   await fs.unlink(report);
   const directory = path.join(f.worker, '.codaryn/session-comms/linked');
   await fs.symlink(outside, directory, process.platform === 'win32' ? 'junction' : 'dir');
@@ -257,7 +413,7 @@ test('legacy unstructured reports cannot fabricate STARTED or be automatically A
 test('worker cannot write a different assignment or act as PM; notification requires exact PM context', async t => {
   const f = await fixture(t, { context: { herdr: '1', pane: 'w5:p1' } }); await f.completed();
   await assert.rejects(f.author.poll(f.pm), failure('PM_CWD'));
-  await assert.rejects(f.author.worker('STARTED', f.pm, f.worker, 'job', 'codex-sec'), failure('WORKER_MISMATCH'));
+  await assert.rejects(f.author.worker('STARTED', f.pm, f.worker, 'job', 'claude-worker'), failure('WORKER_MISMATCH'));
   assert.equal((await f.api.poll(f.pm, { notify: true }))[0].error, 'PM_CONTEXT');
   assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
 });
@@ -274,8 +430,8 @@ test('explicit wrong ACK digest, duplicate registration and arbitrary CLI action
 test('CLI defaults stay file-only; unknown commands cannot start/close agents or approve a dialog', async t => {
   const f = await fixture(t); await f.register(); const rows = [];
   await cli(['dispatch', '--pm', f.pm, '--id', 'job'], { api: f.api, output: row => rows.push(row) });
-  await cli(['started', '--pm', f.pm, '--worktree', f.worker, '--id', 'job', '--worker', 'codex-check'], { api: f.author, output: row => rows.push(row) });
-  await cli(['ready', '--pm', f.pm, '--worktree', f.worker, '--id', 'job', '--worker', 'codex-check', '--stdin'], { api: f.author, input: async () => Buffer.from('# CLI report\n'), output: row => rows.push(row) });
+  await cli(['started', '--pm', f.pm, '--worktree', f.worker, '--id', 'job', '--worker', 'codex-worker'], { api: f.author, output: row => rows.push(row) });
+  await cli(['ready', '--pm', f.pm, '--worktree', f.worker, '--id', 'job', '--worker', 'codex-worker', '--stdin'], { api: f.author, input: async () => Buffer.from('# CLI report\n'), output: row => rows.push(row) });
   await cli(['poll', '--pm', f.pm], { api: f.api, output: row => rows.push(row) });
   assert.equal(rows[3][0].state, 'READY'); assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
 });
@@ -319,7 +475,7 @@ test('closed ACK remains valid after commit/branch/session/task/report changes; 
   const f = await fixture(t); await f.register('job', { checkout: { ...f.config.checkout } });
   await f.dispatch(); await f.started(); const ready = await f.ready(); await f.api.ack(f.pm, 'job', ready.reportSHA, true);
   f.config.checkout = { branch: 'next-job', head: 'd'.repeat(40) };
-  f.agents['codex-check'].terminal_id = 'next-session';
+  f.agents['codex-worker'].terminal_id = 'next-session';
   await f.write(f.pm, '.codaryn/pm-tools/job.md', 'next task');
   await fs.unlink(path.join(f.worker, local('job'), 'report.md'));
   const row = (await f.api.poll(f.pm, { notify: true }))[0]; assert.equal(row.state, 'ACK'); assert.equal(row.closed, true);
@@ -349,22 +505,22 @@ test('checkout and receipt key order are immaterial; extra schema keys are still
 });
 
 for (const state of ['working', 'blocked', 'unknown', 'quota']) test('worker ' + state + ' keeps report READY but is not yet acceptance-ready', async t => {
-  const f = await fixture(t); const ready = await f.completed(); f.agents['codex-check'].agent_status = state;
+  const f = await fixture(t); const ready = await f.completed(); f.agents['codex-worker'].agent_status = state;
   const row = (await f.api.poll(f.pm, { notify: true }))[0];
   assert.equal(row.state, 'READY'); assert.equal(row.workerStatus, state); assert.equal(row.acceptanceReady, false);
   assert.equal(await fs.readFile(path.join(f.worker, local('job'), 'report.md'), 'utf8'), '# Report\n');
   await assert.rejects(f.api.ack(f.pm, 'job', ready.reportSHA, true), failure('ACK_NOT_READY'));
   assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
-  f.agents['codex-check'].agent_status = 'done'; assert.equal((await f.api.poll(f.pm))[0].acceptanceReady, true);
+  f.agents['codex-worker'].agent_status = 'done'; assert.equal((await f.api.poll(f.pm))[0].acceptanceReady, true);
 });
 
 test('identity without session metadata exposes its limit; available session identity is pinned', async t => {
   const f = await fixture(t); await f.completed(); assert.equal((await f.api.poll(f.pm))[0].sessionBound, false);
-  const g = await fixture(t); g.agents['codex-check'].agent_session = { agent: 'codex', kind: 'id', source: 'herdr:codex', value: 'session-one' };
+  const g = await fixture(t); g.agents['codex-worker'].agent_session = { agent: 'codex', kind: 'id', source: 'herdr:codex', value: 'session-one' };
   await g.completed(); assert.equal((await g.api.poll(g.pm))[0].sessionBound, true);
-  g.agents['codex-check'].agent_session.value = 'session-two';
+  g.agents['codex-worker'].agent_session.value = 'session-two';
   assert.equal((await g.api.poll(g.pm))[0].error, 'IDENTITY_MISMATCH');
-  delete g.agents['codex-check'].agent_session;
+  delete g.agents['codex-worker'].agent_session;
   assert.equal((await g.api.poll(g.pm))[0].error, 'IDENTITY_MISMATCH');
 });
 
@@ -456,19 +612,19 @@ test('quoted footer followed by the actual approval menu never permits dispatch 
 });
 
 test('AUDIT regression: registration rejects worker TUI cwd in a different project', async t => {
-  const f = await fixture(t); f.agents['codex-check'].cwd = path.dirname(f.pm);
+  const f = await fixture(t); f.agents['codex-worker'].cwd = path.dirname(f.pm);
   await assert.rejects(f.register());
   assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
 });
 
 test('AUDIT regression: active dispatch rejects changed worker TUI cwd before any prompt', async t => {
-  const f = await fixture(t); await f.register(); f.agents['codex-check'].cwd = path.dirname(f.pm);
+  const f = await fixture(t); await f.register(); f.agents['codex-worker'].cwd = path.dirname(f.pm);
   await assert.rejects(f.dispatch('job', { send: true }));
   assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
 });
 
 test('AUDIT regression: changed worker TUI cwd prevents active poll acceptance and ACK', async t => {
-  const f = await fixture(t); const ready = await f.completed(); f.agents['codex-check'].cwd = path.dirname(f.pm);
+  const f = await fixture(t); const ready = await f.completed(); f.agents['codex-worker'].cwd = path.dirname(f.pm);
   assert.equal((await f.api.poll(f.pm))[0].state, 'REJECTED');
   await assert.rejects(f.api.ack(f.pm, 'job', ready.reportSHA, true));
 });
@@ -484,7 +640,7 @@ test('AUDIT regression: explicit checkout drift rejects file and prompt dispatch
 
 for (const tui of ['main', 'assigned-worktree']) test('worker TUI cwd ' + tui + ' is normalized/pinned independently of tool cwd', async t => {
   const f = await fixture(t); const expected = tui === 'main' ? f.pm : f.worker;
-  f.agents['codex-check'].cwd = expected + path.sep + '.';
+  f.agents['codex-worker'].cwd = expected + path.sep + '.';
   await f.register(); const job = await f.read(f.pm, '.codaryn/pm-comms/registry/job.json');
   assert.equal(job.identity.cwd, await fs.realpath(expected));
   await f.dispatch(); await f.started(); const ready = await f.ready();
@@ -497,18 +653,18 @@ test('registration refuses missing, relative, nonexistent, other-WT or junction 
   const f = await fixture(t); const other = path.join(f.pm, '.worktrees/other'); await fs.mkdir(other);
   const linked = path.join(f.pm, '.worktrees/linked'); await fs.symlink(f.pm, linked, process.platform === 'win32' ? 'junction' : 'dir');
   for (const cwd of [undefined, 'relative', path.join(f.pm, '.worktrees/missing'), other, linked]) {
-    f.agents['codex-check'].cwd = cwd; await assert.rejects(f.register());
+    f.agents['codex-worker'].cwd = cwd; await assert.rejects(f.register());
   }
 });
 
 test('active jobs reject switching between allowed TUI directories and missing cwd; closed ACK remains valid', async t => {
   const f = await fixture(t); const ready = await f.completed();
-  f.agents['codex-check'].cwd = f.worker;
+  f.agents['codex-worker'].cwd = f.worker;
   await assert.rejects(f.dispatch()); assert.equal((await f.api.poll(f.pm))[0].state, 'REJECTED');
-  delete f.agents['codex-check'].cwd;
+  delete f.agents['codex-worker'].cwd;
   await assert.rejects(f.api.ack(f.pm, 'job', ready.reportSHA, true));
-  f.agents['codex-check'].cwd = f.pm; await f.api.ack(f.pm, 'job', ready.reportSHA, true);
-  f.agents['codex-check'].cwd = path.dirname(f.pm);
+  f.agents['codex-worker'].cwd = f.pm; await f.api.ack(f.pm, 'job', ready.reportSHA, true);
+  f.agents['codex-worker'].cwd = path.dirname(f.pm);
   assert.equal((await f.api.poll(f.pm))[0].closed, true);
 });
 
@@ -532,7 +688,7 @@ for (const route of ['dispatch-worker', 'notify-worker', 'notify-pm']) test('fin
   const transport = {
     async get(name) { return { result: { type: 'agent_info', agent: { ...f.agents[name] } } }; },
     async visible() {
-      f.agents[route === 'notify-pm' ? 'codex-review' : 'codex-check'].cwd = path.dirname(f.pm);
+      f.agents[route === 'notify-pm' ? 'codex-review' : 'codex-worker'].cwd = path.dirname(f.pm);
       return '› Ask Codex to do anything';
     },
     async prompt(name) { prompts.push(name); return { result: { type: 'agent_prompt' } }; },
@@ -554,11 +710,11 @@ for (const variant of ['lowercase-drive', 'lowercase-root', 'worktrees-alias']) 
   const alias = variant === 'worktrees-alias' ? path.join(f.pm, '.WORKTREES', path.basename(f.worker))
     : variant === 'lowercase-drive' ? f.pm[0].toLowerCase() + f.pm.slice(1) : f.pm.toLowerCase();
   if (process.platform !== 'win32') {
-    f.agents['codex-check'].cwd = variant === 'worktrees-alias' ? alias : f.pm.toUpperCase();
+    f.agents['codex-worker'].cwd = variant === 'worktrees-alias' ? alias : f.pm.toUpperCase();
     await assert.rejects(f.register()); return;
   }
   assert.equal(await fs.realpath(alias), await fs.realpath(variant === 'worktrees-alias' ? f.worker : f.pm));
-  f.agents['codex-check'].cwd = alias;
+  f.agents['codex-worker'].cwd = alias;
   await f.register('job', variant === 'worktrees-alias' ? { worktree: alias } : {});
   const registered = await f.read(f.pm, '.codaryn/pm-comms/registry/job.json');
   assert.equal(registered.identity.cwd, await fs.realpath(alias));
@@ -569,14 +725,14 @@ for (const variant of ['lowercase-drive', 'lowercase-root', 'worktrees-alias']) 
 
 test('worktree scope case: another project remains rejected despite case folding', async t => {
   const f = await fixture(t), external = path.join(path.dirname(f.pm), 'different-project');
-  await fs.mkdir(external); f.agents['codex-check'].cwd = process.platform === 'win32' ? external.toLowerCase() : external;
+  await fs.mkdir(external); f.agents['codex-worker'].cwd = process.platform === 'win32' ? external.toLowerCase() : external;
   await assert.rejects(f.register());
   assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
 });
 
 test('worktree scope case: alias of another WT still violates the registered worker identity', async t => {
   const f = await fixture(t), other = path.join(f.pm, '.worktrees/other'); await fs.mkdir(other);
-  f.agents['codex-check'].cwd = path.join(f.pm, '.WORKTREES', path.basename(other));
+  f.agents['codex-worker'].cwd = path.join(f.pm, '.WORKTREES', path.basename(other));
   await assert.rejects(f.register());
   assert.equal(f.calls.filter(x => x[0] === 'prompt').length, 0);
 });
@@ -588,10 +744,10 @@ test('native transport: admission-only prompt uses supported argv and keeps pare
     assert.equal(options.timeout, 10000); assert.equal(options.windowsHide, true);
     // Installed CLI's pre-input validator: --timeout is valid only together with --wait.
     if (args.includes('--timeout') && !args.includes('--wait')) throw Object.assign(new Error('--timeout requires --wait'), { code: 2 });
-    assert.deepEqual(args, ['agent', 'prompt', 'codex-check', 'synthetic metadata only']);
+    assert.deepEqual(args, ['agent', 'prompt', 'codex-worker', 'synthetic metadata only']);
     return { stdout: '{"result":{"type":"agent_prompt","accepted":true}}' };
   } });
-  assert.deepEqual(await transport.prompt('codex-check', 'synthetic metadata only'), { result: { type: 'agent_prompt', accepted: true } });
+  assert.deepEqual(await transport.prompt('codex-worker', 'synthetic metadata only'), { result: { type: 'agent_prompt', accepted: true } });
   assert.equal(calls.length, 1); assert.equal(calls[0].executable, 'herdr');
 });
 
@@ -599,12 +755,12 @@ test('native transport: JSON get and plain visible stdout remain separate withou
   const calls = [], visible = 'Completed.\n› Ask Codex to do anything';
   const transport = herdrTransport({ inHerdr: () => true, nativeExec: async (executable, args, options) => {
     calls.push(args); assert.equal(executable, 'herdr'); assert.equal(options.timeout, 10000);
-    if (args[1] === 'get') return { stdout: '{"result":{"type":"agent_info","agent":{"name":"codex-check"}}}' };
+    if (args[1] === 'get') return { stdout: '{"result":{"type":"agent_info","agent":{"name":"codex-worker"}}}' };
     return { stdout: visible };
   } });
-  assert.equal((await transport.get('codex-check')).result.agent.name, 'codex-check');
-  assert.equal(await transport.visible('codex-check'), visible);
-  assert.deepEqual(calls, [['agent', 'get', 'codex-check'], ['agent', 'read', 'codex-check', '--source', 'visible', '--lines', '20']]);
+  assert.equal((await transport.get('codex-worker')).result.agent.name, 'codex-worker');
+  assert.equal(await transport.visible('codex-worker'), visible);
+  assert.deepEqual(calls, [['agent', 'get', 'codex-worker'], ['agent', 'read', 'codex-worker', '--source', 'visible', '--lines', '20']]);
 });
 
 test('native transport: parent timeout rejects once without waiting, fallback or retry', async () => {
@@ -613,6 +769,6 @@ test('native transport: parent timeout rejects once without waiting, fallback or
     calls++; assert.equal(options.timeout, 10000); assert(!args.includes('--wait'));
     throw Object.assign(new Error('synthetic parent timeout'), { code: 'ETIMEDOUT' });
   } });
-  await assert.rejects(transport.prompt('codex-check', 'synthetic metadata only'), failure('ETIMEDOUT'));
+  await assert.rejects(transport.prompt('codex-worker', 'synthetic metadata only'), failure('ETIMEDOUT'));
   assert.equal(calls, 1);
 });

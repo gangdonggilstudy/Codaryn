@@ -102,7 +102,7 @@ git -C <지정 worktree> rev-parse --show-toplevel
 - 이미 만든 커밋에 trailer나 잘못된 작성자가 있으면 amend, rebase, 추가 커밋으로 고치지 않는다. 해시를 관리자에게 보고하고 처리를 맡긴다.
 - [확정] 현재 사용자 지시(2026-11-14)는 보고 여부와 관계없이 amend·이력 재작성·force push·--no-verify를 금지한다. 코드·문서 내용 오류는 새 수정 커밋으로 바로잡는다. 기존 커밋의 작성자·trailer 오류는 위 항목대로 해당 해시를 관리자에게 보고하며 추가 커밋으로 고쳐졌다고 처리하지 않는다. 2026-11-12 G-2의 미보고 자기 커밋 재작성 예외는 현재 작업에 적용하지 않는다. 작업 트리를 버리는 `git reset --hard`도 계속 금지다.
 - [운영] **비밀 검사 훅**
-  - 공용 `.git/hooks/pre-commit`이 `scripts/check-secrets.mjs --staged`와 같은 사본을 실행한다. 모든 worktree에 적용된다.
+  - 공용 `.git/hooks/pre-commit`을 설치하면 `scripts/check-secrets.mjs --staged`와 같은 사본을 실행하고, 모든 worktree에 적용된다. 지금 관리용 저장소에는 설치되어 있지 않으므로(2026-11-23 PM 확인, 공용 hooks 폴더에 샘플만 있음) 아래 "훅이 없는 환경" 방식으로 진행한다.
   - 문서와 시험에 키 모양 문자열이나 키 대입 형태를 쓰면 거부된다. 가짜 값은 실제 키 형식과 구별되게 쓴다.
   - `--no-verify`는 금지다.
   - 훅은 Git이 추적하지 않으므로 새로 복제한 저장소에는 관리자가 다시 설치한다. 설치: `scripts/check-secrets.mjs`를 공용 hooks 폴더에 복사하고 `pre-commit`에서 `--staged`로 실행한다.

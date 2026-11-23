@@ -4,24 +4,32 @@
  * list inside app.asar before the engine host starts. Development builds never come here; app.ts
  * keeps their paths. No Electron import, so the unit tests run this on plain Node.
  *
- * Layout under `process.resourcesPath`:
- * - `node/node.exe`: the Node 26 the engine host runs on (Windows; other systems are not packaged).
- * - `engine/build/src/engine-host/main.js` with `engine/build/src/shared/**` beside it, so the
- *   host's relative imports are the development build's.
- * - `engine/dist/src/**`: the engine (`app/index.js`), passed as `--engine-dir`.
+ * Layout in the package folder (`Codaryn-win32-x64/`, the parent of `process.resourcesPath`):
+ * - `resources/node/node.exe`: the Node 26 the engine host runs on (Windows; other systems are not
+ *   packaged), with `resources/node/LICENSE`.
+ * - `resources/engine/build/src/engine-host/main.js` with `resources/engine/build/src/shared/**`
+ *   beside it, so the host's relative imports are the development build's.
+ * - `resources/engine/dist/src/**`: the engine (`app/index.js`), passed as `--engine-dir`.
+ * - `package.json` (name `codaryn`, the root version, `"type": "module"`): the engine finds its
+ *   install folder by it (src/app/input/install.ts:31-48), so that folder is the whole package
+ *   folder (user decision 2026-11-24), and it makes the engine's .js files ES modules.
  *
  * The list is `engine-manifest.json` at the app root (next to package.json, inside app.asar):
- * `{ "version": 1, "files": [{ "path": "node/node.exe", "size": 1, "sha256": "<64 lowercase hex>" }] }`
- * with paths relative to `resourcesPath`, `/` between parts, in ascending order. The packaging
- * script (a later GU-9 unit) writes it; this module only reads and checks it.
+ * `{ "version": 1, "files": [{ "path": "package.json", "size": 1, "sha256": "<64 lowercase hex>" }] }`
+ * with paths relative to the package folder, `/` between parts, in ascending order. The packaging
+ * script (`gui/scripts/package/`) writes it; this module reads and checks it.
  *
  * The check fails closed: on any doubt the host is not started.
  * - The list's form: version, paths (Windows aliases refused too), sizes and hashes, and that it
  *   names the files the start needs.
- * - A walk of `node/` and `engine/` records each folder's and file's identity (volume and file id,
- *   and a file's size). A link, junction or any entry that is neither a regular file nor a folder
- *   fails the check when the walk meets it. The regular files must be exactly the listed ones:
- *   none missing, none extra.
+ * - A walk of `resources/node/` and `resources/engine/`, plus the single file `package.json`,
+ *   records each folder's and file's identity (volume and file id, and a file's size); the
+ *   `resources` folder itself must be a plain folder too. A link, junction or any entry that is
+ *   neither a regular file nor a folder fails the check when the walk meets it. The regular files
+ *   must be exactly the listed ones: none missing, none extra.
+ * - Not checked here: the rest of the package folder (the Electron runtime, `resources/app.asar`,
+ *   `licenses/`). app.asar relies on the asar integrity fuse; the runtime files are a boundary left
+ *   open (below).
  * - Each file is opened once; the open handle's identity and size must be the walk's, and the hash
  *   is read from that same handle, so the size and the hash are of the same bytes.
  * - After all hashes, a second walk must find the same folders and files with the same identities.
@@ -35,7 +43,9 @@
  * - Hard links are regular files here and are not told apart; their bytes are checked like any
  *   file's, but another name of the same file can change them later (as above).
  * - The list is only as good as app.asar: it relies on the asar integrity fuse, whose effect on
- *   Windows is not confirmed.
+ *   Windows is not confirmed. The Electron runtime files next to the exe are not in the list.
+ * - `package.json`'s content is not read here: its hash in the list fixes what the packaging script
+ *   wrote (name, version, type), and the script's own test checks that content.
  * - Whoever can change the list and the files together is not stopped. This finds damaged or
  *   swapped files, not a determined attacker who can write to the installation.
  * - Hashing every file (node.exe is the large one) runs at every engine start; its time is not
@@ -46,16 +56,20 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { lstat, open, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export const ENGINE_MANIFEST_FILE = "engine-manifest.json";
 export const ENGINE_MANIFEST_VERSION = 1;
-/** The two folders under `resourcesPath` that the list covers completely. */
-export const PACKAGED_ROOTS: readonly string[] = ["node", "engine"];
-export const PACKAGED_NODE = "node/node.exe";
-export const PACKAGED_HOST_SCRIPT = "engine/build/src/engine-host/main.js";
-export const PACKAGED_ENGINE_DIR = "engine/dist/src";
-export const PACKAGED_ENGINE_ENTRY = "engine/dist/src/app/index.js";
+/** The folder of the package folder that holds the two trees (`process.resourcesPath`). */
+export const PACKAGED_RESOURCES = "resources";
+/** The two folders the list covers completely, as list paths. */
+export const PACKAGED_TREES: readonly string[] = ["resources/node", "resources/engine"];
+/** The single file at the package folder's top that the list covers. */
+export const PACKAGED_PACKAGE_JSON = "package.json";
+export const PACKAGED_NODE = "resources/node/node.exe";
+export const PACKAGED_HOST_SCRIPT = "resources/engine/build/src/engine-host/main.js";
+export const PACKAGED_ENGINE_DIR = "resources/engine/dist/src";
+export const PACKAGED_ENGINE_ENTRY = "resources/engine/dist/src/app/index.js";
 
 export interface PackagedEnginePaths {
   /** Null where no Node is packaged (only Windows is). */
@@ -177,33 +191,44 @@ function isWindowsAlias(part: string): boolean {
   return part.endsWith(".") || part.endsWith(" ") || isWindowsDeviceName(part) || isShortName(part);
 }
 
-function fromList(resourcesPath: string, listed: string): string {
-  return join(resourcesPath, ...listed.split("/"));
+function fromList(packageRoot: string, listed: string): string {
+  return join(packageRoot, ...listed.split("/"));
+}
+
+/**
+ * The package folder: the parent of `process.resourcesPath`. The check and the start both resolve
+ * list paths from it, so the files started are the files checked.
+ */
+export function packageRootOf(resourcesPath: string): string {
+  return dirname(resourcesPath);
 }
 
 export function packagedEnginePaths(resourcesPath: string, platform: NodeJS.Platform): PackagedEnginePaths {
+  const root = packageRootOf(resourcesPath);
   return {
-    nodePath: platform === "win32" ? fromList(resourcesPath, PACKAGED_NODE) : null,
-    hostScript: fromList(resourcesPath, PACKAGED_HOST_SCRIPT),
-    engineDir: fromList(resourcesPath, PACKAGED_ENGINE_DIR),
+    nodePath: platform === "win32" ? fromList(root, PACKAGED_NODE) : null,
+    hostScript: fromList(root, PACKAGED_HOST_SCRIPT),
+    engineDir: fromList(root, PACKAGED_ENGINE_DIR),
   };
 }
 
 /** The files the start cannot do without; the list must name them, so they are checked too. */
 export function requiredListedFiles(platform: NodeJS.Platform): readonly string[] {
-  return platform === "win32" ? [PACKAGED_NODE, PACKAGED_HOST_SCRIPT, PACKAGED_ENGINE_ENTRY] : [PACKAGED_HOST_SCRIPT, PACKAGED_ENGINE_ENTRY];
+  const always = [PACKAGED_PACKAGE_JSON, PACKAGED_HOST_SCRIPT, PACKAGED_ENGINE_ENTRY];
+  return platform === "win32" ? [PACKAGED_NODE, ...always] : always;
 }
 
 /**
- * A list path: relative, `/` between parts, inside one of the two roots, no empty part, no `.` or
- * `..`, no backslash, no colon (drive letters, alternate data streams), no control character, and
- * no part Windows would read as another name.
+ * A list path: `package.json`, or a relative path inside one of the two trees with `/` between
+ * parts, no empty part, no `.` or `..`, no backslash, no colon (drive letters, alternate data
+ * streams), no control character, and no part Windows would read as another name.
  */
 export function isListedPath(value: unknown): value is string {
+  if (value === PACKAGED_PACKAGE_JSON) return true;
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_PATH_LENGTH) return false;
   if (value.includes("\\") || value.includes(":") || hasControl(value)) return false;
   const parts = value.split("/");
-  if (parts.length < 2 || !PACKAGED_ROOTS.includes(parts[0] ?? "")) return false;
+  if (parts.length < 3 || !PACKAGED_TREES.some((tree) => value.startsWith(`${tree}/`))) return false;
   return parts.every((part) => part !== "" && part !== "." && part !== ".." && !isWindowsAlias(part));
 }
 
@@ -264,8 +289,22 @@ interface Tree {
   readonly files: Map<string, EntryInfo>;
 }
 
-/** Walks the two roots. A root that does not exist holds no files; any link or special entry stops. */
-async function walkTree(fs: EngineFs, resourcesPath: string): Promise<Tree> {
+/** The entry at `path`, or null when nothing is there. */
+async function entryOrNull(fs: EngineFs, path: string): Promise<EntryInfo | null> {
+  try {
+    return await fs.entry(path);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/**
+ * Walks the package folder's checked part: the `resources` folder itself, the two trees under it
+ * and the single file `package.json`. What does not exist holds no files; any link or special
+ * entry stops the check.
+ */
+async function walkTree(fs: EngineFs, packageRoot: string): Promise<Tree> {
   const tree: Tree = { dirs: new Map(), files: new Map() };
   const visit = async (dir: string, listed: string): Promise<void> => {
     for (const name of await fs.list(dir)) {
@@ -282,18 +321,23 @@ async function walkTree(fs: EngineFs, resourcesPath: string): Promise<Tree> {
       }
     }
   };
-  for (const root of PACKAGED_ROOTS) {
-    const dir = join(resourcesPath, root);
-    let info: EntryInfo;
-    try {
-      info = await fs.entry(dir);
-    } catch (error) {
-      if (errorCode(error) === "ENOENT") continue;
-      throw error;
+  const resources = await entryOrNull(fs, fromList(packageRoot, PACKAGED_RESOURCES));
+  if (resources !== null) {
+    if (resources.kind !== "directory") throw new CheckStop("file_not_regular");
+    tree.dirs.set(PACKAGED_RESOURCES, resources);
+    for (const root of PACKAGED_TREES) {
+      const dir = fromList(packageRoot, root);
+      const info = await entryOrNull(fs, dir);
+      if (info === null) continue;
+      if (info.kind !== "directory") throw new CheckStop("file_not_regular");
+      tree.dirs.set(root, info);
+      await visit(dir, root);
     }
-    if (info.kind !== "directory") throw new CheckStop("file_not_regular");
-    tree.dirs.set(root, info);
-    await visit(dir, root);
+  }
+  const single = await entryOrNull(fs, fromList(packageRoot, PACKAGED_PACKAGE_JSON));
+  if (single !== null) {
+    if (single.kind !== "file") throw new CheckStop("file_not_regular");
+    tree.files.set(PACKAGED_PACKAGE_JSON, single);
   }
   return tree;
 }
@@ -327,8 +371,9 @@ async function hashOpened(file: OpenedFile, size: bigint): Promise<string | null
 }
 
 /**
- * Checks the packaged Node and engine against the list at `manifestFile` (inside app.asar).
- * Resolves `{ ok: true }` only when everything matches; `fs` is for the unit tests.
+ * Checks the packaged Node and engine against the list at `manifestFile` (inside app.asar), with
+ * list paths from the package folder (`packageRootOf(resourcesPath)`). Resolves `{ ok: true }` only
+ * when everything matches; `fs` is for the unit tests.
  */
 export async function checkPackagedEngine(
   resourcesPath: string,
@@ -346,15 +391,16 @@ export async function checkPackagedEngine(
   if (files === null) return { ok: false, reason: "manifest_invalid" };
   const listed = new Set(files.map((file) => file.path));
   if (!requiredListedFiles(platform).every((path) => listed.has(path))) return { ok: false, reason: "manifest_incomplete" };
+  const root = packageRootOf(resourcesPath);
   try {
-    const before = await walkTree(fs, resourcesPath);
+    const before = await walkTree(fs, root);
     for (const path of listed) if (!before.files.has(path)) return { ok: false, reason: "file_missing" };
     for (const path of before.files.keys()) if (!listed.has(path)) return { ok: false, reason: "file_extra" };
     for (const file of files) {
       const seen = before.files.get(file.path);
       if (seen === undefined) return { ok: false, reason: "file_missing" };
       if (seen.size !== BigInt(file.size)) return { ok: false, reason: "size_mismatch" };
-      const opened = await fs.open(fromList(resourcesPath, file.path));
+      const opened = await fs.open(fromList(root, file.path));
       try {
         const now = await opened.info();
         if (!sameEntry(now, seen)) return { ok: false, reason: "file_changed" };
@@ -367,7 +413,7 @@ export async function checkPackagedEngine(
     }
     let after: Tree;
     try {
-      after = await walkTree(fs, resourcesPath);
+      after = await walkTree(fs, root);
     } catch (error) {
       if (error instanceof CheckStop) return { ok: false, reason: "tree_changed" };
       throw error;

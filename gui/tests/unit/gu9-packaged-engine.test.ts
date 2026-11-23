@@ -22,10 +22,12 @@ import {
   PACKAGED_ENGINE_ENTRY,
   PACKAGED_HOST_SCRIPT,
   PACKAGED_NODE,
+  PACKAGED_PACKAGE_JSON,
   checkPackagedEngine,
   isListedPath,
   isShortName,
   isWindowsDeviceName,
+  packageRootOf,
   packagedEnginePaths,
   parseEngineManifest,
   requiredListedFiles,
@@ -40,11 +42,12 @@ const HANGUL = /[가-힣]/;
 const B = "\\";
 
 const BASE_FILES: Readonly<Record<string, string>> = {
-  "node/node.exe": "not a real node",
-  "engine/build/src/engine-host/main.js": "export {};\n",
-  "engine/build/src/shared/protocol.js": "export const P = 1;\n",
-  "engine/dist/src/app/index.js": "export const A = 1;\n",
-  "engine/dist/src/i18n/index.js": "export const I = 1;\n",
+  "resources/node/node.exe": "not a real node",
+  "resources/engine/build/src/engine-host/main.js": "export {};\n",
+  "resources/engine/build/src/shared/protocol.js": "export const P = 1;\n",
+  "resources/engine/dist/src/app/index.js": "export const A = 1;\n",
+  "resources/engine/dist/src/i18n/index.js": "export const I = 1;\n",
+  "package.json": '{ "name": "codaryn", "version": "0.1.0", "type": "module" }\n',
 };
 
 interface ListEntry {
@@ -86,7 +89,7 @@ function layout(t: TestContext, files: Readonly<Record<string, string>> = BASE_F
   mkdirSync(resources, { recursive: true });
   mkdirSync(app, { recursive: true });
   for (const [path, text] of Object.entries(files)) {
-    const full = join(resources, ...path.split("/"));
+    const full = join(root, ...path.split("/"));
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, text);
   }
@@ -107,13 +110,16 @@ function linkError(error: unknown): string {
 }
 
 test("gu9 D-7: packaged paths are under resourcesPath, and only Windows gets a packaged Node", () => {
-  const win = packagedEnginePaths("R", "win32");
-  assert.equal(win.nodePath, join("R", "node", "node.exe"));
-  assert.equal(win.hostScript, join("R", "engine", "build", "src", "engine-host", "main.js"));
-  assert.equal(win.engineDir, join("R", "engine", "dist", "src"));
-  assert.equal(packagedEnginePaths("R", "linux").nodePath, null);
-  assert.deepEqual([...requiredListedFiles("win32")].sort(), [PACKAGED_ENGINE_ENTRY, PACKAGED_HOST_SCRIPT, PACKAGED_NODE].sort());
+  const resources = join("P", "resources");
+  assert.equal(packageRootOf(resources), "P");
+  const win = packagedEnginePaths(resources, "win32");
+  assert.equal(win.nodePath, join(resources, "node", "node.exe"));
+  assert.equal(win.hostScript, join(resources, "engine", "build", "src", "engine-host", "main.js"));
+  assert.equal(win.engineDir, join(resources, "engine", "dist", "src"));
+  assert.equal(packagedEnginePaths(resources, "linux").nodePath, null);
+  assert.deepEqual([...requiredListedFiles("win32")].sort(), [PACKAGED_ENGINE_ENTRY, PACKAGED_HOST_SCRIPT, PACKAGED_NODE, PACKAGED_PACKAGE_JSON].sort());
   assert.equal(requiredListedFiles("linux").includes(PACKAGED_NODE), false);
+  assert.equal(requiredListedFiles("linux").includes(PACKAGED_PACKAGE_JSON), true);
 });
 
 test("gu9 D-7: the development paths in app.ts are the ones they were; the packaged branch comes first", () => {
@@ -182,29 +188,36 @@ test("gu9 D-7: a list that cannot be read (a folder in its place) fails", async 
 
 test("gu9 D-7: a list without a file the start needs fails", async (t) => {
   const files = { ...BASE_FILES };
-  delete files["node/node.exe"];
+  delete files["resources/node/node.exe"];
   const l = layout(t, files);
   assert.deepEqual(await check(l), { ok: false, reason: "manifest_incomplete" });
 });
 
 test("gu9 D-7: list paths are relative, inside node/ or engine/, without .., drive, backslash or empty part", () => {
-  for (const good of ["node/node.exe", "engine/dist/src/app/index.js", "engine/a b.js", "engine/console.js", "engine/~a.js", "engine/comx.js"]) {
+  for (const good of ["package.json", "resources/node/node.exe", "resources/engine/dist/src/app/index.js", "resources/engine/a b.js", "resources/engine/console.js", "resources/engine/~a.js", "resources/engine/comx.js"]) {
     assert.equal(isListedPath(good), true, good);
   }
   const bad = [
-    "engine/../node/node.exe",
-    "/engine/a.js",
-    "C:/engine/a.js",
-    "engine" + B + "a.js",
-    "engine//a.js",
-    "engine/./a.js",
-    "engine/a.js/",
+    "resources/engine/../node/node.exe",
+    "/resources/engine/a.js",
+    "C:/resources/engine/a.js",
+    "resources/engine" + B + "a.js",
+    "resources/engine//a.js",
+    "resources/engine/./a.js",
+    "resources/engine/a.js/",
     "other/a.js",
-    "engine",
+    "resources/other/a.js",
+    "resources/engine",
+    "resources",
+    "engine/a.js",
+    "node/node.exe",
+    "resources/package.json",
+    "./package.json",
+    "Package.json",
     "",
-    "node/node.exe:stream",
-    "engine/a\u0000.js",
-    "engine/a\n.js",
+    "resources/node/node.exe:stream",
+    "resources/engine/a\u0000.js",
+    "resources/engine/a\n.js",
     "x".repeat(1025),
     7,
     null,
@@ -214,21 +227,21 @@ test("gu9 D-7: list paths are relative, inside node/ or engine/, without .., dri
 
 test("gu9 D-7 I1: parts Windows reads as another name are refused in the list", () => {
   const aliases = [
-    "engine/a.js.",
-    "engine/a.js ",
-    "engine/dir./a.js",
-    "engine/nul",
-    "engine/NUL.txt",
-    "engine/con .x",
-    "engine/com1",
-    "engine/COM9.js",
-    "engine/lpt1.js",
-    "engine/lpt9",
-    "engine/aux",
-    "engine/prn.log",
-    "engine/conin$",
-    "engine/PROGRA~1/a.js",
-    "node/NODE~1.EXE",
+    "resources/engine/a.js.",
+    "resources/engine/a.js ",
+    "resources/engine/dir./a.js",
+    "resources/engine/nul",
+    "resources/engine/NUL.txt",
+    "resources/engine/con .x",
+    "resources/engine/com1",
+    "resources/engine/COM9.js",
+    "resources/engine/lpt1.js",
+    "resources/engine/lpt9",
+    "resources/engine/aux",
+    "resources/engine/prn.log",
+    "resources/engine/conin$",
+    "resources/engine/PROGRA~1/a.js",
+    "resources/node/NODE~1.EXE",
   ];
   for (const value of aliases) assert.equal(isListedPath(value), false, value);
 });
@@ -245,16 +258,16 @@ test("gu9 D-7: a list of the wrong form fails, and so does the check", async (t)
   const first = good.files[0];
   assert.ok(first !== undefined);
   const variants: Record<string, unknown> = {
-    "dot-dot path": { ...good, files: [{ ...first, path: "engine/../node/node.exe" }, ...good.files.slice(1)] },
-    "absolute path": { ...good, files: [{ ...first, path: "/engine/a.js" }] },
+    "dot-dot path": { ...good, files: [{ ...first, path: "resources/engine/../node/node.exe" }, ...good.files.slice(1)] },
+    "absolute path": { ...good, files: [{ ...first, path: "/resources/engine/a.js" }] },
     "upper-case hash": { ...good, files: [{ ...first, sha256: first.sha256.toUpperCase() }, ...good.files.slice(1)] },
     "short hash": { ...good, files: [{ ...first, sha256: first.sha256.slice(1) }] },
     "same path twice": { ...good, files: [first, first, ...good.files.slice(1)] },
     "paths that differ in case only": {
       ...good,
       files: [
-        { path: "engine/A.js", size: 0, sha256: sha256("") },
-        { path: "engine/a.js", size: 0, sha256: sha256("") },
+        { path: "resources/engine/A.js", size: 0, sha256: sha256("") },
+        { path: "resources/engine/a.js", size: 0, sha256: sha256("") },
       ],
     },
     "out of order": { ...good, files: [...good.files].reverse() },
@@ -431,10 +444,10 @@ test("gu9 D-7 L1: only the 8.3 short name form is refused; long names with ~ and
   for (const part of ["report~2026-draft.js", "a~b.js", "file~1.longext", "name12345.js", "v1.2.3.js", "~a.js", "abcdefghi~1", "x.y.z~1"]) {
     assert.equal(isShortName(part), false, part);
   }
-  for (const path of ["engine/report~2026-draft.js", "engine/a~b.js", "engine/file~1.longext", "engine/name12345.js", "engine/v1.2.3.js"]) {
+  for (const path of ["resources/engine/report~2026-draft.js", "resources/engine/a~b.js", "resources/engine/file~1.longext", "resources/engine/name12345.js", "resources/engine/v1.2.3.js"]) {
     assert.equal(isListedPath(path), true, path);
   }
-  for (const path of ["engine/PROGRA~1/a.js", "engine/progra~1.exe", "engine/AB~12.JS"]) assert.equal(isListedPath(path), false, path);
+  for (const path of ["resources/engine/PROGRA~1/a.js", "resources/engine/progra~1.exe", "resources/engine/AB~12.JS"]) assert.equal(isListedPath(path), false, path);
 });
 
 /** The real file operations, counting opens per file and closes, with `change` able to alter what an open returns. */
@@ -489,7 +502,7 @@ test("gu9 D-7 I-new1: each file is opened once and every handle is closed, on su
 test("gu9 D-7 I-new1: a file over 1 MiB is read in several chunks from one handle and its hash still matches", async (t) => {
   const unit = "0123456789abcdefghijklmnopqrstuvwxyz";
   const big = unit.repeat(Math.ceil((1024 * 1024 + 12345) / unit.length)).slice(0, 1024 * 1024 + 12345);
-  const files = { ...BASE_FILES, "node/node.exe": big };
+  const files = { ...BASE_FILES, "resources/node/node.exe": big };
   const reads: number[] = [];
   const watched = counting((file, opened) =>
     file.endsWith("node.exe")
@@ -512,7 +525,7 @@ test("gu9 D-7 I-new1: a file over 1 MiB is read in several chunks from one handl
 test("gu9 D-7 I-new1: a read error partway through a file fails the check and the handle is closed", async (t) => {
   const unit = "abcdefghij";
   const big = unit.repeat(Math.ceil((1024 * 1024 + 10) / unit.length));
-  const files = { ...BASE_FILES, "node/node.exe": big };
+  const files = { ...BASE_FILES, "resources/node/node.exe": big };
   let calls = 0;
   const failing = counting((file, opened) =>
     file.endsWith("node.exe")
@@ -555,6 +568,62 @@ test("gu9 D-7 I-new1: a folder whose identity differs at the second walk fails",
     },
   };
   assert.deepEqual(await check(l, fs), { ok: false, reason: "tree_changed" });
+});
+
+test("gu9 package A: the root package.json is listed and checked like the trees", async (t) => {
+  const missing = layout(t);
+  unlinkSync(join(missing.root, "package.json"));
+  assert.deepEqual(await check(missing), { ok: false, reason: "file_missing" });
+
+  const changed = layout(t);
+  writeFileSync(join(changed.root, "package.json"), '{ "name": "codaryx", "version": "0.1.0", "type": "module" }\n');
+  assert.deepEqual(await check(changed), { ok: false, reason: "hash_mismatch" });
+
+  const folder = layout(t);
+  unlinkSync(join(folder.root, "package.json"));
+  mkdirSync(join(folder.root, "package.json"));
+  assert.deepEqual(await check(folder), { ok: false, reason: "file_not_regular" });
+
+  const files = { ...BASE_FILES };
+  delete files["package.json"];
+  assert.deepEqual(await check(layout(t, files)), { ok: false, reason: "manifest_incomplete" });
+});
+
+test("gu9 package A: the root package.json as a file link fails", async (t) => {
+  const l = layout(t);
+  const target = join(l.root, "elsewhere-package.json");
+  writeFileSync(target, BASE_FILES["package.json"] ?? "");
+  unlinkSync(join(l.root, "package.json"));
+  try {
+    symlinkSync(target, join(l.root, "package.json"), "file");
+  } catch (error) {
+    t.skip(`could not make a file link here: ${linkError(error)}`);
+    return;
+  }
+  assert.deepEqual(await check(l), { ok: false, reason: "file_not_regular" });
+});
+
+test("gu9 package A: resources itself as a link fails", async (t) => {
+  const l = layout(t);
+  const real = join(l.root, "real-resources");
+  renameSync(l.resources, real);
+  try {
+    symlinkSync(real, l.resources, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    t.skip(`could not make a directory link here: ${linkError(error)}`);
+    return;
+  }
+  assert.deepEqual(await check(l), { ok: false, reason: "file_not_regular" });
+});
+
+test("gu9 package A: the rest of the package folder is not part of this check", async (t) => {
+  const l = layout(t);
+  writeFileSync(join(l.root, "Codaryn.exe"), "not an exe");
+  writeFileSync(join(l.root, "LICENSE"), "electron license");
+  writeFileSync(join(l.resources, "app.asar"), "not an asar");
+  mkdirSync(join(l.root, "licenses", "Codaryn"), { recursive: true });
+  writeFileSync(join(l.root, "licenses", "Codaryn", "NOTICE"), "Codaryn\n");
+  assert.deepEqual(await check(l), { ok: true });
 });
 
 test("gu9 D-7: the new failure has a text in both languages that says what to do", () => {

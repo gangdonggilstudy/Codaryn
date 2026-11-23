@@ -40,6 +40,13 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-63, 2026-11-24) — GU-9 D-7 채택과 꾸러미 결정
+
+- **D-7 채택(`9c373178`, worker `466450a7`):** 꾸러미 앱(`app.isPackaged`)은 `resources/node/node.exe`, `resources/engine/build/src/engine-host/main.js`, `resources/engine/dist/src`로 엔진 호스트를 띄우되, 그 전에 app.asar 안 `engine-manifest.json`과 대조한다: 두 트리의 파일 집합(빠짐·남음), 크기, SHA-256, 순회 때 기록한 파일 정체성(dev·ino·size)과 연 핸들의 비교, 같은 핸들에서의 해시, 모든 해시 뒤 두 번째 순회. 하나라도 다르거나 링크·junction·특수 항목·Windows 별칭 이름(끝 점·공백, 장치 이름, 8.3 짧은 이름 모양)이 있으면 `engine_integrity_failed`로 엔진을 띄우지 않는다. 개발 모드 경로는 그대로다. 남는 경계: 원자적이지 않음(검사 중 교체 후 되돌림, 검사 뒤 TOCTOU), 하드 링크 구별 안 함, 목록은 asar 무결성 fuse에 기대며 Windows 효과 미확인, 목록과 파일을 함께 바꾸는 공격자는 막지 못함, 시작마다 전체 해시(시간 미측정).
+- **검토:** claude-worker 구현 → codex-worker 독립 보안 검토 H0/M1(검사 중 경로 재열기)/정보3 → 보완 → 재검토 M1 닫힘·L1(8.3 판정이 정상 긴 이름까지 거부) → 보완(PM 검토). 첫 검토 중 codex-worker의 출력 일부가 서비스 쪽 사이버보안 필터에 막혀, 경합 재현 없이 정적 검토로 마치게 했다. 작업자가 첫 구현 때 `git add -N`(intent-to-add)을 실행했다고 스스로 보고했다(내용 stage 없음, 영향 없음, PM이 커밋 때 정리). PM 환경 최종: GUI 473건(472 통과·1 건너뜀(파일 심볼릭 링크 EPERM)·실패 0), 연기 시험 227/227. main 위 patch가 worker patch(`008c361f`)와 같다.
+- **사용자 결정(2026-11-24):** D-8b 꾸러미 스크립트를 만들고 이 PC에서만 실행(내려받기 없음, `electronZipDir`; D-4b = 내려받지 않음), D-5b Node 26.13.1 `node.exe`와 LICENSE 묶기, D-6 설계 6.7의 여섯 fuse + `strictlyRequireAllFuses`, 나머지 셋(`EnableCookieEncryption`, `WasmTrapHandlers`, `LoadBrowserProcessSpecificV8Snapshot`)은 Electron 기본값, 설치 폴더 보호 범위는 꾸러미 폴더 전체(루트 `package.json` 이름 `codaryn`, 그 파일도 해시 확인). 서명·설치 파일·외부 게시는 포함하지 않는다.
+- **진행 중:** 꾸러미 스크립트와 확인 범위 확장(claude-worker, branch `gu9/package-script`). 실제 꾸러미 실행은 독립 보안 검토 뒤 PM이 한 번 한다. 꾸러미 앱 확인 기준(D-9)은 그 뒤에 묻는다.
+
 ## 진행 요약 (CP-62, 2026-11-23~24) — GU-9 의존성 설치와 꾸러미 입력 확인
 
 - **사용자 결정(2026-11-23~24, 제안서 11절):** D-1 `@electron/packager` 20.3.0 추가, D-2 `@electron/fuses` 2.1.3 추가, D-3a lock 해석, D-3b 작업 공간에만 설치와 `npm audit signatures` 1회, BlueOak-1.0.0 원문 1회 조회, lock의 main 채택, D-7 진행(시작 때 해시 확인), D-4a는 PM이 캐시의 Electron zip 하나만 확인, D-5a는 설치된 node.exe와 Node LICENSE 원문 1회 조회. **꾸러미 만들기(D-8b), fuses 적용, Node 묶기(D-5b), 배포는 아직 승인 전이다.**

@@ -70,9 +70,9 @@
 ## 4. 실제 API 검증 조건
 
 - [요구] 실제 API 검증은 로컬 키, 명시한 모델, 한도가 준비된 뒤 사용자가 직접 실행한다. PM과 작업자는 실행하지 않는다.
-- `tests/live/anthropic-live.ts`의 실행 조건과 상한 **구현(미실행)**
-  - 세 조건(`CODARYN_LIVE`, `ANTHROPIC_API_KEY`, `CODARYN_MODEL`)이 모두 있을 때만 돈다. 아니면 건너뛴다.
-  - 파일 이름이 `.test.ts`로 끝나지 않으므로 npm 스크립트에 들어가지 않는다.
+- `tests/live/anthropic-live.ts`와 `tests/live/openai-live.ts`의 실행 조건과 상한 **구현(미실행)**
+  - 파일마다 세 조건이 모두 있을 때만 돈다. Anthropic은 `CODARYN_LIVE`, `ANTHROPIC_API_KEY`, `CODARYN_MODEL`이고, OpenAI는 `CODARYN_LIVE`, `OPENAI_API_KEY`, `CODARYN_OPENAI_MODEL`이다. 아니면 건너뛴다.
+  - 두 파일 모두 이름이 `.test.ts`로 끝나지 않으므로 npm 스크립트에 들어가지 않는다.
   - 상한은 작업마다 턴 4, 도구 4, 재시도 1, 출력 토큰 1,024, 총 토큰 30,000, 3분이고, HTTP 요청은 작업마다 최대 8회다. 작업이 둘(문서·코드)이라 합쳐 요청 최대 16회, 토큰 최대 60,000이다. OpenAI 점검 `tests/live/openai-live.ts`의 상한은 턴 4, 도구 4, 재시도 1, 출력 토큰 4,096(추론 토큰 포함), 총 토큰 40,000, 3분이고, HTTP 요청은 점검 셋을 합쳐 최대 10회다(실행 조건은 `tests/live/README.md`).
 - 실행 전 확인
   - 키는 로컬 환경에만 있다. 출력과 기록에 없다.

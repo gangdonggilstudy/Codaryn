@@ -2,6 +2,8 @@
 
 현재 의존 방향 보완(2026-11-15, C11 완료 검증 대상 main37fb966a): 공통 규칙을 app으로, JSON/Markdown 표시를 presentation으로 분리했다. 물리 app roots66 전체의 혼합 source union과 새 production runtime에서 각각 CLI0·unknown0·실제 종료0을 확인했고, 별도 독립 검토와 원본 selftest30/입력147 동일성도 통과했다. [최신 CP51](pm-status.md)과 [어댑터 계약 3·7.2절](design/adapter-contract.md)이 현재 상태다. 아래 f8fb993/3aca6b5의 CLI 이행·app→CLI 임시 의존 서술은 그 판의 이력이며 현재 의존 수로 쓰지 않는다. 실제 API·모델과 설치 패키지 등 전체 제품 완료를 뜻하지 않는다.
 
+현재 CLI 구조 확인(2026-11-24, main `944e0e82` 소스 읽기): DR-65의 C1~C11 범위 공통 규칙 이동과 app→CLI 임시 의존 제거는 완료했다. 아래 날짜가 붙은 목록의 “`changes`뿐”은 당시 상태다. 현재 CLI는 실행 준비·조립·수명, 보고·되돌리기·실행 목록의 공통 규칙, doctor·models·init core를 앱 계층과 공유한다. 모든 명령이 `CodarynApp`의 공개 메서드만 부르는 것은 아니며 CLI 고유 인자 해석·질문·출력은 남는다([어댑터 계약 3·7.2절](design/adapter-contract.md)).
+
 상태: 2026-11-13, main `f8fb993` 기준. 아래 두 목록은 main `3aca6b5`에서 다시 확인했다(실행 중 권한 확인은 `cd1cace`, U-147. Markdown 규칙은 U-165. GUI의 권한 대화상자는 main `07cd600`, U-179. 앱 계층의 작업 공간 글 읽기·쓰기는 main `5ee11a1`, U-188. 쓰기 허용 경로는 main `c83ec5b`, U-200. GUI의 파일 보기는 main `c0afedb`, U-209. 묶음 A·B의 "없는 것"은 main `79e1a3f`, U-214. 묶음 B의 실행 계획은 main `13ea1ac`, U-216. 묶음 A와 앱·GUI의 실행 계획 수행은 main `1f0eb85`, U-253). 본문의 다른 절은 `f8fb993` 기준 그대로다(7절의 읽기 제외 경로, 9절의 자료 분석, 10절은 U-253).
 - **main에 있는 것:**
   - 단계 0 설계(2026-11-12 Codex 채택)를 바탕으로 한 단계 1a, 1b(모의 API까지), 2, 3의 오프라인 기구와 `codaryn models`
@@ -50,8 +52,8 @@
     - VS Code 확장의 `vscode/`(VX-D3)는 **중단**(DR-20)이다. 그 전에 커밋된 `vscode/src/core`는 그 시험과 함께 지웠다(DR-66, U-81).
 - [선택] 엔진은 하나다. CLI와 독립 GUI는 엔진을 부르는 어댑터이며 작업 논리를 갖지 않는다(M-2). **일부**
   - 어댑터가 함께 쓰는 실행 준비(입력 해석, 실행 전 보안 검사, 조립, 실행 수명)를 앱 계층 `src/app`에 둔다(AC-D1). `src/app`은 있고, GUI 엔진 호스트는 앱 계층만 부른다(`gui/src/engine-host/host.ts`).
-  - CLI의 이행(어댑터 계약 7절의 이행 2~5: run, 진행·취소, report·revert·runs, doctor·models)은 하지 않았다. CLI에서 앱 계층을 거치는 명령은 `changes`뿐이다(`src/cli/main.ts`, 코드 기준). 사용자 결정으로 이행은 "최종 설계까지 구현"에 들지만, 실행 중 권한 확인·GUI 남은 항목·사용성 지적 뒤에 직렬로 하고, 단위마다 고정 출력이 글자까지 같아야 병합한다(DR-65).
-  - 반대로 앱 계층의 아홉 파일이 `src/cli`의 함수를 가져다 쓴다(AC-D16의 임시 의존, 코드 기준).
+  - CLI의 `run`은 앱의 `prepareTask`·조립·`runLife`를, 계획 적용은 `applyLife`를 공유한다. `report`·`revert`·`runs`도 공통 읽기·되돌리기·작업 공간/실행 참조 규칙을 쓰며, `doctor`·`models`·`init`는 앱 core를 직접 부른다. `changes`는 앱의 공개 명령을 부른다. C1~C11의 공통 규칙 이행은 완료됐지만 CLI 고유 parser·질문·출력까지 모두 이동한 것은 아니다([어댑터 계약 7.2절](design/adapter-contract.md)). 다음 DR-65의 진행 순서·병합 조건은 이행 때 적용한 결정의 이력이다. 사용자 결정으로 이행은 "최종 설계까지 구현"에 들지만, 실행 중 권한 확인·GUI 남은 항목·사용성 지적 뒤에 직렬로 하고, 단위마다 고정 출력이 글자까지 같아야 병합한다(DR-65).
+  - AC-D16이 허용한 app→CLI 임시 의존은 C11에서 제거했다. 현재 `src/app` 소스에서 CLI를 향하는 정적 import·재수출, 동적 import·require, 실행 경로 문자열 의존은 없다. 옛 CLI 경로의 재수출은 CLI→app 방향이다.
   - 같은 대본을 CLI와 GUI 엔진 호스트로 돌려 결과와 기록을 비교하는 계약 층 시험은 한 대본 사례만 있다: 실제 CLI와 별도 엔진 호스트의 전체 저장 result·journal 비교(CP53 `823486b5`, `gui/tests/unit/cli-host-parity.test.ts`). 그 밖의 사례와 취소·권한 확인의 기본 거부·`by` 값의 비교는 아직 없다.
   - VS Code 확장(VX-D1)은 **중단**(DR-20)이다.
 - [선택] 공통 엔진은 Git이나 코드 테스트를 전제로 하지 않는다. Git은 후보 준비 스크립트(엔진 밖)만 쓴다. **구현**
@@ -64,7 +66,7 @@
 | 모듈 | 책임 | 알지 못해야 하는 것 | 상태 |
 | --- | --- | --- | --- |
 | `contracts` | 모듈 사이의 타입·상수·한도(계약). 역할 1(계약 담당)만 바꾼다 | 구현 | 구현 |
-| `cli` | 인자 해석, 설정·task 해석, 실행 전 보안 검사(C-3a부터 `app/input/security`에 있다), 조립(`assemble.ts`), 5절의 명령, 사람용 출력(`cli/human`), 진행 표시, 취소 신호 | 모델 형식, 도구 내부 | 구현. 연결되지 않았던 줄 프로토콜 코드 `cli/protocol`은 지웠다(DR-20, DR-66, U-81) |
+| `cli` | 명령 인자 해석과 5절의 명령 연결, 터미널 질문·사람용 출력(`cli/human`)·진행 표시·프로세스 신호 포트. 설정·task 해석과 보안 검사·조립·실행 수명은 앱의 공통 core를 사용하며 옛 경로는 재수출을 유지한다 | 모델 형식, 도구 내부 | 구현. 연결되지 않았던 줄 프로토콜 코드 `cli/protocol`은 지웠다(DR-20, DR-66, U-81) |
 | `engine` | 상태 기계, 모델↔도구 반복, 한도, 가림 적용 순서, 검증 회차, 재수정 판단, 무결성·상태 디렉터리 점검 시점(DR-38), 에이전트의 마지막 답(`final-message.ts`, DR-47), 승인한 계획의 적용(`apply.ts`, GT-D4) | 파일 시스템, Git, 테스트 러너, 제공자 형식 | 구현 |
 | `model` | 제공자 중립 `complete`·모델 목록. `anthropic`(Messages API), `openai`(Responses API, DR-31), 두 제공자가 함께 쓰는 전송 `http`, 대본 제공자 `scripted.ts` | 파일 시스템, 정책 | 구현. 실제 API 미확인 |
 | `tools` | 내장 도구 네 개(`read_file`, `search_files`, `write_file`, `run_command`), 작업 종류 도구 두 개(`inspect_files`, `propose_plan`, `workflow-tools.ts`), 명령 실행기(`command-runner.ts`, Windows 실행 `windows-launch.ts`), 계획 적용기(`plan-executor.ts`, `plan-files.ts`) | 모델 제공자 | 구현 |
@@ -73,15 +75,15 @@
 | `verify` | 검증기 `command`, `file_rules`, `data_checks`(`tabular`을 쓴다)와 적용 실행마다 만드는 `inventory`(설정할 수 없다). 무결성 목록(`integrity.ts`) | 수정 방법 | 구현 |
 | `store` | journal(가림본 기록), result.json, 작업 공간 잠금(`lock.ts`), 스냅샷과 되돌리기(`changes.ts`, 적용 실행은 `apply-revert.ts`), 계획과 적용 표시(`plan.ts`), 폐기 보관함(`discarded.ts`), 사람 확인(`review.ts`), 실행 목록(`runs.ts`), 정리(`cleanup.ts`), 상태 디렉터리 점검(`state-guard.ts`)과 기록 변경 표시(`marks.ts`, DR-38), 계획 뒤 점검하지 못한 실행 찾기(`unchecked.ts`, U-29) | 모델 제공자 | 구현 |
 | `workspace` | 허용 루트 안의 경로 해석(링크·8.3 이름 해석), 텍스트 읽기, 원자적 쓰기, 목록 | 정책 판단 | 구현 |
-| `app` | 어댑터 공통 계층. 실행 전 입력 검사(`app/input`: 보안 검사, 글 정리, 설치 위치, 실행 id, 사람용 글 꼴. C-3a)도 여기에 있고 CLI가 가져다 쓴다. `startRun`(이벤트, 취소, 결과 저장), `report`·`reportMarkdown`·`revert`·`listRuns`·`resolveRun`, 정리(`stateSummary`, `previewCleanup`, `applyCleanup`), `doctor`, 설정(`readSettings`, `createSettings`, 설정 변경 제안·적용), `listModels`·`selectModel`, `changes`, `plan`·`applyPlan`·`review`(`src/app/types.ts`의 `CodarynApp`, 코드 기준) | 어댑터의 화면과 인자 형식, 프로세스 전역(`process.env`, 신호, stdout) | 일부. GUI가 쓴다. CLI는 `changes`만 거친다. 여러 함수가 안에서 `src/cli` 함수를 감싼다(AC-D16) |
+| `app` | 어댑터 공통 계층. 실행 전 입력 검사(`app/input`: 보안 검사, 글 정리, 설치 위치, 실행 id, 사람용 글 꼴. C-3a)도 여기에 있고 CLI가 가져다 쓴다. `startRun`(이벤트, 취소, 결과 저장), `report`·`reportMarkdown`·`revert`·`listRuns`·`resolveRun`, 정리(`stateSummary`, `previewCleanup`, `applyCleanup`), `doctor`, 설정(`readSettings`, `createSettings`, 설정 변경 제안·적용), `listModels`·`selectModel`, `changes`, `plan`·`applyPlan`·`review`(`src/app/types.ts`의 `CodarynApp`, 코드 기준) | 어댑터의 화면과 인자 형식, 프로세스 전역(`process.env`, 신호, stdout) | C1~C11 범위의 공통 규칙 이동·app→CLI 임시 의존 제거 완료. CLI와 GUI가 공통 core를 공유한다. CLI 고유 질문·출력과 일부 명령 parser는 CLI에 남는다 |
 | `i18n` | 사람용 고정 문구 카탈로그(ko, en)와 언어 선택(N-4) | 파일·환경의 값 | 구현. CLI와 GUI 엔진 호스트가 쓴다 |
 | `workflows` | 내장 작업 종류 정의 다섯 개(`general`, `code`, `document`, `analyze`, `organize`). 로직 없는 데이터 상수([범용 작업](design/general-tasks.md) 4절) | 실행 논리 | 구현 |
 | `tabular` | 표(CSV, TSV, JSON Lines) 해석과 집계. 순수 함수. 표를 조각 단위로 읽는다(U-202) | 파일 시스템, 모델 | 구현. `data_checks` 검증기와 `query_table` 도구(U-208)가 쓴다 |
 
 - 의존 방향
   - 엔진은 `contracts`만 import한다(코드 기준). `cli/assemble.ts`와 `app/assemble.ts`가 모듈을 만들어 `EngineDeps`로 엔진에 넣는다. **구현**
-  - 목표는 `cli` → `app` → (`engine`, `store`, `tools`, `policy`, `privacy`, `verify`, `workspace`, `model`) → `contracts`다. 지금은 `app` → `cli`의 역방향 의존이 있다(AC-D16). **일부**
-  - "다른 모듈은 각 모듈의 `index.ts` 공개 export로만 쓴다"는 규칙도 **일부**다. 앱 계층이 `src/cli`의 파일을 직접 가져다 쓴다.
+  - 목표는 `cli` → `app` → (`engine`, `store`, `tools`, `policy`, `privacy`, `verify`, `workspace`, `model`) → `contracts`다. C1~C11에서 공통 규칙을 앱으로 옮기고 app→CLI 역방향 임시 의존을 제거했다(AC-D16은 과거 이력). CLI의 모든 명령을 앱의 단일 공개 메서드로만 연결했다는 뜻은 아니다.
+  - "다른 모듈은 각 모듈의 `index.ts` 공개 export로만 쓴다"는 규칙도 **일부**다. CLI가 `app/input`과 명령별 core 등 앱의 하위 모듈을 직접 가져다 쓰는 경로가 남아 있다.
   - `src` 밖의 어댑터: `gui/`(Electron, DR-20). 엔진 호스트는 빌드한 엔진(`dist/src`)을 불러 앱 계층을 쓴다. `vscode/src/core`는 지웠다(DR-20, DR-66, U-81).
 - 작업 유형(워크플로)
   - 작업 종류 정의(도구 묶음, 지시문, 계획 방식, 완료 방식, 기본값과 상한)를 내장(`src/workflows`)과 사용자 설정 `workflows`에 두고, task의 `workflowRef`나 간편 형식의 `--workflow <id>`로 고른다(GT-D1, GT-D2). **구현**
@@ -219,12 +221,12 @@
 ### 4.4 앱 계층과 단계 4 흐름
 
 앱 계층([어댑터 계약](design/adapter-contract.md)). **일부**
-- `startRun`이 4.1의 준비와 4.2의 조립을 앱 환경으로 한다. GUI 엔진 호스트가 이것을 부른다. CLI의 `run`은 거치지 않는다(이행 2 미완).
+- `startRun`이 4.1의 준비와 4.2의 조립을 앱 환경으로 한다. GUI 엔진 호스트가 이것을 부른다. CLI의 `run`은 이 공개 메서드를 직접 부르지는 않지만 `prepareTask`·조립·`runLife`의 공통 core를 쓴다(`src/cli/run.ts`의 `runThroughApp`). 이행 2의 원래 단일 창구 목표와 C1~C11의 공통 규칙 이동 완료 범위는 구분한다.
   - 변수 파일은 `process.env`에 적재하지 않고 환경 사본에 합친다(AC 4절).
-  - 환경 사본은 Windows에서 이름을 대소문자 없이 맞춘다(`app/environment.ts`). 앱 계층의 조립은 명령 실행기의 부모 환경을 이 사본에서 넘긴다(DR-4, `app/assemble.ts`, 코드 기준). DR-4가 CLI 이행의 완료 기준에 넣은 두 시험은 이행을 하지 않아 아직 해당이 없다.
+  - 환경 사본은 Windows에서 이름을 대소문자 없이 맞춘다(`app/environment.ts`). 앱 계층의 조립은 명령 실행기의 부모 환경을 이 사본에서 넘긴다(DR-4, `app/assemble.ts`, 코드 기준). DR-4의 두 경우는 [어댑터 계약 7.1절](design/adapter-contract.md)의 이행 검증 기준이다. 이행 당시의 검증 결과는 [CP51](pm-status.md)의 기존 기록을 따른다.
 - 진행 이벤트는 journal에 쓴 가림본 `JournalRecord` 그대로다(AC-D2). 사람용 문장은 어댑터가 문구 카탈로그(N-4)로 만든다.
-- 취소: 앱 계층과 GUI에서는 `handle.cancel()` 하나로 모인다. CLI의 신호·취소 파일은 앱 계층을 거치지 않고 CLI의 취소 출처(`cli/cancel.ts`)가 받는다. **일부**
-- 확인 질문 통로(AC 5.7)는 실행 중 권한 확인 전용이다(DR-1). 엔진은 `EngineDeps.confirm`으로 묻고(U-74), 앱 계층은 그것을 `RunObserver.confirm`으로 넘긴다(U-108). CLI의 `run`은 앱 계층을 거치지 않고 터미널 질문(`cli/confirm.ts`, `cli/terminal.ts`)을 엔진에 직접 준다(U-110). 형태는 DR-3(3절). **구현**
+- 취소: 앱 계층과 GUI에서는 `handle.cancel()`로 모인다. CLI의 신호·취소 파일도 앱의 공통 취소 원천(`app/cancel.ts`)을 쓴다. `cli/cancel.ts`는 그 함수를 옛 이름으로 다시 내보내고, CLI는 프로세스 신호 포트를 주입해 공통 실행 수명에 연결한다. **연결됨**
+- 확인 질문 통로(AC 5.7)는 실행 중 권한 확인 전용이다(DR-1). 엔진은 `EngineDeps.confirm`으로 묻고(U-74), 앱 계층은 그것을 `RunObserver.confirm`으로 넘긴다(U-108). CLI는 터미널 질문(`cli/confirm.ts`, `cli/terminal.ts`)을 `createRunDisplay`의 관찰자에 두고 공통 조립·실행 수명에 연결한다(`src/cli/run.ts`의 `runThroughApp`). 형태는 DR-3(3절). **구현**
 - 계획 승인은 실행 사이 확인 하나다(DR-1, GT-D4). 앱 계층에 `plan`, `applyPlan(runId, digest)`, `review`가 있고, CLI에는 같은 이름의 명령이 있다. **구현**
 - 변경 비교는 다시 가린 비교만 내준다. 비교는 앱 계층의 `changes`가 만들고, CLI `changes`와 GUI가 이것을 쓴다. 어댑터는 스냅샷 저장 형식을 직접 읽지 않는다(DR-7). **구현**
 - 프로세스 밖 어댑터용 줄 프로토콜(`--events jsonl`, `--confirm stdio`, AC-D7, AC-D8)은 **중단**(DR-20)이다. 연결되지 않았던 `src/cli/protocol/`은 지웠다(DR-66, U-81). `--cancel-file`은 `run`과 `apply`에 있다(실제 CLI, `--help`).

@@ -149,6 +149,7 @@ export const KO = {
   "error.node_not_found": "Node 26 이상을 찾지 못했습니다. Node 26 이상을 설치한 뒤 앱을 다시 시작하세요.",
   "error.node_too_old": "엔진은 Node 26 이상에서만 실행됩니다. Node를 새 판으로 바꾼 뒤 앱을 다시 시작하세요.",
   "error.engine_not_built": "엔진이 빌드되지 않았습니다. 저장소 루트에서 npm run build를 실행하세요.",
+  "error.engine_integrity_failed": "앱과 함께 설치된 엔진 파일이 바뀌었거나 빠져 있어 엔진을 시작하지 않았습니다. 앱을 다시 설치하세요.",
   "error.host_not_started": "엔진 프로세스를 시작하지 못했습니다.",
   "error.ready_timeout": "엔진 프로세스가 제시간에 준비되지 않았습니다.",
   "error.protocol_violation": "엔진 프로세스와의 통신 형식이 맞지 않아 멈췄습니다.",

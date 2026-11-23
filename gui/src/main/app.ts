@@ -37,6 +37,7 @@ import { cleanupQuestions } from "../shared/cleanup.js";
 import { WIDENING_KINDS, applyFormText, permissionDialogOptions, cleanupDiscardedDetail, endNotice, formatBytes, widenText } from "./dialog-texts.js";
 import { ModelEntries, ModelListLimit } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
+import { ENGINE_MANIFEST_FILE, checkPackagedEngine, packagedEnginePaths } from "./packaged-engine.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
 import { guardContents, secureSession } from "./security.js";
 import { SESSION_PARTITION, debuggingRequested, secureWebPreferences } from "./security-policy.js";
@@ -116,8 +117,33 @@ function isFile(file: string): boolean {
   }
 }
 
-/** DR-26: development uses an installed Node 26+; packaged builds carry their own (decided before distribution). */
+/**
+ * GU-9 D-7: a packaged build runs the Node and the engine it carries under `process.resourcesPath`,
+ * and only after every one of those files matches the list inside app.asar (packaged-engine.ts,
+ * which also names what that check cannot do: TOCTOU, the asar fuse on Windows, list and files
+ * changed together). A mismatch, a missing list or a read failure ends here and nothing is
+ * started (fail closed). Only Windows carries a Node; elsewhere a packaged build still reports
+ * `node_not_found`.
+ */
+async function startPackagedHost(options: GuiOptions): Promise<StartOutcome | { readonly ok: false; readonly failure: string }> {
+  const paths = packagedEnginePaths(process.resourcesPath, process.platform);
+  if (paths.nodePath === null) return { ok: false, failure: "node_not_found" };
+  const check = await checkPackagedEngine(process.resourcesPath, join(options.guiRoot, ENGINE_MANIFEST_FILE), process.platform);
+  if (!check.ok) return { ok: false, failure: "engine_integrity_failed" };
+  return startEngineHost({
+    nodePath: paths.nodePath,
+    hostScript: paths.hostScript,
+    engineDir: paths.engineDir,
+    ...(options.loopbackOnly === true ? { transport: "loopback-only" as const } : {}),
+    env: hostEnvironment(process.env),
+    cwd: app.getPath("home"),
+    showStderr: options.showHostStderr === true,
+  });
+}
+
+/** DR-26: development uses an installed Node 26+ and the repository's builds; a packaged build goes to startPackagedHost (GU-9 D-7). */
 async function startHost(options: GuiOptions): Promise<StartOutcome | { readonly ok: false; readonly failure: string }> {
+  if (app.isPackaged) return startPackagedHost(options);
   const engineDir = join(options.guiRoot, "..", "dist", "src");
   const nodePath = app.isPackaged ? null : findDevelopmentNode(process.env, process.platform, isFile);
   if (nodePath === null) return { ok: false, failure: "node_not_found" };

@@ -13,7 +13,7 @@ Codaryn CLI를 실제 작업에 쓰는 방법이다. 설명은 현재 코드 동
 - Node.js 26 이상(`package.json`의 `engines`). 검증은 Windows에서 했고 다른 OS는 확인하지 않았다.
 - 실제 호출에는 고른 제공자의 API 키와 모델 ID가 필요하다. 3절의 체험에는 둘 다 필요 없다.
 - 모델 제공자는 Anthropic API(기본)와 OpenAI API(Responses API) 둘이다([4절 "두 번째 제공자"](#두-번째-제공자-openai)).
-- 이 문서는 CLI를 다룬다. 독립 데스크톱 GUI(`gui/`)는 만드는 중이고, 설치 패키지가 없어 개발 환경에서만 띄울 수 있다. GUI는 파일 보기(텍스트 보기와 고치기)만 19절에서 다룬다. VS Code 확장은 만들지 않는다.
+- 이 문서는 CLI를 다룬다. 독립 데스크톱 GUI(`gui/`)는 개발 환경에서 띄우거나, 이 PC에서 만든 로컬 zip 꾸러미(Windows x64, 서명·설치 파일 없음)로 띄울 수 있다(2절 끝 "GUI 꾸러미 만들기"). GUI는 파일 보기(텍스트 보기와 고치기)만 19절에서 다룬다. VS Code 확장은 만들지 않는다.
 
 ## 2. 설치와 빌드
 
@@ -39,6 +39,28 @@ npm rm -g codaryn    # 링크를 지운다
 - PowerShell에서 `codaryn`이 스크립트 실행이 막혔다는 오류(영문 "running scripts is disabled on this system")로 멈추면 실행 정책이 npm의 `.ps1` 실행 파일을 막은 것이다. `codaryn.cmd`로 부르면 된다.
 - 이 문서의 예시는 `node dist/src/cli/main.js`로 적는다. 링크했으면 `codaryn`으로 바꿔 쓴다.
 - 확인 범위: 실제 전역 위치 대신 별도 prefix(`npm_config_prefix`)에서 link, `codaryn`·`codaryn.cmd` 실행, 체험 예시 실행, `npm rm -g`를 확인했다. 실행 정책 Restricted에서는 `codaryn`이 막히고 `codaryn.cmd`는 실행됐다.
+
+**GUI 꾸러미 만들기(Windows x64, 이 PC에서만, GU-9):**
+
+```powershell
+npm run build                       # 저장소 루트
+Set-Location gui
+npm run build                       # GUI 개발 의존성은 미리 설치돼 있어야 한다(수동 점검 3절 준비)
+npm run package -- --electron-zip-dir <폴더> --node-exe <node.exe> --node-license <LICENSE>
+```
+
+- 스크립트는 빌드하지 않는다. 루트와 `gui`의 빌드가 먼저 있어야 한다.
+- 세 입력은 모두 이 PC의 로컬 경로다. 네트워크 공유와 장치 경로는 파일을 열기 전에 거부한다. 상대 경로는 `gui/` 기준이다(npm이 거기서 스크립트를 실행한다).
+  - `--electron-zip-dir`: `electron-v45.3.1-win32-x64.zip`이 든 폴더
+  - `--node-exe`: Node 26.13.1의 `node.exe`
+  - `--node-license`: Node 26.13.1의 LICENSE
+  - 셋의 SHA-256은 스크립트에 고정돼 있고, 하나라도 다르면 아무것도 만들지 않는다. 내려받지 않는다.
+- 산출은 `gui/out/`에 셋이다: `Codaryn-win32-x64/`(꾸러미 폴더), `Codaryn-win32-x64.zip`, `Codaryn-win32-x64.record.json`(기록 파일).
+- 기록 파일은 모든 단계가 끝난 실행만 마지막에 남긴다. 기록 파일이 없으면 그 폴더와 zip은 끝까지 만들어지지 않은 것이니 쓰지 않는다. 기록 파일에는 입력 해시, fuse 값, zip과 모든 파일의 SHA-256이 있다.
+- 다시 만들려면 위 셋을 먼저 지운다. 하나라도 남아 있으면 덮어쓰지 않고 멈춘다.
+- 빌드에 허용 목록 밖의 파일(숨은 이름 포함)이 있으면 멈추고 그 이름을 알린다.
+- 코드 서명, 설치 파일, 외부 게시는 없다(승인 전, GUI-D9). 꾸러미 앱의 화면 확인은 [수동 점검](manual-checks.md) M-3.19다.
+- 확인 범위: 스크립트는 main `27115387`이고, PM이 이 PC에서 한 번 실행했다(종료 0, CP-64). 이 문서를 쓰면서 다시 실행하지는 않았다.
 
 ## 3. 키 없이 체험하기
 
@@ -2627,7 +2649,7 @@ error (policy_denied): denied by policy: path/unreadable_path. Files here may no
 독립 GUI에서 작업 공간의 텍스트 파일을 열어 보고, 고칠 수 있는 파일이면 고쳐 저장하는 화면이다(사용자 요청 DR-71, PM 판단 DR-72. U-174 읽기 전용 보기, U-184 편집·저장, 병합 `111e25d`). 사람이 직접 고치는 화면이며 모델은 관여하지 않는다.
 
 - **근거:** 이 절은 main `c0afedb`의 코드와 카탈로그 기준이다. 화면을 띄워 보지 않았다. 화면의 글은 카탈로그(`gui/src/renderer/i18n/ko.ts`, OS 대화상자는 `gui/src/main/dialog-texts.ts`)에서 그대로 옮겼고, 영어 화면의 글은 같은 키의 `en.ts`에 있다.
-- GUI를 띄우는 법은 [수동 점검](manual-checks.md) 3절 "준비"에 있다. 설치 패키지는 없다(1절).
+- GUI를 띄우는 법은 [수동 점검](manual-checks.md) 3절 "준비"에 있다. 로컬 zip 꾸러미를 만드는 법은 2절 끝에 있다. 서명과 설치 파일은 없다.
 - 화면은 앱 계층의 작업 공간 글 읽기·쓰기(`readWorkspaceText`·`writeWorkspaceText`, U-172, [어댑터 계약](design/adapter-contract.md) 5.15)를 쓴다. 설계는 [독립 GUI 설계](design/standalone-gui.md) 3.14다.
 
 ### 19.1 여는 곳과 화면

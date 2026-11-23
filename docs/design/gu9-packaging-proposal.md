@@ -1,6 +1,7 @@
 # GU-9 꾸러미 승인 제안서 (초안)
 
-- 상태: **초안, 승인 전.** 아무것도 설치·내려받기·빌드·실행하지 않았다.
+- 상태(2026-11-24): **채택되어 실행했다.** 제안서는 main `01cbe538`에 채택됐고(CP-61), 11절의 결정은 2026-11-23~24에 사용자가 하나씩 정했다(결과는 11.1). 의존성(`1dce881d`), 꾸러미 엔진 배치와 시작 확인(D-7, `9c373178`), 꾸러미 스크립트(`27115387`)가 main에 있고, 첫 로컬 꾸러미와 PM 자동 점검을 마쳤다(CP-64). 코드 서명·설치 파일·외부 게시는 여전히 승인 전이다(GUI-D9). 아래 본문은 승인 전에 쓴 초안 그대로이고, 그 뒤 확인한 사실은 "2026-11-2x 확인:"으로 잇는다.
+- 작성 때 상태: **초안, 승인 전.** 아무것도 설치·내려받기·빌드·실행하지 않았다.
   - 사용자가 2026-11-23에 승인한 것은 아래 주소의 메타데이터 읽기뿐이다.
   - 설치, 꾸러미 만들기, 서명, 게시는 여전히 미승인이다(DR-67 `docs/decision-register.md:597`, [인계 문서](../operations/pm-handoff-2026-11-15.md):65).
 - 작업: gu9-proposal-claude-01(claude-worker). 기준은 main `a91cf12a`, 조회일은 2026-11-23이다.
@@ -40,11 +41,14 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
   - 꾸러미 앱에서는 `nodePath`가 `null`이 되어(`gui/src/main/app.ts:122`) `node_not_found`로 끝난다(`:123`).
   - 엔진 위치도 개발 배치인 `guiRoot/../dist/src`로 고정되어 있다(`:121`). `gui/src/main/node-path.ts:3`~`:4`도 "until then a packaged build finds none"이라고 적는다.
   - 고치려면 `gui/src/main/**`를 바꿔야 하는데, 그곳은 GU-1 소유다(`standalone-gui.md:1071`). GU-9 소유는 `gui/scripts/package/**`와 `docs/gui-usage.md`뿐이다(`:1079`). 그래서 GU-1 소유자의 변경이 먼저 필요하다(D-7).
+  - 2026-11-24 확인: D-7(`9c373178`)로 고쳤다. 꾸러미 앱은 `resources/node/node.exe`, `resources/engine/build/src/engine-host/main.js`, `resources/engine/dist/src`로 엔진 호스트를 띄우고, 그 전에 app.asar 안 `engine-manifest.json`과 대조한다. 다르면 `engine_integrity_failed`로 엔진을 띄우지 않는다.
 - **엔진 호스트와 엔진은 asar 밖에 두어야 한다[추정].**
   - 별도 Node 26 프로세스는 Electron의 asar 묶음 안 파일을 읽지 못한다.
   - 지금 호스트 진입점은 앱 폴더 안의 `build/src/engine-host/main.js`다(`app.ts:127`).
   - asar 무결성 fuse가 asar 밖의 파일(Node, 엔진)까지 지키는지는 미확인이다(D-7).
+  - 2026-11-24 확인: 엔진 호스트와 엔진은 asar 밖 `resources/engine/`에 둔다(D-7). asar 밖 파일은 fuse가 아니라 시작 확인(목록의 파일 집합·크기·SHA-256)이 본다. PM 자동 점검에서 엔진 파일을 바꾼 사본은 앱 창은 떴지만 엔진(`node.exe`)이 뜨지 않았다(`.codaryn/pm-tools/evidence/gu9-check/results.json`, `tampered-engine`).
 - **asar 무결성 fuse가 Windows에서 효과가 있는지 미확인이다.** fuses README의 해당 주석은 "validation of the app.asar archive on macOS"다(`raw/fuses-v2.1.3-README.md:27`). E-4(`standalone-gui.md:1044`)는 일부만 풀린다.
+  - 2026-11-24 확인(실행): Windows에서도 효과가 있다. app.asar를 바꾼 사본은 Electron이 `Integrity check failed for asar archive entry 'package.json'`로 바로 끝냈다(같은 `results.json`, `tampered-asar`, CP-64).
 
 ## 2. 개발 의존성 표
 
@@ -115,6 +119,7 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
 - 명령(제안, 실행 안 함): `gui/package.json`에 두 줄을 더한 뒤 `gui`에서 `npm install --package-lock-only --ignore-scripts`를 실행한다.
   - 레지스트리 메타데이터를 읽으므로 네트워크를 쓴다.
   - 이 명령이 `node_modules`를 만들지 않고 lock만 쓴다는 것은 [추정]이다. npm 문서와 대조하지 않았다.
+  - 2026-11-23 확인: 추정과 달랐다. `node_modules`는 만들지 않았지만, 숨은 lock(`gui/node_modules/.package-lock.json`)에도 설치되지 않은 두 패키지를 적었다. 작업자가 멈춤 조건대로 멈췄고 PM이 그 파일을 증거로 옮겼다. 실제 설치(D-3b) 뒤의 새 숨은 lock은 설치와 맞았다(CP-62).
 - 해석한 뒤 PM이 볼 것
   - `check-lock.mjs`의 네 규칙: 설치 스크립트 없음(`gui/scripts/build/check-lock.mjs:35`), npm 레지스트리 출처(`:15`, `:36`), sha512 무결성(`:37`), 개발 전용(`:38`). 새로 들어온 패키지 전부가 대상이다.
   - 라이선스: 저장소 루트에서 `node scripts/check-licenses.mjs --json`. GUI lock도 읽는다(`check-licenses.mjs:7`). review나 deny로 나온 항목은 DR-75대로 처리한다.
@@ -185,6 +190,7 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
 - **이 확인 전에는 꾸러미 만들기(6절 5단계)의 실행 승인을 묻지 않는다.**
   - 지금 물을 수 있는 것은 기존 zip의 명시 위치와 SHA-256 확인까지다(D-4a).
   - 다시 받기나 자동 내려받기가 일어날 수 있는 실행(D-4b, D-8b)은 정확한 주소와 동작을 확인한 뒤 다시 묻는다.
+- 2026-11-23 확인(설치된 packager 20.3.0 소스, CP-62): `electronZipDir`가 있으면 그 폴더의 `electron-v45.3.1-win32-x64.zip`을 그대로 쓰고 `@electron/get`을 부르지 않는다(`node_modules/@electron/packager/dist/packager.js:141`~`:151`). 이 경로에는 체크섬 대조가 없어 사전 SHA-256 확인이 무결성 확인이다. 없으면 기본 캐시를 쓰되 원격 `SHASUMS256.txt`를 받는다(캐시가 있어도 네트워크). 그래서 D-4b는 "내려받지 않음"으로 정했고(2026-11-24), 꾸러미 스크립트는 확인한 zip을 자기 준비 폴더로 복사해 다시 잰 뒤 `electronZipDir`로 준다(`27115387`).
 
 ## 6. 명령 순서 (제안, 실행 안 함)
 
@@ -231,6 +237,13 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
   - Electron `dist` 374,391,699 bytes, `gui/build/src` 1,634,792 bytes, 루트 `dist/src` 3,539,978 bytes.
   - 그래서 압축 전 약 380 MB에 Node가 더해진다. Node 크기는 미확인이다.
   - zip 크기: README는 최소 앱의 zip이 Electron zip과 크기가 비슷하다고 적는다(`:33`~`:36`). 그러나 Electron zip의 크기 자체가 미확인이다.
+- 2026-11-24 확인(실제 배치, `27115387`; 기록 `.codaryn/pm-tools/evidence/gu9-run/Codaryn-win32-x64.record.json`, CP-64)
+  - 꾸러미 폴더 맨 위: `Codaryn.exe`와 Electron 런타임, Electron의 `LICENSE`·`LICENSES.chromium.html`(packager가 둔 자리), 루트 `package.json`(이름 `codaryn`, 루트 판, `"type": "module"`). 이 `package.json` 때문에 엔진의 `installDir`이 꾸러미 폴더 전체가 되고(2026-11-24 사용자 결정), 그 파일도 시작 확인 대상이다.
+  - `resources/app.asar`: 89항목, 시험·`.map` 없음, `engine-manifest.json` 있음.
+  - asar 밖: `resources/node/{node.exe,LICENSE}`, `resources/engine/build/src/{engine-host,shared}/**`, `resources/engine/dist/src/**`. 엔진 목록은 225개다.
+  - 고지: `licenses/Codaryn/LICENSE`, `licenses/Codaryn/NOTICE`.
+  - 고르는 방식은 허용 목록이다(확장자·위치, `.map` 뺌). 숨은 이름이나 그 밖의 파일이 빌드에 있으면 꾸러미를 만들지 않고 멈춘다. `--ignore`는 쓰지 않는다.
+  - 실측: 파일 300개, 크기 합 477,778,586 bytes(기록 파일의 `files`), zip 197,946,337 bytes.
 
 ## 8. 검증
 
@@ -260,6 +273,14 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
    - 다른 Windows 계정이나 PC에서 zip을 풀어 실행해 본다. 서명이 없는 상태에서 OS가 무엇을 보이는지도 관찰해 기록한다(서명 결정은 GUI-D9).
    - 산출에 든 `LICENSE`·`NOTICE` 파일을 7절의 자리와 10절의 표에 대조한다(`development-workflow.md:124`).
    - zip의 SHA-256을 기록한다.
+- 2026-11-24 PM 자동 점검 결과(D-9 "PM 자동 점검 + 사용자 화면 확인", `.codaryn/pm-tools/evidence/gu9-check/results.json`, CP-64)
+  - 1항 fuses: 적용 뒤 다시 읽은 값이 설정과 같다(기록 파일 `fuses.after`).
+  - 정상 시작: 엔진이 `resources/node/node.exe`로 뜨고, TCP 대기 0·UDP 0이다.
+  - `ELECTRON_RUN_AS_NODE=1`: 무시되고 앱이 정상 시작한다.
+  - `--inspect`·`--inspect-brk`·`--remote-debugging-port`: 시작 검사로 종료 코드 2다(`--inspect-brk`도 이제 막힌다).
+  - `NODE_OPTIONS=--inspect`: 앱은 정상 시작하지만 검사기 포트는 열리지 않는다(TCP 대기 0). fuse가 그 값을 무시해, 시작 검사가 그 값을 보지 못한 것은 관찰한 동작이다.
+  - 4항 asar 무결성: 바꾼 app.asar는 Electron이 바로 끝냈다. 엔진 파일을 바꾼 사본은 엔진이 뜨지 않았다.
+  - 남은 것: 사람의 화면 확인(점검 표시, 변조 사본의 오류 문구, 닫을 때 엔진 종료)은 수동 점검 M-3.19이고 NOT_RUN이다. `--remote-debugging-pipe`는 자동 점검 대상이 아니었다.
 
 ## 9. 비용
 
@@ -285,6 +306,10 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
 
 - "배포물에 들어가지 않는다"의 근거는 packager가 `devDependencies`를 복사하지 않는다는 점이다(`raw/packager-v20.3.0-README.md:109`~`:112`). 실제 산출 목록과 대조한다(`development-workflow.md:124`).
 - 고지 의무의 범위는 실제로 배포하는 파일로 정한다. 빌드 도구는 배포하지 않으면 고지할 대상이 없다[추정]. 다만 DR-75는 이름, 판, 출처, 라이선스를 기록하라고 한다(`:124`).
+- 2026-11-23~24 확인(CP-62)
+  - BlueOak-1.0.0: lock 해석 결과 `graceful-fs`는 4.2.11(ISC)로 남았고, `@electron/asar` 경로의 6개(glob 14.0.6, minimatch 11.0.9, lru-cache 11.5.3, minipass 7.1.3, path-scurry 3.0.0, @isaacs/nonrecursive-glob-match 1.1.0)가 BlueOak-1.0.0이다. PM이 원문을 읽었다(허락의 조건은 사본을 줄 때 라이선스 글이나 링크를 함께 주는 것). 배포물에 들어가지 않는 개발 도구라 지금 고지 의무는 없다. 허용 목록은 바꾸지 않았다.
+  - Node 26.13.1: LICENSE(SHA-256 `8e603aa8…`, 2,923줄)는 MIT 본문과 제3자 고지다. node.exe와 함께 `resources/node/LICENSE`로 그대로 묶는다는 것이 PM 판단이다(D-5b).
+  - 배치: Codaryn의 `LICENSE`·`NOTICE`는 `licenses/Codaryn/`, Electron의 고지는 packager가 둔 자리다(7절 2026-11-24 확인).
 
 ## 11. 사용자 결정 필요 목록
 
@@ -309,6 +334,25 @@ GU-9는 GUI를 Windows x64에서 풀어 바로 실행할 수 있는 묶음으로
   - 6절의 명령 순서로는 D-1·D-2 → D-3a → D-3b → D-7 → D-4a → (5.2 확인) → D-4b·D-8b → D-5a → D-5b → D-6 → D-8a → D-9 차례다.
   - D-4b와 D-8b는 5.2 확인 전에는 묻지 않는다. D-3b와 D-5b는 앞 단계 결과를 본 뒤에 묻는다.
 - 이 제안의 값은 2026-11-23 조회 기준이다. 승인 시점에 latest가 바뀌었으면 그 판은 다시 조회해 표를 고친다.
+
+### 11.1 결정 결과 (2026-11-23~24, CP-61~CP-64)
+
+| 번호 | 날짜 | 결정 | 실행 결과 | 커밋·근거 |
+| --- | --- | --- | --- | --- |
+| D-1·D-2 | 2026-11-23 | 승인: `@electron/packager` 20.3.0, `@electron/fuses` 2.1.3 추가 | `gui/package.json`에 정확한 판으로 추가 | `1dce881d`, CP-62 |
+| D-3a | 2026-11-23 | 승인: lock만 해석 | 새 40개(전체 53), 모두 레지스트리·sha512·설치 스크립트 없음·dev. 숨은 lock도 쓰였다(3.1 확인) | CP-62 |
+| D-3b | 2026-11-23 | 승인: 이 작업 공간에만 설치, `npm audit signatures` 1회 | `npm install --ignore-scripts` 1회(40개 추가), Electron 실행 파일 그대로. 53개 서명·14개 증명 검증 | `1dce881d`, CP-62 |
+| D-4a | 2026-11-23~24 | PM이 캐시의 Electron zip 하나만 확인 | SHA-256 `d92d1aa4…`, 158,352,921 bytes, 전용 폴더로 복사 | CP-62 |
+| D-4b | 2026-11-24 | 내려받지 않음 | `electronZipDir`로 확인한 zip만 쓴다 | `27115387`, CP-63 |
+| D-5a | 2026-11-23~24 | 설치된 node.exe와 Node LICENSE 원문 1회 조회 | node.exe가 공식판과 SHA-256 `f5109dc8…`로 같음. LICENSE `8e603aa8…` | CP-62 |
+| D-5b | 2026-11-24 | 승인: Node 묶기 | `resources/node/{node.exe,LICENSE}` | `27115387`, CP-64 |
+| D-6 | 2026-11-24 | 6.7의 여섯 값 + `strictlyRequireAllFuses`, 나머지 셋은 Electron 기본값 | 기본값은 바이너리에서 읽음: 쿠키 암호화 끔, 브라우저 전용 V8 스냅숏 끔, Wasm trap handlers 켬. 적용 뒤 다시 읽어 같음 | 기록 파일 `fuses`, CP-64 |
+| D-7 | 2026-11-24 | 진행 + 시작 때 해시 확인 | 꾸러미 앱이 목록과 대조한 뒤에만 엔진을 띄운다 | `9c373178`, CP-63 |
+| 설치 폴더 범위 | 2026-11-24 | 꾸러미 폴더 전체 | 루트 `package.json`(이름 `codaryn`)을 두고 시작 확인에 넣었다 | `27115387`, CP-63·CP-64 |
+| D-8a | — | 따로 기록된 결정 없음 | D-8b에 따라 Windows `tar.exe`로 zip 하나를 만들었다 | `27115387` |
+| D-8b | 2026-11-24 | 승인: 이 PC에서만 꾸러미 만들기 | 한 번 실행, 종료 0, zip SHA-256 `46a7aa71…`, 기록 파일 남김 | CP-64 |
+| D-9 | 2026-11-24 | PM 자동 점검 + 사용자 화면 확인 | 자동 점검 마침(8절 2026-11-24 결과). 화면 확인은 M-3.19, NOT_RUN | CP-64 |
+| D-10 | — | 그대로 미룸 | 코드 서명·설치 파일·SmartScreen·외부 게시·자동 업데이트·충돌 보고 없음(GUI-D9 승인 전) | — |
 
 ## 부록 A. 근거 원문 (raw, Git 제외)
 

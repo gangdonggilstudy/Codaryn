@@ -20,6 +20,7 @@
   - 계획 실행(묶음 B-4)은 main `13ea1ac`에서 7절로 넣었다(U-217). 자동 시험은 `tests/integration/n15-plan-run.test.ts`다.
   - 묶음 A(읽기 제외, `query_table`, `analyze-private`)는 main `1f0eb85`에서 8절로 넣었다(U-251). 같은 판에서 M-7.4를 GUI의 계획 수행(U-226) 뒤로 고치고 M-7.5를 더했다.
   - M-8.4·M-8.5는 U-247(GUI의 읽기 제외·k 편집과 analyze-private 안내)이 병합된 main `bc9ea45`에서 고쳤고, M-3.18(GS-4: OS 알림과 클립보드)을 더했다(U-266).
+  - M-3.19(꾸러미 앱)는 main `aa91b04f`(2026-11-24)에서 더했다(GU-9 문서 현행화). 꾸러미는 [사용 안내](usage.md) 2절의 `npm run package`로 만든 로컬 zip이다.
 - 출처
   - `docs/reviews/2026-11-13-*.md`의 '검사하지 않은 범위'와 'PM 판단' 절
   - `docs/pm-status.md`의 '확인하지 않은 범위'
@@ -98,6 +99,7 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 | M-3.16 | 실행 중의 저장 거부와, 다른 편집기가 바꾼 뒤의 충돌 안내 | 없음 | — | U-184, U-172 |
 | M-3.17 | 파일 보기의 화면 낭독기와 키보드만 쓰기 | 없음 | NVDA는 선택 | U-174, U-184, E-5 |
 | M-3.18 | OS 알림과 클립보드에 가짜 키·가짜 가릴 값이 나가지 않는지(GS-4) | 없음 | — | GS-4, U-274, U-62, U-103 |
+| M-3.19 | 꾸러미 앱: 키 없이 시작한 점검 표시와 엔진 연결, 엔진 파일을 바꾼 사본의 다시 설치 안내, 창을 닫을 때 엔진 종료 | 없음 | 로컬 꾸러미(`npm run package`의 산출) | GU-9, D-7, D-9, CP-64 |
 | M-4.1 | FAT32·exFAT에서 적용·되돌리기 동의(CLI) | 없음 | 빈 USB 메모리 또는 VHD | DR-21, DR-25, U-119 |
 | M-4.2 | FAT32·exFAT에서 동의(GUI) | 없음 | 위와 같음 | DR-25, U-119 |
 | M-4.3 | 두 볼륨 사이 이동 | 없음 | 두 번째 볼륨 | 설계 조사 5.4 |
@@ -1407,6 +1409,48 @@ npm start                               # gui 폴더에서
 - 가림: `src/privacy/`, [개인정보 문서](privacy.md)
 
 **관련**: GS-4, U-274, U-62, U-103, R-73
+
+### M-3.19 꾸러미 앱의 시작·엔진 연결·변조 사본·닫기 (키 없음)
+
+**확인할 것**
+- 꾸러미의 `Codaryn.exe`를 키 없이 시작하면 창이 뜨고, 점검이 표시되고, 엔진이 연결되는지
+- 엔진 파일 하나를 바꾼 사본에서는 엔진이 뜨지 않고, 앱을 다시 설치하라는 안내가 보이는지
+- 창을 닫으면 엔진 호스트(`resources\node\node.exe`)도 끝나는지
+
+**여기서 못 한 까닭**: PM 자동 점검(CP-64, `.codaryn/pm-tools/evidence/gu9-check/results.json`)은 프로세스 수, 엔진 프로세스의 경로, 소켓, 종료 코드만 봤다. 창의 점검 표시와 오류 문구는 사람이 봐야 한다(D-9 "PM 자동 점검 + 사용자 화면 확인").
+
+**준비**
+- 꾸러미 폴더 `gui/out/Codaryn-win32-x64/`가 있어야 한다([사용 안내](usage.md) 2절). 같은 `gui/out`에 기록 파일 `Codaryn-win32-x64.record.json`이 없으면 그 꾸러미는 끝까지 만들어지지 않은 것이니 쓰지 않는다.
+- 0절의 점검 폴더에 꾸러미를 두 벌 복사하고, 한 벌의 엔진 파일 하나에 빈 줄을 더한다.
+
+```powershell
+$m = "$HOME\codaryn-manual"
+Copy-Item -Recurse gui\out\Codaryn-win32-x64 "$m\pkg"            # 저장소 루트에서
+Copy-Item -Recurse gui\out\Codaryn-win32-x64 "$m\pkg-changed"
+Add-Content "$m\pkg-changed\resources\engine\dist\src\app\index.js" ""   # 크기가 바뀐다
+Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyContinue   # 이 터미널에서만
+```
+
+**순서**
+1. `& "$m\pkg\Codaryn.exe"`로 띄운다. 창과 점검 표시를 본다.
+2. 작업 관리자의 "세부 정보"에서 `node.exe`를 찾아, 명령줄이나 위치가 `$m\pkg\resources\node\node.exe`인지 본다.
+3. 창을 닫는다. 몇 초 뒤 작업 관리자에서 그 `node.exe`가 없어졌는지 본다.
+4. `& "$m\pkg-changed\Codaryn.exe"`로 띄운다. 창의 오류 카드를 보고, 작업 관리자에서 `node.exe`가 없는지 본다. 창을 닫는다.
+
+**기대 결과**
+- 1: 창이 뜨고 점검 결과가 보인다(키가 없다는 표시가 있다). 엔진을 시작하지 못했다는 카드는 없다. 개발자 도구는 열리지 않는다.
+- 2: `node.exe`가 하나 있고 `pkg\resources\node\node.exe`에서 떴다. 설치된 다른 Node가 아니다.
+- 3: 그 `node.exe`가 끝난다(앱이 끝나면 엔진 호스트도 함께 끝난다, 설계 4.4).
+- 4: 엔진이 뜨지 않고, 카드에 "앱과 함께 설치된 엔진 파일이 바뀌었거나 빠져 있어 엔진을 시작하지 않았습니다. 앱을 다시 설치하세요."(영어면 "The engine files that came with the app have changed or are missing, so the engine was not started. Install the app again.")가 보인다.
+
+**결과**: NOT_RUN(2026-11-24 기준, 사람이 아직 보지 않았다)
+
+**다르면 볼 곳**
+- `gui/src/main/app.ts`(`startPackagedHost`), `gui/src/main/packaged-engine.ts`
+- `gui/scripts/package/package.mjs`, 기록 파일의 `files`
+- 문구: `gui/src/renderer/i18n/ko.ts`·`en.ts`의 `error.engine_integrity_failed`
+
+**관련**: GU-9, D-7, D-9, CP-64, [GU-9 제안서](design/gu9-packaging-proposal.md) 8절
 
 ---
 
@@ -2788,6 +2832,6 @@ $gc | Add-Member -NotePropertyName profiles -NotePropertyValue ([pscustomobject]
 
 ## 이 문서에 넣지 않은 것
 
-- **GUI 꾸러미, 코드 서명, SmartScreen, 설치 크기**(GU-9, E-4, E-6): 꾸러미 만들기가 아직 없다(`npm run package` 없음). 만들어지면 이 문서에 더한다.
+- **코드 서명, SmartScreen, 설치 파일과 그 크기**(E-6, GUI-D9): 서명과 설치 파일은 승인되지 않았다. 로컬 zip 꾸러미의 화면 확인은 M-3.19다(2026-11-24).
 - **WCAG 2.2 AA 자동 검사**: 도구 설치에 승인이 필요하다(설계 7절). M-3.3~M-3.7은 사람이 보는 몫이다.
 - **Windows arm64**: 지원이 미정이다(설계 9절).

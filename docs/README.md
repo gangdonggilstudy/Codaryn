@@ -1,8 +1,12 @@
 # Codaryn 개발 문서
 
-Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루프, 민감정보 처리, 검증과 협업 절차를 관리한다. 사용자가 제품 방향을 정하고 Codex가 최종 기술 판단과 개발 관리를 맡는다(위임 기간에는 임시 PM). 코딩과 토큰 사용이 많은 작업은 전문 페르소나를 지정한 Claude에 배정한다.
+Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루프, 민감정보 처리, 검증과 협업 절차를 관리한다. 사용자가 제품 방향을 정하고 Codex가 최종 기술 판단과 개발 관리를 맡는다(위임 기간에는 임시 PM). 지금은 `pm-control.json`의 active 위임에 따라 Claude `w3:pG`가 PM이며, 작업은 전문 페르소나를 지정해 현재 작업자 codex-worker와 claude-worker에게 배정한다(2026-11-22 사용자 결정).
 
-현재 상태(2026-11-13, main `3aca6b5`):
+현재 상태(CP-58 기준. 판정은 [임시 PM 상태](pm-status.md)의 최신 체크포인트가 우선한다):
+- 2026-11-15 사용자 결정으로 새 저장소에서 다시 시작했다. 그 전의 커밋 해시는 private `Codaryn-archive`의 이력을 가리킨다.
+- 실제 Anthropic API와 실제 OpenAI API는 아직 호출하지 않았다. 키 없는 Windows 수동 점검 12항목은 모두 NOT_RUN이고, 설치 패키지·서명·외부 게시(GU9/DR67)는 승인되지 않았다.
+
+당시 상태(2026-11-13, main `3aca6b5`):
 - 단계 1a·2·3의 오프라인 구현, 두 제공자(Anthropic, OpenAI), `codaryn models`가 main에 있다. 1b는 모의 API 검증까지다.
 - 그 위에 단계 4 범용 작업의 P0와 P1 묶음 가운데 Markdown 규칙(U-116), 앱 계층과 독립 GUI, 실행 중 권한 확인(엔진·앱 계층·CLI는 U-74, U-108~U-110, U-137, GUI의 OS 대화상자는 U-124)이 있다.
 - **실제 Anthropic API와 실제 OpenAI API는 한 번도 호출하지 않았다.**

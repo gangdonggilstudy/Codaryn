@@ -226,7 +226,7 @@
   - 환경 사본은 Windows에서 이름을 대소문자 없이 맞춘다(`app/environment.ts`). 앱 계층의 조립은 명령 실행기의 부모 환경을 이 사본에서 넘긴다(DR-4, `app/assemble.ts`, 코드 기준). DR-4의 두 경우는 [어댑터 계약 7.1절](design/adapter-contract.md)의 이행 검증 기준이다. 이행 당시의 검증 결과는 [CP51](pm-status.md)의 기존 기록을 따른다.
 - 진행 이벤트는 journal에 쓴 가림본 `JournalRecord` 그대로다(AC-D2). 사람용 문장은 어댑터가 문구 카탈로그(N-4)로 만든다.
 - 취소: 앱 계층과 GUI에서는 `handle.cancel()`로 모인다. CLI의 신호·취소 파일도 앱의 공통 취소 원천(`app/cancel.ts`)을 쓴다. `cli/cancel.ts`는 그 함수를 옛 이름으로 다시 내보내고, CLI는 프로세스 신호 포트를 주입해 공통 실행 수명에 연결한다. **연결됨**
-- 확인 질문 통로(AC 5.7)는 실행 중 권한 확인 전용이다(DR-1). 엔진은 `EngineDeps.confirm`으로 묻고(U-74), 앱 계층은 그것을 `RunObserver.confirm`으로 넘긴다(U-108). CLI는 터미널 질문(`cli/confirm.ts`, `cli/terminal.ts`)을 `createRunDisplay`의 관찰자에 두고 공통 조립·실행 수명에 연결한다(`src/cli/run.ts`의 `runThroughApp`). 형태는 DR-3(3절). **구현**
+- 확인 질문 통로(AC 5.9)는 실행 중 권한 확인 전용이다(DR-1). 엔진은 `EngineDeps.confirm`으로 묻고(U-74), 앱 계층은 그것을 `RunObserver.confirm`으로 넘긴다(U-108). CLI는 터미널 질문(`cli/confirm.ts`, `cli/terminal.ts`)을 `createRunDisplay`의 관찰자에 두고 공통 조립·실행 수명에 연결한다(`src/cli/run.ts`의 `runThroughApp`). 형태는 DR-3(3절). **구현**
 - 계획 승인은 실행 사이 확인 하나다(DR-1, GT-D4). 앱 계층에 `plan`, `applyPlan(runId, digest)`, `review`가 있고, CLI에는 같은 이름의 명령이 있다. **구현**
 - 변경 비교는 다시 가린 비교만 내준다. 비교는 앱 계층의 `changes`가 만들고, CLI `changes`와 GUI가 이것을 쓴다. 어댑터는 스냅샷 저장 형식을 직접 읽지 않는다(DR-7). **구현**
 - 프로세스 밖 어댑터용 줄 프로토콜(`--events jsonl`, `--confirm stdio`, AC-D7, AC-D8)은 **중단**(DR-20)이다. 연결되지 않았던 `src/cli/protocol/`은 지웠다(DR-66, U-81). `--cancel-file`은 `run`과 `apply`에 있다(실제 CLI, `--help`).
@@ -397,7 +397,7 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
   - GUI의 파일 보기(DR-72, U-174·U-184)는 앱 계층이 지금 가린 글만 그린다. 가리면 글이 달라지는 파일은 읽기 전용이라, 고칠 수 있는 파일은 화면의 글과 파일의 글이 같다. 등록 값이나 키 모양이 든 새 글은 저장하지 않는다(`text_refused`). 화면은 경로를 보내지 않고 메인이 준 항목 id와 편집 토큰만 쓴다. 코드 기준.
   - 계획 보기도 다시 가린 표기가 저장된 것과 같을 때만 보인다(DR-28).
   - 자료 분석(`analyze`)이 `read_file`로 읽은 표는 원자료 행이 모델로 간다. 가림은 등록한 비밀 값에만 적용된다. 그래서 개인정보가 든 표는 읽기 제외 경로 아래에 두고 `analyze-private`로 다룬다. 모델은 `query_table`의 집계만 받는다(GT-D8 (b), 사용자 확정 DR-23, DR-70. [민감정보 처리](privacy.md) 15절).
-  - 확인 질문의 글은 화면에 보이려고 복원하지 않는다(AC 5.7). 확인 질문 자체가 아직 없다(DR-3).
+  - 확인 질문의 글은 화면에 보이려고 복원하지 않는다(AC 5.9). 확인 질문 자체가 아직 없다(DR-3).
 
 **도구 실행(`src/tools/command-runner.ts`).**
 - 자식 환경

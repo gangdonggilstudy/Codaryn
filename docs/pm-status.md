@@ -40,6 +40,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-65, 2026-11-24) — 계약 층 시험 넓힘, CLI 구조 문서 현행화, 문서 정리
+
+- **사용자 선택(2026-11-24):** 남은 오프라인 코드 작업 가운데 "계약 층 시험 마저 채우기". PM이 앞 질문에서 CLI 구조 이행을 "앱 계층이 `src/cli` 파일 9개를 가져다 쓴다"고 설명했으나, 이는 낡은 문서를 따른 것이었다. 코드에는 `src/app` → `src/cli` 의존이 하나도 없다(아래). 사용자에게 정정했다.
+- **계약 층 시험 채택(`d692e8d6`, worker `583047ff`):** `gui/tests/unit/cli-host-contract.test.ts`·`cli-host-contract-support.ts`. 실제 CLI child와 별도 실제 엔진 호스트 child로 같은 사례를 돌려 저장 result·journal 전체를 비교한다(CP53 정규화 그대로). C-1 검증 실패→재수정→통과, C-2 도구 호출 한도(각 쪽이 첫 호출만 실행, 두 번째 파일 없음, toolCalls 1), C-3 모델 요청 중 취소(CLI 취소 파일 ↔ 호스트 `cancelRun`, 요청 기록 뒤의 취소까지만 보인다), C-4 답 없는 권한 질문(두 쪽 모두 `deny`/`by: "default"` 두 번, 시험 안 루프백 가짜 API — PM이 허용, 바깥 연결 0, 경로 치환 0을 단언, 가짜 키 부재를 불리언으로 단언). 두 쪽 차이는 발견되지 않았다. claude-worker 구현 → codex-worker 독립 검토 H0/M1(C-2가 같은 위반을 놓칠 수 있음)/L2/정보1, 사본 독립 실행 4/4 → 보완(PM 검토). PM 환경 GUI 507건(505 통과·2 건너뜀·실패 0), 연기 시험 227/227.
+- **설계 12절의 남은 계약 분기:** 사람의 거부(`by: "user"`), 질문 중 취소(`by: "cancelled"`), 질문 대기의 시간 한도(`max_duration`)는 CLI 자식을 터미널 없이 띄우는 지금 방식으로 만들 수 없어 비교하지 않았다(시험 머리 주석). 12절 계약 층은 **전부 완료가 아니다.**
+- **CLI 구조(DR-65) 문서 현행화(`dd8210d0`, worker `7ddac9d5`):** codex-worker가 코드로 확인했다: `src/app` 66개 파일에서 CLI를 향한 정적·동적 import·require·경로 문자열 의존 0, CLI는 실행 준비·조립·수명, 보고·되돌리기·실행 목록, doctor·models·init의 공통 core를 앱과 공유. 이행 2의 원래 단일 공개 창구(`startRun`) 형태와 CLI 고유 인자·질문·출력은 남는다. architecture·roadmap·progress의 "앱 계층 이행 덜 됨", "앱의 아홉 파일이 `src/cli`를 씀(AC-D16)" 같은 현재형을 고쳤다(날짜 붙은 기록은 그대로).
+- **그 밖의 문서 정리:** 실제 API 점검 설명(`4f0922c1`, `6643d54c`), GU-9 문서 현행화(`32cfe154`), DR-63 현황과 계약 층 시험 한 사례(`2274e446`, `944e0e82`), 권한 질문의 옛 절 번호 "AC 5.7" → 어댑터 계약 5.9(`d692e8d6`에 포함).
+- **운영:** codex-worker 창의 Codex 세션 ID가 READY 직후 두 값 사이를 다시 오갔다(contract-review-codex-01). 수동 ACK와 이름 복구로 처리했다(`.codaryn/pm-tools/receipts/contract-review-codex-01-manual-ack.json`).
+- 남은 것: 사용자의 꾸러미 화면 확인(M-3.19), 실제 API 3.1, 키 없는 수동 12항목, 계약 층의 남은 세 분기, 서명·설치 파일·외부 게시(GUI-D9, 미승인), E-5·E-6 보류.
+
 ## 진행 요약 (CP-64, 2026-11-24) — GU-9 꾸러미 스크립트 채택, 첫 로컬 꾸러미와 PM 자동 점검
 
 - **꾸러미 스크립트 채택(`27115387`, worker `8f5d450d`):** `npm run package -- --electron-zip-dir <폴더> --node-exe <node.exe> --node-license <LICENSE>`. 입력은 파일 접근 전에 로컬 경로 규칙(UNC·장치 거부)으로 검사하고 Electron zip·node.exe·Node LICENSE를 SHA-256으로 고정, 내려받지 않음(`electronZipDir`, `download` 없음), packager 임시 폴더를 자기 준비 폴더 안으로 한정(packager 기본값은 `%TEMP%\electron-packager`를 통째로 지움), 빌드 파일은 허용 목록(확장자·위치, 숨은 이름 거부)으로만 고르고 그 밖의 파일이 있으면 멈춤, 복사본을 앱의 시작 확인으로 다시 대조, fuse 9개를 strict로 설정하고 다시 읽음, 산출을 덮어쓰지 않음, 기록 파일은 끝까지 성공한 실행만 마지막에 남김. 시작 확인은 꾸러미 루트 `package.json`(이름 `codaryn`)까지 포함해 엔진의 `installDir`이 꾸러미 폴더 전체가 된다. claude-worker 구현 → codex-worker 독립 보안 검토 H0/M3/L1 → 보완 → 재검토 L1 → 보완(PM 검토). PM 환경 GUI 503건(501 통과·2 건너뜀·실패 0), 연기 시험 227/227. main 위 patch가 worker patch(`4e526949`)와 같다.

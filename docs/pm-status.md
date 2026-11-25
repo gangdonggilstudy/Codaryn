@@ -40,6 +40,23 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-71, 2026-11-27) — 개선 검토 D 수정 대부분, 개선 검토 E의 E1~E6, 상태 폴더 링크 거부
+
+- **개선 검토 D(GUI) 수정:**
+  - 설정 적용 뒤 늦게 온 트리·변경 응답이 옛 가림 규칙의 항목에 새 id를 받던 것을 막았다. 리셋 세대를 보고 기존 `unknown_entry`로 거부한다. 리셋 세대 함수는 RD-1에 따라 필수 인자다. IR-D7 상태 저장은 큐 하나로 묶었다(`768e8053`).
+  - 렌더러의 늦은 응답(IR-D1 설정 저장, IR-D2 변경 보기)을 막았고, 작업 공간별 마지막 형태가 전달되게 했다(IR-D3, `1a478884`).
+  - GUI 상태 파일이 읽기 상한(UTF-16 262,144)을 넘지 않게 오래된 실행 기억부터 줄인다. 메모리와 파일은 같다. 읽기는 같은 handle로 786,433바이트까지만 한다(IR-D5·D6, `990b1213`).
+  - 남은 것은 IR-D4(언어 재구성마다 구독 누적)와 RR-1(둘째 실행·명령줄 열기의 마지막 형태, main 쪽)이다.
+- **개선 검토 E(저장소·엔진·스크립트) 수정:**
+  - E3: 검증 회차의 상태 점검 뒤에도 취소·기한을 다시 본다(`1db933d2`). E3R-1에 따라 점검이 없는 구성에서 취소를 더 늦게 관찰하는 것도 허용한다. 끝 점검 도중의 취소는 이미 정한 끝을 바꾸지 않는다. 이 점을 사용 문서에 적는 일(E3R-2)이 남았다.
+  - E4·E5·E6: 비밀 검사가 hunk 상태를 추적하고 NUL 경로·Git quoting을 읽는다. index 조회 실패는 finding으로 친다. branch 검사는 커밋별 본문을 본다. 검토 의견 GR-1에 따라 gitlink는 건너뛰고, GR-2에 따라 조합 diff는 exit 2로 거부한다(`76126e3d`). 새 검사기를 이 저장소의 tracked 전체·범위·staged·병합 자체에 돌려 오탐이 없음을 확인했다.
+  - **E1(보안):** `.codaryn`이나 `runs`가 처음부터 링크(junction·symlink)면 run의 잠금·journal·result·snapshot이 작업 공간 밖에 쓰였다(재현됨). 이제 쓰기 전에 거부하고, 새 code `state_dir_not_plain`(종료 2, state, 재시도 아님)을 run·apply·revert·review·GUI 적용 점검·GUI 글 저장이 함께 쓴다(PM 결정 안 A, `d1bbd080`). cleanup은 아직 빈 목록·`internal_error`라 다음 단위다. 검토 의견 E1R-1(store를 직접 부를 때 현재 run mark)·E1R-2(시험 단언)는 고치는 중이다.
+  - E2: state-guard·revert·applied·result·plan reader가 lstat 뒤 커진 파일을 끝까지 읽던 것을, 같은 handle의 제한 읽기(`readBounded`)로 바꿨다. 새 code는 없다(`43b26552`). 상한 없는 나머지 읽기(잠금·journal·변경 기록 등)는 검토자의 위험 순서대로 고치는 중이다.
+- **IR-C2:** data_checks가 표를 읽는 중에도 취소 신호를 본다. 계약 변경은 없고 내부 전달만 한다. 후보 `f90f86e4`는 독립 검토 중이다.
+- **운영:** 작업자 단위가 세 번 시작 직후 멈췄다(GUI 상태 파일 두 번, E1 한 번). 모두 PM이 소유 파일을 좁게 준 탓이었다. 이후로는 지시 전에 바뀌는 형·반환의 호출자와 옛 호출을 감싼 시험 대역을 찾아 소유에 넣는다. Codex 세션 ID 변동으로 ACK가 거절되면 수동 수신 기록으로 처리했다.
+- **PM 측정(합친 판마다 프로젝트 스크립트, 실패 0):** `43b26552`에서 unit 4,562건(4,551 통과·10 건너뜀(POSIX symlink 4 포함)·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), GUI 758건(756 통과·2 건너뜀), 연기 시험 227/227. `review-branch.test.mjs`는 unit glob 밖이라 보드에서 따로 돌린다(4/4).
+- 남은 것: C2 채택, E1R-1·E1R-2, 남은 제한 읽기, cleanup의 `state_dir_not_plain`, IR-D4, RR-1, E3R-2 문서, 쓰이지 않게 된 `createRunVerify`의 `integrity` 인자 정리, 설정 화면 "다음 실행부터 적용" 안내(낮음), GUI 시험 3에 `plan_checked`(OF-2), 사용자의 꾸러미 화면 확인(M-3.19), 실제 API 3.1, 키 없는 수동 12항목, GUI-D9(미승인), E-5·E-6 보류.
+
 ## 진행 요약 (CP-70, 2026-11-27) — 개선 검토 C 수정 끝(C3·C3R-1·C4), OFG-2, GUI 정리, 개선 검토 D·E 시작
 
 - **OFG-2(`096f10c8`):** GUI 엔진 호스트가 apply 전용 기록(`apply_started`·`plan_checked`·`file_moved`·`file_discarded`·`plan_item_failed`)만 `applyProgressLine`에 넘기고 나머지는 `progressLine`으로 보낸다(선택 A). 같은 사건이 렌더러 안에서 두 번 처리되던 것이 없어졌다. CLI 쪽 u52 시험은 GUI 순서를 따로 고정했다(`ac1f2804`).

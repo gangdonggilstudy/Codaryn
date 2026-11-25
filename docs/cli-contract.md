@@ -1299,6 +1299,7 @@ codaryn review <task 형식> --run <runId|latest> (--accept | --reject) [--note 
 
 - 대상: `needs-input`/`awaiting_review`로 끝난 실행. 다른 실행이면 `run_not_awaiting_review`(종료 2)다.
 - 판정을 `review.json`에 쓴다(`ReviewRecord`). 다시 판정하면 이전 판정을 바꾸고 출력에 `replaced`가 나온다. `result.json`은 바뀌지 않는다. 검토로 실행이 `done`이 되지는 않는다.
+- IR-F3(U-220): 판정 저장 뒤 작업 공간 잠금을 해제하지 못해도 성공 결과와 기존 종료 코드(받아들임·거절 모두 0)를 유지한다. 이때만 앱과 `review --json`의 `ReviewOutput`에 `lockLeft: true`가 있으며, 사람용 글 끝에는 기존 `lock.release_failed` 안내를 한 번 붙인다. 정상 해제 때는 필드와 안내가 없어 결과·출력·종료 코드가 그대로다. 저장 전 실패는 기존 오류이며, 해제 실패가 그 오류를 덮어쓰지 않는다. `review.json`과 `result.json`에는 lockLeft를 쓰지 않는다. 남은 잠금은 U-176의 기존 판정·회수 규칙을 따른다.
 - 메모
   - `MAX_REVIEW_NOTE_CHARS`(500)자 이하
   - 키 모양이 있으면 `key_in_file`

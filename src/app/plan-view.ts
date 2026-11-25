@@ -510,6 +510,7 @@ export async function recordReview(
   if (!lock.ok && lock.code === "state_dir_not_plain") return { ok: false, outcome: cliError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE) };
   if (!lock.ok) return { ok: false, outcome: cliError("workspace_locked", "another run or revert holds the workspace; nothing was written") };
   let replaced: boolean;
+  let lockLeft = false;
   try {
     replaced = (await readReviewRecord(workspaceRoot, runId).catch(() => null)) !== null;
     await writeReviewRecord(workspaceRoot, {
@@ -523,7 +524,12 @@ export async function recordReview(
   } catch {
     return { ok: false, outcome: cliError("internal_error", "the review could not be written; review.json was left as it was") };
   } finally {
-    await releaseLock({ workspaceRoot, runId: lockId });
+    // IR-F3, U-220: release failure must not replace a saved verdict or the write's own error.
+    try {
+      await releaseLock({ workspaceRoot, runId: lockId });
+    } catch {
+      lockLeft = true;
+    }
   }
   const output: ReviewOutput = {
     schemaVersion: RESULT_SCHEMA_VERSION,
@@ -533,6 +539,7 @@ export async function recordReview(
     exitCode: REVIEW_EXIT_CODES[request.verdict],
     checklist: review.checklist,
     replaced,
+    ...(lockLeft ? { lockLeft: true as const } : {}),
   };
   if (!request.revertLine) return { ok: true, output };
   // U-131 (N3): a rejected run that changed files: how to undo them, with the workspace as typed.

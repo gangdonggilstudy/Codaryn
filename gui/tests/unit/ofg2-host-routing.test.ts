@@ -144,7 +144,7 @@ for (const language of ["ko", "en"] as const) {
 }
 
 test("OFG-2: null and exceptions never try another renderer, for run and apply records", () => {
-  for (const type of ["integrity_checked", "apply_started", "future_record"]) {
+  for (const type of ["integrity_checked", "apply_started", "plan_checked", "future_record"]) {
     for (const throws of [false, true]) {
       const calls: string[] = [];
       const method = (name: string) => () => { calls.push(name); if (throws) throw new Error("synthetic renderer failure"); return null; };

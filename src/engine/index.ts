@@ -159,7 +159,7 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
   const { checkIntegrity, checkAtEnd, checkState, checkStateAtEnd, checkPoint, noteActivity } = checks;
   const { handleCall } = createRunTools(tally, task, tools, policy, privacy, offered, mask, maskJson, record, errorResult, denied, execute, unknownTool, invalidArgsOf, executeWorkflow, finishWorkflowCall, askPermission, checkState);
   const { endedByModelError, budgetStop, start, converse } = createRunConverse(tally, task, model, privacy, limits, settings, approved, offeredBuiltin, offeredWorkflow, runSignal, mask, maskJson, interrupted, record, recordableCalls, noteActivity, handleCall);
-  const { verify, repair, checkApprovedPlan } = createRunVerify(tally, task, verifiers, settings, limits, integrity, policy, runSignal, mask, interrupted, record, checkPoint, checkState, noteActivity, budgetStop);
+  const { verify, repair, checkApprovedPlan } = createRunVerify(tally, task, verifiers, settings, limits, policy, runSignal, mask, interrupted, record, checkPoint, checkState, noteActivity, budgetStop);
 
   const runLoop = async (): Promise<End> => {
     const system = await start();

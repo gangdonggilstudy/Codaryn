@@ -79,6 +79,24 @@ async function mockPartsOf(): Promise<MockParts> {
 }
 export const mockApi = (): Promise<MockApi> => mockPartsOf();
 
+/** The variable the tests' terminal preload reads (it lives in tests/; product code does not read it). */
+const TERMINAL_ENV = "CODARYN_TEST_TERMINAL";
+/** C-5 to C-7: the terminal preload (built into dist/tests) and the first sentence of the CLI's question. */
+interface TerminalParts { readonly url: string; readonly questionLead: string }
+let terminalParts: TerminalParts | null = null;
+async function terminalPartsOf(): Promise<TerminalParts> {
+  if (terminalParts !== null) return terminalParts;
+  const file = path.join(ROOT, "dist", "tests", "unit", "cli", "u110-terminal-preload.js");
+  assert.ok(existsSync(file), `build prerequisite: ${file}`);
+  const i18n = await load<{ createMessageCatalog(language: "en"): { format(id: string, params: { count: number }): string } }>("src", "i18n", "index.js");
+  // The question as the catalog writes it (confirm.question.command); its first sentence is the same at every count.
+  const text = i18n.createMessageCatalog("en").format("confirm.question.command", { count: 0 });
+  const questionLead = text.slice(0, text.indexOf("?") + 1);
+  assert.ok(questionLead.length > 10, "the question's first sentence");
+  terminalParts = { url: pathToFileURL(file).href, questionLead };
+  return terminalParts;
+}
+
 export interface QuickRun {
   readonly goal: string;
   /** The model's replies; each side's own fake API gives the same ones in order. */
@@ -98,8 +116,20 @@ export interface ContractCase {
   readonly quick?: QuickRun;
   /** Cancel once the journal holds this many model_request records: CLI `--cancel-file`, host `cancelRun`. */
   readonly cancelAt?: number;
-  /** The host side's answer to each question (as the main process answers when it cannot ask). Absent: a question fails the case. */
-  readonly answer?: "dismissed";
+  /**
+   * The host side at each question, as the main process does it: "dismissed" (C-4: nobody could ask),
+   * "deny" (the person's no, the dialog's Deny or Esc), "cancel" (cancelRun while the question is open),
+   * "none" (no answer: the engine's time limit ends the question). Absent: a question fails the case.
+   */
+  readonly answer?: "dismissed" | "deny" | "cancel" | "none";
+  /**
+   * C-5 to C-7: the CLI child at a terminal, as the tests' preload makes it (tests/unit/cli/
+   * u110-terminal-preload.ts, `--import`: only `isTTY` of stdin and stderr changes; stdin is a pipe),
+   * so main.ts gives the run its question (`ask`). At each question on stderr: "deny" types `n`,
+   * "interrupt" types Ctrl+C (0x03, readline's interrupt, which the CLI turns into SIGINT), "none" types
+   * nothing. Absent: no terminal, so the CLI does not ask (C-1 to C-4).
+   */
+  readonly cliTerminal?: "deny" | "interrupt" | "none";
 }
 export interface SideRun extends Stored {
   /** Every workspace file outside `.codaryn` after the run: relative path → text. */
@@ -115,6 +145,10 @@ export interface PairRun {
   readonly bases: { readonly cli: string; readonly host: string };
   /** The question ids the host sent, in order. */
   readonly questions: readonly string[];
+  /** The question ids the host ended itself (questionEnded: the run's signal ended them), in order. */
+  readonly questionsEnded: readonly string[];
+  /** How many questions the CLI wrote on stderr (its terminal cases), as the answering loop counted them. */
+  readonly cliQuestions: number;
   /** A quick case: what each side's fake API received. */
   readonly requests: { readonly cli: readonly RecordedRequest[]; readonly host: readonly RecordedRequest[] } | null;
 }
@@ -144,20 +178,30 @@ interface CliRun {
   readonly ended: Promise<{ code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }>;
   readonly kill: () => void;
   readonly closed: () => boolean;
+  /** stderr so far (the terminal cases watch it for the question). */
+  readonly stderrNow: () => string;
+  /** Types into the CLI's stdin (a terminal case only; nothing once the process ended). */
+  readonly type: (text: string) => void;
+  /** Closes the CLI's stdin (a terminal case only). */
+  readonly endInput: () => void;
 }
-function startCli(base: string, args: readonly string[], env: Record<string, string>, nodeArgs: readonly string[]): CliRun {
-  const child = spawn(process.execPath, [...nodeArgs, CLI, ...args], { cwd: base, env, stdio: ["ignore", "pipe", "pipe"], shell: false, windowsHide: true });
+function startCli(base: string, args: readonly string[], env: Record<string, string>, nodeArgs: readonly string[], stdinPipe = false): CliRun {
+  const child = spawn(process.execPath, [...nodeArgs, CLI, ...args], { cwd: base, env, stdio: [stdinPipe ? "pipe" : "ignore", "pipe", "pipe"], shell: false, windowsHide: true });
+  // A write after the child ended is dropped, not an error of the case.
+  child.stdin?.on("error", () => undefined);
+  // Both are pipes (stdio above); the conditional stdin only widens the typings.
+  const out = child.stdout!, err = child.stderr!;
   let closed = false, stdout = "", stderr = "", failure: Error | null = null;
   const ended = new Promise<{ code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }>((resolve, reject) => {
-    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    out.setEncoding("utf8"); err.setEncoding("utf8");
     const append = (channel: "stdout" | "stderr", text: string): void => {
       if ((channel === "stdout" ? stdout.length : stderr.length) + text.length > CAPTURE_LIMIT) {
         failure = new Error(`CLI ${channel}: capture limit`); child.kill(); return;
       }
       if (channel === "stdout") stdout += text; else stderr += text;
     };
-    child.stdout.on("data", (text: string) => append("stdout", text));
-    child.stderr.on("data", (text: string) => append("stderr", text));
+    out.on("data", (text: string) => append("stdout", text));
+    err.on("data", (text: string) => append("stderr", text));
     child.once("error", (error) => { failure = error; reject(error); });
     child.once("close", (code, signal) => {
       closed = true;
@@ -165,7 +209,14 @@ function startCli(base: string, args: readonly string[], env: Record<string, str
     });
   });
   ended.catch(() => undefined); // awaited by the case; this only keeps an early failure from going unhandled
-  return { ended, kill: () => child.kill(), closed: () => closed };
+  return {
+    ended,
+    kill: () => child.kill(),
+    closed: () => closed,
+    stderrNow: () => stderr,
+    type: (text) => { if (!closed && child.stdin !== null && !child.stdin.destroyed) child.stdin.write(text); },
+    endInput: () => { if (child.stdin !== null && !child.stdin.destroyed) child.stdin.end(); },
+  };
 }
 
 /** Complete journal lines of the one run so far (a line still being written is left out). */
@@ -351,6 +402,9 @@ export async function runContractPair(t: TestContext, c: ContractCase): Promise<
   assert.ok(Number(process.versions.node.split(".")[0]) >= 26, "Node26 prerequisite");
   for (const file of [CLI, HOST, path.join(ENGINE, "app", "index.js")]) assert.ok(existsSync(file), `build prerequisite: ${file}`);
   const mock = quick === undefined ? null : await mockPartsOf();
+  // A terminal case asks: a quick run (a settings rule makes the question) with a host answer to compare.
+  if (c.cliTerminal !== undefined) assert.ok(quick !== undefined && c.answer !== undefined && c.answer !== "dismissed", "a terminal case is a quick case with a host answer");
+  const terminal = c.cliTerminal === undefined ? null : await terminalPartsOf();
   const parent = await fs.realpath(os.tmpdir());
   const base = await fs.mkdtemp(path.join(parent, `codaryn-cli-host-contract-${c.name}-`));
   assert.ok(!path.resolve(base).toLowerCase().startsWith(ROOT.toLowerCase() + path.sep), "TEMP outside installation");
@@ -377,6 +431,7 @@ export async function runContractPair(t: TestContext, c: ContractCase): Promise<
     }
     if (running !== null && !running.closed()) {
       const owned = running;
+      owned.endInput(); // a question still waiting ends as no answer
       if (c.cancelAt !== undefined) {
         await fs.writeFile(cancelFile, "", "utf8").catch(() => undefined);
         await within(owned.ended, 30_000, "CLI cancel cleanup").catch(() => undefined);
@@ -435,13 +490,30 @@ export async function runContractPair(t: TestContext, c: ContractCase): Promise<
   live("its CLI"); // spawn is synchronous: `running` is set before the cleanup can run
   const cliRun = mock === null
     ? startCli(cli.base, cliArgs, cli.env, [])
-    : startCli(cli.base, cliArgs, { ...cli.env, [mock.guardEnv]: guardLog }, ["--import", mock.guardUrl]);
+    : terminal === null
+      ? startCli(cli.base, cliArgs, { ...cli.env, [mock.guardEnv]: guardLog }, ["--import", mock.guardUrl])
+      : startCli(cli.base, cliArgs, { ...cli.env, [mock.guardEnv]: guardLog, [TERMINAL_ENV]: "stdin,stderr" }, ["--import", mock.guardUrl, "--import", terminal.url], true);
   running = cliRun;
   if (c.cancelAt !== undefined) {
     await reach(cli.work, c.cancelAt, () => !cliRun.closed(), "CLI");
     await fs.writeFile(cancelFile, "", { encoding: "utf8", flag: "wx" });
   }
+  // C-5 to C-7: what the CLI's terminal types at each question it writes on stderr: each answer goes
+  // once its question is there (stderr is looked at every 25 ms), and "none" types nothing at all.
+  let cliQuestions = 0;
+  const typing = terminal === null ? Promise.resolve() : (async () => {
+    while (!cliRun.closed()) {
+      const asked = cliRun.stderrNow().split(terminal.questionLead).length - 1;
+      for (; cliQuestions < asked; cliQuestions += 1) {
+        if (c.cliTerminal === "deny") cliRun.type("n\n");
+        else if (c.cliTerminal === "interrupt") cliRun.type("\u0003");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  })();
   const cliEnd = await within(cliRun.ended, 60_000, "CLI completion");
+  await typing;
+  cliRun.endInput();
   if (mock !== null) assert.equal(existsSync(guardLog) ? readFileSync(guardLog, "utf8") : "", "", "the CLI reached no host but loopback");
   const cliJson = object(JSON.parse(cliEnd.stdout), "whole CLI stdout");
   const cliStored = await readStored(cli.work, cliJson.runId);
@@ -459,7 +531,7 @@ export async function runContractPair(t: TestContext, c: ContractCase): Promise<
   const owned = started.host;
   host = owned;
   assert.notEqual(owned.pid, process.pid, "host is a separate process");
-  const messages: HostRunMessage[] = [], collectorErrors: string[] = [], questions: string[] = [];
+  const messages: HostRunMessage[] = [], collectorErrors: string[] = [], questions: string[] = [], questionsEnded: string[] = [];
   const answering: ReturnType<EngineHost["call"]>[] = [];
   const done = Promise.withResolvers<unknown>();
   done.promise.catch(() => undefined);
@@ -470,11 +542,20 @@ export async function runContractPair(t: TestContext, c: ContractCase): Promise<
       if (message.type === "question") {
         if (c.answer === undefined) throw new Error("unexpected question message");
         questions.push(message.question.id);
-        const sent = owned.call("answerQuestion", { run: message.run, id: message.question.id, decision: c.answer }, 10_000);
-        sent.catch(() => undefined);
-        answering.push(sent);
+        // "none" answers nothing; "cancel" cancels the run while the question is open (handle.cancel, AC 5.3).
+        const sent = c.answer === "none" ? null
+          : c.answer === "cancel" ? owned.call("cancelRun", { run: message.run }, 10_000)
+          : owned.call("answerQuestion", { run: message.run, id: message.question.id, decision: c.answer }, 10_000);
+        if (sent !== null) {
+          sent.catch(() => undefined);
+          answering.push(sent);
+        }
       }
-      if (message.type === "questionEnded") throw new Error("unexpected questionEnded message");
+      if (message.type === "questionEnded") {
+        // Only the run's signal ends a question on the host's side (a cancel, or the time limit).
+        if (c.answer !== "cancel" && c.answer !== "none") throw new Error("unexpected questionEnded message");
+        questionsEnded.push(message.id);
+      }
       if (message.type === "done") { hostDone = true; done.resolve(message.outcome); }
     } catch (error) { collectorErrors.push(String(error)); done.reject(error); }
   });
@@ -495,7 +576,7 @@ export async function runContractPair(t: TestContext, c: ContractCase): Promise<
   const ipc = await within(done.promise, 60_000, "host done");
   for (const answered of await Promise.all(answering)) {
     assert.ok(answered.ok, JSON.stringify(answered));
-    assert.deepEqual(answered.value, { ok: true }, "the host took the answer");
+    assert.deepEqual(answered.value, { ok: true }, "the host took the answer (or the cancel)");
   }
   const hostStored = await readStored(gui.work, value.runId);
   if (mock !== null) {
@@ -520,6 +601,8 @@ export async function runContractPair(t: TestContext, c: ContractCase): Promise<
     messages,
     bases: { cli: cli.base, host: gui.base },
     questions,
+    questionsEnded,
+    cliQuestions,
     requests: apis === null ? null : { cli: [...apis[0].requests], host: [...apis[1].requests] },
   };
 }

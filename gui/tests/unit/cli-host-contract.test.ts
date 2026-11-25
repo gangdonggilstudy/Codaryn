@@ -2,16 +2,16 @@
  * Contract-layer cases after CP53 (standalone-gui 8.3, 12): the same run through the real CLI and a
  * separate real engine host ends the same way, with the same stored result and journal.
  *
- * 이 시험이 다루지 않는 계약 분기 (adapter-contract 5.9; standalone-gui 12절의 남은 범위):
- * - 사람의 거부: `confirmation_answered {decision: "deny", by: "user"}` (의미 3). The CLI asks in a
- *   terminal only, and a CLI child without one dismisses (C-4 covers that default deny).
- * - 질문 중 취소: `by: "cancelled"`, the run `cancelled` (의미 7). C-3 cancels during a model request,
- *   not during a question; it is no stand-in for this branch.
- * - 질문 대기의 시간 한도: the question ends `by: "default"` and the run `budget-exhausted`/`max_duration`
- *   (의미 6).
+ * The permission question's branches (adapter-contract 5.9): C-4 the default deny of a CLI without a
+ * terminal (meaning 3, `by: "default"`); C-5 the person's deny (`by: "user"`); C-6 a cancel while the
+ * question waits (meaning 7, `by: "cancelled"`, the run `cancelled`); C-7 no answer until the run's time
+ * limit (meaning 6, `by: "default"`, `budget-exhausted`/`max_duration`). The CLI asks at a terminal only
+ * (main.ts), so C-5 to C-7 give the real CLI child one with the tests' preload (`--import`, only `isTTY`
+ * of stdin and stderr changes; product code does not); C-3 cancels during a model request instead.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { TestContext } from "node:test";
 import { object, sha } from "./cli-host-parity-support.js";
 import type { Obj, Stored } from "./cli-host-parity-support.js";
 import { assertIPCView, compare, compareRequests, fakeKeyAbsent, mockApi, runContractPair, shownRequests, sidePlaces } from "./cli-host-contract-support.js";
@@ -208,4 +208,116 @@ test("C-4 (c) permission question default deny and its by value: CLI and separat
   };
   assert.deepEqual(keyFree, { stored: true, workspace: true, hostMessages: true, requestBodies: true, diagnostic: true }, "the fake key value is absent");
   t.diagnostic(diagnostic);
+});
+
+/** C-7's run time limit: long enough to reach the first question, short enough for the case (PM Q-3). */
+const QUESTION_LIMIT_MS = 4_000;
+
+/**
+ * C-5 to C-7: C-4's quick run (its goal, replies, config and asking rule), with the CLI child at a
+ * terminal so it asks (`cliTerminal`) and the host doing what its main process would (`answer`).
+ */
+async function askedPair(t: TestContext, name: string, cliTerminal: "deny" | "interrupt" | "none", answer: "deny" | "cancel" | "none", maxDurationMs: number): Promise<PairRun> {
+  const mock = await mockApi();
+  const asked = (word: string) => mock.toolUse(`toolu_${word}`, "run_command", { executable: NODE, args: ["-e", `require('fs').writeFileSync('ran-${word}.txt', '')`] });
+  return runContractPair(t, {
+    name,
+    files: { "notes.md": NOTES },
+    quick: {
+      goal: "Run the two checks.",
+      replies: [mock.replyTools([asked("one")]), mock.replyTools([asked("two")]), mock.replyText("Both checks are asked.")],
+      config: (url) => mock.fakeApiConfig(url, {
+        language: "en",
+        model: "fake-model",
+        maxRetries: 0,
+        limits: { maxModelTurns: 6, maxToolCalls: 6, maxTotalTokens: 200_000, maxDurationMs },
+        policy: { commands: [{ executable: NODE, argsPrefix: ["-e"], allowExtraArgs: true, confirm: true }], network: "deny", destructive: "deny", restorePathTokens: false },
+      }),
+    },
+    answer,
+    cliTerminal,
+  });
+}
+
+/** A side's question records as C-4 shows them (the shape n20 pins for the CLI). */
+function questionRecords(side: Stored): Obj[] {
+  return side.records.filter((r) => ["confirmation_requested", "confirmation_answered", "tool_decision", "tool_result"].includes(String(r.type))).map((r) => {
+    if (r.type === "confirmation_requested") return { type: r.type, kind: r.kind, id: r.id, callId: r.callId, tool: r.tool, permission: r.permission };
+    if (r.type === "confirmation_answered") return { type: r.type, id: r.id, decision: r.decision, by: r.by };
+    if (r.type === "tool_decision") return { type: r.type, callId: r.callId, stage: r.stage, allowed: r.allowed, permission: r.permission, code: r.code };
+    const result = object(r.result, "tool result");
+    return { type: r.type, callId: result.callId, ok: result.ok, errorCode: result.errorCode };
+  });
+}
+
+/**
+ * The records each question leaves: asked, answered `deny` with `by`, the call's denial; then its
+ * tool_result only when the run goes on (an answer). A cancel or the time limit ends the run at the
+ * question, so no result goes back to the model (engine askPermission, U-137).
+ */
+function expectedQuestions(words: readonly string[], by: "user" | "cancelled" | "default", goesOn: boolean): Obj[] {
+  return words.flatMap((word, index) => [
+    { type: "confirmation_requested", kind: "permission", id: `q${index + 1}`, callId: `toolu_${word}`, tool: "run_command", permission: "command" },
+    { type: "confirmation_answered", id: `q${index + 1}`, decision: "deny", by },
+    { type: "tool_decision", callId: `toolu_${word}`, stage: "policy_effective", allowed: false, permission: "command", code: "confirmation_required" },
+    ...(goesOn ? [{ type: "tool_result", callId: `toolu_${word}`, ok: false, errorCode: "policy_denied" }] : []),
+  ]);
+}
+
+/** Both sides' question records, then what C-4 checks after them: strict comparison, fake APIs, no side folder, IPC, no fake key. */
+function sameAsked(t: TestContext, label: string, pair: PairRun, expected: readonly Obj[], modelRequests: number): void {
+  for (const [name, side] of [["cli", pair.cli], ["host", pair.host]] as const) {
+    assert.deepEqual(questionRecords(side), expected, `${name}: the question records`);
+    assert.equal(count(side, "model_request"), modelRequests, `${name}: model requests`);
+    assert.equal(usageOf(side).toolCalls, 0, `${name}: no asked command was carried out`);
+    assert.deepEqual(side.workspace, { "notes.md": NOTES }, `${name}: no asked command ran`);
+  }
+  assert.ok(pair.cliQuestions >= expected.filter((r) => r.type === "confirmation_requested").length, "the CLI asked at its terminal (stderr)");
+  compare(pair.cli, pair.host);
+  assert.equal(compareRequests(pair), modelRequests, "the same requests to each side's fake API");
+  const places = {
+    storedCli: sidePlaces({ result: pair.cli.result, records: pair.cli.records }, pair.bases.cli),
+    storedHost: sidePlaces({ result: pair.host.result, records: pair.host.records }, pair.bases.host),
+    requestsCli: sidePlaces(shownRequests(pair.requests!.cli), pair.bases.cli),
+    requestsHost: sidePlaces(shownRequests(pair.requests!.host), pair.bases.host),
+  };
+  assert.deepEqual(places, { storedCli: 0, storedHost: 0, requestsCli: 0, requestsHost: 0 }, "no side folder in stored or sent text");
+  assertIPCView(pair.ipc, pair.host);
+  const diagnostic = `${label}: CLI questions on stderr ${pair.cliQuestions}; host questions ${pair.questions.join(",")}, ended by the run's signal ${pair.questionsEnded.join(",") || "none"}`;
+  const keyFree = {
+    stored: fakeKeyAbsent([pair.cli.result, pair.cli.records, pair.host.result, pair.host.records]),
+    workspace: fakeKeyAbsent([pair.cli.workspace, pair.host.workspace]),
+    hostMessages: fakeKeyAbsent([pair.ipc, pair.messages]),
+    requestBodies: fakeKeyAbsent([pair.requests!.cli.map((r) => r.bodyText), pair.requests!.host.map((r) => r.bodyText)]),
+    diagnostic: fakeKeyAbsent(diagnostic),
+  };
+  assert.deepEqual(keyFree, { stored: true, workspace: true, hostMessages: true, requestBodies: true, diagnostic: true }, "the fake key value is absent");
+  t.diagnostic(diagnostic);
+}
+
+test("C-5 (c) the person's deny: the CLI's terminal answers n, the host's main process deny; both by user", { timeout: 120_000 }, async (t) => {
+  const pair = await askedPair(t, "contract-deny", "deny", "deny", 60_000);
+  ends(pair, "needs-input", "no_verifier", 3);
+  assert.deepEqual([pair.questions, pair.questionsEnded], [["q1", "q2"], []], "the host answered both questions; none ended by a signal");
+  sameAsked(t, "C-5", pair, expectedQuestions(["one", "two"], "user", true), 3);
+});
+
+test("C-6 (c) cancel while the question waits: the CLI's Ctrl+C and the host's cancelRun; both by cancelled", { timeout: 120_000 }, async (t) => {
+  const pair = await askedPair(t, "contract-question-cancel", "interrupt", "cancel", 60_000);
+  ends(pair, "cancelled", "cancelled", 5);
+  assert.deepEqual([pair.questions, pair.questionsEnded], [["q1"], ["q1"]], "the run's signal ended the host's open question");
+  sameAsked(t, "C-6", pair, expectedQuestions(["one"], "cancelled", false), 1);
+});
+
+test("C-7 (c) no answer until the run's time limit: both budget-exhausted/max_duration, by default", { timeout: 120_000 }, async (t) => {
+  const started = Date.now();
+  const pair = await askedPair(t, "contract-question-limit", "none", "none", QUESTION_LIMIT_MS);
+  ends(pair, "budget-exhausted", "max_duration", 4);
+  assert.deepEqual([pair.questions, pair.questionsEnded], [["q1"], ["q1"]], "the run's time limit ended the host's open question");
+  sameAsked(t, "C-7", pair, expectedQuestions(["one"], "default", false), 1);
+  // The engine's deadline is a timer and durationMs its clock's difference: a few ms either way.
+  for (const [name, side] of [["cli", pair.cli], ["host", pair.host]] as const) {
+    assert.ok(Number(usageOf(side).durationMs) >= QUESTION_LIMIT_MS - 50, `${name}: the run lasted about its limit`);
+  }
+  t.diagnostic(`C-7: ${Date.now() - started} ms for both sides (each run's limit ${QUESTION_LIMIT_MS} ms; the case's own limit 120000 ms)`);
 });

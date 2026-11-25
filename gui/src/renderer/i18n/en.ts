@@ -326,6 +326,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "limit.maxSameFailures": "same failures",
 
   "error.run_active": "A run is already going on. Start a new task after it ends.",
+  "error.revert_active": "A revert is going on. Try again after it ends.",
   "nav.newtask": "New task",
   "nav.run": "Run",
   "task.title": "New task",

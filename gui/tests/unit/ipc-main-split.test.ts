@@ -49,13 +49,15 @@ test("main IPC split: factory creation reads no dependencies and opens or regist
   const workspaces = new Proxy<IpcDeps["workspaces"]>({} as IpcDeps["workspaces"], { get: rejectRead });
   const register = t.mock.method(ipcMain, "handle", () => { throw new Error("factory registered IPC"); });
   const open = t.mock.method(dialog, "showOpenDialog", async () => { throw new Error("factory opened a dialog"); });
-  const callbacks = createWorkspaceHandlers({ deps, workspaces });
+  const treeEpoch = t.mock.fn((): number => { throw new Error("factory read the tree epoch"); });
+  const callbacks = createWorkspaceHandlers({ deps, workspaces }, treeEpoch);
   const reset = t.mock.fn(() => { throw new Error("factory reset tokens"); });
   const settings = createSettingsHandlers({ deps, workspaces }, reset);
   const history = createHistoryHandlers({ deps, workspaces });
   assert.equal(typeof callbacks.tree, "function");
   assert.equal(typeof settings.settings, "function");
   assert.equal(typeof history.previewRevert, "function");
+  assert.equal(treeEpoch.mock.callCount(), 0);
   assert.equal(reset.mock.callCount(), 0);
   assert.deepEqual(reads, []);
   assert.equal(register.mock.callCount(), 0);

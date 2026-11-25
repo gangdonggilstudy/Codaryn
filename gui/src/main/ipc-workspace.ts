@@ -6,7 +6,7 @@ import type { CopyReply, OpenFolderReply, OpenReply, RecentView, TreeReply } fro
 import { SETTINGS_TIMEOUT_MS, TREE_TIMEOUT_MS } from "./ipc-context.js";
 import type { IpcHandlerContext } from "./ipc-context.js";
 
-export function createWorkspaceHandlers(context: IpcHandlerContext, treeEpoch: () => number = () => 0) {
+export function createWorkspaceHandlers(context: IpcHandlerContext, treeEpoch: () => number) {
   const { deps, workspaces } = context;
 
   const openFolder = async (args: unknown[]): Promise<OpenFolderReply> => {

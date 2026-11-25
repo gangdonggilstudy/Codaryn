@@ -1,3 +1,4 @@
+/** Main IPC dependencies, timeouts and message lookup; public names pass through ipc.ts. */
 import type { BrowserWindow } from "electron";
 import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";

@@ -23,21 +23,16 @@ import {
   toReviewReply,
   toChangesReply,
   toReportReply,
-  parseTokenArgs,
   parseRunArgs,
-  parseWorkspaceArgs,
   toRevertView,
-  toRunsReply,
   isRunId,
   hostCodeOf,
 } from "../shared/ipc.js";
 import type { InfoView, SaveTextReply, TextReply } from "../shared/ipc.js";
 import { isAppUrl } from "./app-url.js";
 import { reviewTarget } from "./history.js";
-import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
-import { cleanupQuestions } from "../shared/cleanup.js";
-import { parseCleanupPreviewArgs, toCleanupResultReply, toHostCleanupPreview, toStateSummaryReply } from "../shared/ipc.js";
-import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from "../shared/ipc.js";
+import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply } from "../shared/ipc.js";
+
 import { reportFileName, reportPathInStateDir, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
 import { parseCheckPlanArgs, toPlanCheckReply, toStartFailure, parseRunEventsArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
@@ -52,6 +47,7 @@ import { CANCEL_TIMEOUT_MS, PLAN_CHECK_TIMEOUT_MS, REVERT_TIMEOUT_MS, RUNS_TIMEO
 import type { IpcDeps, IpcHandlerContext, StartRunReply } from "./ipc-context.js";
 import { createWorkspaceHandlers } from "./ipc-workspace.js";
 import { createSettingsHandlers } from "./ipc-settings.js";
+import { createHistoryHandlers } from "./ipc-history.js";
 
 export type { IpcDeps, StartRunReply } from "./ipc-context.js";
 export { texts } from "./ipc-context.js";
@@ -82,6 +78,7 @@ export function registerIpc(deps: IpcDeps): void {
   };
   const context: IpcHandlerContext = { deps, workspaces };
   const workspaceHandlers = createWorkspaceHandlers(context);
+  const historyHandlers = createHistoryHandlers(context);
 
   handle(IPC_CHANNELS.info, async (args): Promise<InfoView | null> => {
     if (!isNoArgs(args)) return null;
@@ -168,53 +165,11 @@ export function registerIpc(deps: IpcDeps): void {
     return { ok: true, name: basename(path) };
   });
 
-  // GU-4 (3.8), DR-39, DR-44: the state summary; a cleanup preview (the plan stays here, the window gets
-  // a token); cleaning by token only, after the main process's questions.
-  handle(IPC_CHANNELS.stateSummary, async (args): Promise<StateSummaryReply> => {
-    const parsed = args.length === 1 ? parseWorkspaceArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const root = workspaces.path(parsed.workspace);
-    if (root === null) return { ok: false, code: "unknown_workspace" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("stateSummary", { workspace: root }, RUNS_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    return toStateSummaryReply(response.value);
-  });
+  handle(IPC_CHANNELS.stateSummary, historyHandlers.stateSummary);
 
-  handle(IPC_CHANNELS.previewCleanup, async (args): Promise<CleanupPreviewReply> => {
-    const parsed = args.length === 1 ? parseCleanupPreviewArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const root = workspaces.path(parsed.workspace);
-    if (root === null) return { ok: false, code: "unknown_workspace" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("previewCleanup", { workspace: root, selection: parsed.selection }, RUNS_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    const preview = toHostCleanupPreview(response.value);
-    if (!preview.ok) return preview;
-    const token = deps.cleanupPreviews.issue({ workspace: parsed.workspace, root, selection: parsed.selection, now: preview.now, plan: preview.plan });
-    return { ok: true, token, plan: preview.plan };
-  });
+  handle(IPC_CHANNELS.previewCleanup, historyHandlers.previewCleanup);
 
-  handle(IPC_CHANNELS.applyCleanup, async (args): Promise<CleanupResultReply> => {
-    const parsed = args.length === 1 ? parseTokenArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const record = deps.cleanupPreviews.take(parsed.token);
-    if (record === null) return { ok: false, code: "unknown_preview" };
-    const questions = cleanupQuestions(record.plan);
-    if (!questions.hasItems) return { ok: false, code: "nothing_to_clean" };
-    if (!(await deps.confirmCleanup(record))) return { ok: false, code: "not_confirmed" };
-    // Asked apart, each only when the plan has such items; each answer holds for this cleanup only.
-    const includeNotReverted = questions.notReverted > 0 ? await deps.confirmCleanupNotReverted(record) : false;
-    const discarded = questions.discarded.count > 0 ? await deps.confirmCleanupDiscarded(record) : false;
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const confirmation = { digest: record.plan.digest, discarded, includeNotReverted };
-    const response = await state.host.call("applyCleanup", { workspace: record.root, selection: record.selection, now: record.now, confirmation }, RUNS_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    return toCleanupResultReply(response.value);
-  });
+  handle(IPC_CHANNELS.applyCleanup, historyHandlers.applyCleanup);
 
   handle(IPC_CHANNELS.proposeSettings, settingsHandlers.proposeSettings);
 
@@ -290,39 +245,9 @@ export function registerIpc(deps: IpcDeps): void {
     }
   });
 
-  // GU-4 (3.8): the run list, a revert preview (a dry run) and the revert, which takes the preview's token only.
-  handle(IPC_CHANNELS.listRuns, async (args): Promise<RunsReply> => {
-    const parsed = args.length === 1 ? parseWorkspaceArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const root = workspaces.path(parsed.workspace);
-    if (root === null) return { ok: false, code: "unknown_workspace" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("listRuns", { workspace: root }, RUNS_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    const reply = toRunsReply(response.value);
-    if (!reply.ok) return reply;
-    deps.history.listedRuns(parsed.workspace, reply.runs.map((run) => run.runId));
-    const forms = await workspaces.runForms(parsed.workspace);
-    return { ...reply, runs: reply.runs.map((run) => (run.state === "checked" ? { ...run, form: forms.get(run.runId) ?? null } : run)) };
-  });
+  handle(IPC_CHANNELS.listRuns, historyHandlers.listRuns);
 
-  handle(IPC_CHANNELS.previewRevert, async (args): Promise<RevertReply> => {
-    const parsed = args.length === 1 ? parseRunArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const root = workspaces.path(parsed.workspace);
-    if (root === null) return { ok: false, code: "unknown_workspace" };
-    if (!deps.history.wasListed(parsed.workspace, parsed.runId)) return { ok: false, code: "unknown_run" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("revert", { workspace: root, runId: parsed.runId, dryRun: true }, REVERT_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    const checked = toRevertView(response.value);
-    if (!checked.ok) return checked;
-    if (checked.view.runId !== parsed.runId || !checked.view.dryRun) return { ok: false, code: "host_error" };
-    const preview = deps.history.issuePreview({ workspace: parsed.workspace, runId: parsed.runId, reverted: checked.view.reverted.length, skipped: checked.view.skipped.length });
-    return { ok: true, view: checked.view, preview, consentRetry: null };
-  });
+  handle(IPC_CHANNELS.previewRevert, historyHandlers.previewRevert);
 
   handle(IPC_CHANNELS.revert, async (args): Promise<RevertReply> => {
     const parsed = args.length === 1 ? parsePreviewArgs(args[0]) : null;

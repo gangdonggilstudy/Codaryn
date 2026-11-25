@@ -1,3 +1,4 @@
+/** Workspace, tree and UI IPC callbacks; ipc.ts owns authentication and registration. */
 import { isAbsolute, join, relative } from "node:path";
 import { dialog } from "electron";
 import { copyablePath, hostCodeOf, isNoArgs, parseCopyArgs, parseIdArg, parseRevealArgs, parseSaveUiArgs, parseTextDirtyArgs, parseTreeArgs } from "../shared/ipc.js";

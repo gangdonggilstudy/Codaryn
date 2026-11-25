@@ -40,29 +40,12 @@
  */
 
 import {
-  ALL_TOOL_NAMES,
-  BUILTIN_TOOLS,
-  CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
-  PLAN_ACTION_DESCRIPTORS,
-  PLANNED_FILE_DESCRIPTOR,
   approvedPlanWritablePathSets,
-  plannedFileStale,
-  REPLACED_CALL_ID_PREFIX,
   RESULT_SCHEMA_VERSION,
-  modelErrorRetryable,
   RUNS_DIR_NAME,
   RUN_EXIT_CODES,
   STATE_DIR_NAME,
-  TOOL_NAMES,
-  UNKNOWN_TOOL_RECORD_NAME,
-  WORKFLOW_TOOLS,
-  REFUSAL_HINTS,
-  TOOL_FAILURE_HINTS,
-  asRawText,
-  failedToolContent,
-  safeModelText,
-  toolFailureMessage,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -72,19 +55,14 @@ import type {
   RunApprovedPlan,
   RunTask,
 } from "../contracts/index.js";
-import { countPrivacyTokens } from "../contracts/index.js";
-import { buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
+// Preserve module evaluation order.
+import "./feedback.js";
 import { finalMessageOf } from "./final-message.js";
-import { judgePlannedFile } from "./planned-file.js";
+// Preserve module evaluation order.
+import "./planned-file.js";
 import { RunState } from "./state.js";
-import {
-  ARGS_RULES,
-  argsProblemText,
-  toolArgsProblem,
-  validateToolArgs,
-  validateWorkflowToolArgs,
-  workflowToolArgsProblem,
-} from "./validate-args.js";
+// Preserve module evaluation order.
+import "./validate-args.js";
 
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
 export { APPLY_FIXED_TEXTS, applyPlan } from "./apply.js";
@@ -104,20 +82,17 @@ export {
 export type { CutText, FailedForFeedback, RepairFeedback } from "./feedback.js";
 
 import {
-  SYSTEM_PROMPT, INSTRUCTIONS_LABEL, NO_PLAN_MESSAGE, NO_CHANGES_PLAN_MESSAGE,
-  PLAN_ACTION_LEAD, PLANNED_FILE_LEAD, APPROVED_SUMMARY_GAP, APPROVED_STALE_LEAD,
-  APPROVED_STALE_END, APPROVED_DENIED_LEAD, APPROVED_DENIED_END, APPROVED_CLAIMED_NOTICE,
-  APPROVED_CLAIM_FAILED_NOTICE, APPROVED_RECORDS_UNCHECKED_NOTICE, REVIEW_NOTICE, NO_VERIFIER_NOTICE,
-  UNKNOWN_TOOL_LEAD, WRITE_NOT_APPLIED_MESSAGE, VERIFIER_NOT_RUN_EVIDENCE, VERIFIER_NOT_RUN_CHECKED,
+  NO_PLAN_MESSAGE,
+  NO_CHANGES_PLAN_MESSAGE,
 } from "./model-texts.js";
 export { SYSTEM_PROMPT, INSTRUCTIONS_LABEL, APPROVED_PLAN_LABEL, FIXED_MODEL_TEXTS } from "./model-texts.js";
 import {
-  MAX_TIMER_MS, CALL_ID_PATTERN, PROFILE_NAME_PATTERN, recordableNarrowings,
-  MASKING_FAILED, CANCELLED, UNKNOWN_OUTCOME,
-  PLAN_PENDING,
-  PLAN_STALE, AWAITING_REVIEW, NO_PLAN, isEnd,
-  isToolName, isWorkflowToolName, offeredTools, answerDecision,
-  isProposedPlan, approvedPlanText, isProposedChanges,
+  MAX_TIMER_MS,
+  NO_PLAN,
+  isEnd,
+  isToolName,
+  isWorkflowToolName,
+  offeredTools,
 } from "./pure.js";
 import type { End } from "./pure.js";
 export { INTEGRITY_NOTICE_PATHS, offeredTools } from "./pure.js";
@@ -185,10 +160,6 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
   const { endedByModelError, budgetStop, start, converse } = createRunConverse(tally, task, model, privacy, limits, settings, approved, offeredBuiltin, offeredWorkflow, runSignal, mask, maskJson, interrupted, record, recordableCalls, noteActivity, handleCall);
   const { verify, repair, checkApprovedPlan } = createRunVerify(tally, task, verifiers, settings, limits, integrity, policy, runSignal, mask, interrupted, record, checkPoint, checkState, noteActivity, budgetStop);
 
-  /**
-   * Builds, records and returns the masked result of a call that was rejected before execution.
-   * Every result handed back to the model is recorded as a tool_result.
-   */
   /**
    * Runs every verifier once (one round). `EngineResult.verifiers` holds the latest round.
    * Returns the end of the run, or the failed results when a repair may follow.

@@ -65,6 +65,10 @@ export function createRunHelpers(
   // AC-D3 (C-2): the journal resolves with the stored record; the engine needs only that it was stored.
   const record = (event: JournalEvent): Promise<JournalRecord> => journal.append(event);
 
+  /**
+   * Builds, records and returns the masked result of a call that was rejected before execution.
+   * Every result handed back to the model is recorded as a tool_result.
+   */
   const errorResult = async (call: ToolCall, code: ToolErrorCode, message: string): Promise<ToolResult | End> => {
     const content = mask(failedToolContent(code, message));
     if (content === null) return MASKING_FAILED;

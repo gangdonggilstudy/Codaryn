@@ -300,6 +300,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "widen.min_group_size_lowered": "the minimum group size k lowered (smaller groups of the tables under unreadable paths are shown to the model)",
   "widen.other": "another widening",
   "error.bad_number": "Enter a whole number of 1 or more.",
+  "error.bad_repair_number": "Enter a whole number of 0 or more.",
   "error.empty_value": "Enter a value first.",
   "error.bad_name": "An environment variable name uses letters, digits and underscores, and does not start with a digit.",
   "error.already_present": "It is already there.",

@@ -48,6 +48,13 @@ const PROVIDER = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_ARGS = 20;
 const MAX_LIMIT = 1_000_000_000;
 /**
+ * IR-B4: a limit's lowest value, as the engine takes it (src/app/input/security/limits.ts MINIMUM):
+ * 0 repair attempts means no repair; every other limit is 1 or more.
+ */
+function limitMinimum(key: LimitKey): number {
+  return key === "maxRepairAttempts" ? 0 : 1;
+}
+/**
  * U-93 (review R-73, U-80 L1): the largest output cap any provider takes, the contract's
  * MAX_OUTPUT_TOKENS_LIMIT (src/contracts/config.ts), repeated here as the window does not load the
  * engine; a unit test compares the two. A larger value would come back as invalid_config.
@@ -76,7 +83,7 @@ export function parseSettingsEdit(value: unknown): SettingsEdit | null {
       const key = v["key"];
       const limit = v["value"];
       if (!only(v, ["op", "key", "value"]) || typeof key !== "string" || !(LIMIT_KEYS as readonly string[]).includes(key)) return null;
-      if (!(limit === null || (typeof limit === "number" && Number.isSafeInteger(limit) && limit >= 1 && limit <= MAX_LIMIT))) return null;
+      if (!(limit === null || (typeof limit === "number" && Number.isSafeInteger(limit) && limit >= limitMinimum(key as LimitKey) && limit <= MAX_LIMIT))) return null;
       return { op: "limit", key: key as LimitKey, value: limit as number | null };
     }
     case "addCommand": {

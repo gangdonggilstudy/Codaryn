@@ -76,6 +76,8 @@ function profileItem(t: Texts, profile: ProfileView): HTMLElement {
 /** The limits a config file may set (the main process and the engine host check the same list). */
 const LIMIT_KEYS = ["maxModelTurns", "maxToolCalls", "maxTotalTokens", "maxDurationMs", "maxRepairAttempts", "maxSameFailures"] as const;
 const MAX_LIMIT = 1_000_000_000;
+/** IR-B4: a limit's lowest value (the shared edit check's limitMinimum; a unit test checks both): only the repair limit takes 0. */
+const limitMinimum = (key: (typeof LIMIT_KEYS)[number]): number => (key === "maxRepairAttempts" ? 0 : 1);
 /** U-93: the largest output cap (the contract's MAX_OUTPUT_TOKENS_LIMIT; the page loads no engine, a unit test compares). */
 export const MAX_OUTPUT_CAP = 200_000;
 
@@ -141,10 +143,11 @@ function rulesSection(t: Texts, rules: SettingsRules, narrowings: readonly Polic
     const row = el("li", undefined, { "data-limit": key });
     const value = set.get(key);
     row.append(el("span", value === undefined ? t.format("settings.limitDefault", { label: limitLabel(t, key) }) : limitText(t, [key, value ?? null])));
-    const input = el("input", undefined, { type: "number", min: "1", max: String(MAX_LIMIT), step: "1", id: `settings-limit-${key}`, "aria-label": t.format("settings.limitInput", { label: limitLabel(t, key) }) });
+    const min = limitMinimum(key);
+    const input = el("input", undefined, { type: "number", min: String(min), max: String(MAX_LIMIT), step: "1", id: `settings-limit-${key}`, "aria-label": t.format("settings.limitInput", { label: limitLabel(t, key) }) });
     const apply = button(t.format("settings.limitSet"), () => {
       const n = Number(input.value);
-      if (input.value.trim() === "" || !Number.isSafeInteger(n) || n < 1 || n > MAX_LIMIT) return warn("bad_number");
+      if (input.value.trim() === "" || !Number.isSafeInteger(n) || n < min || n > MAX_LIMIT) return warn(min === 0 ? "bad_repair_number" : "bad_number");
       propose({ op: "limit", key, value: n });
     }, { "data-limit-set": key });
     row.append(input, apply);

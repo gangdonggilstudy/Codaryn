@@ -147,12 +147,20 @@ for (const prior of ["task", "quick"] as const) test(`H-1 [모의 API·실제 AP
   assert.deepEqual(app.calls.filter(call => call.name === "runEvents").at(-1)?.args, [A.handle, APPLY, PLAN_FORM.profile, PLAN_FORM.workflow, 0]);
 });
 
-for (const prior of ["task", "quick"] as const) for (const action of ["run-again", "run-new-plan"] as const) {
-  test(`H-1 [모의 API·실제 API 아님]: ${action} after ${prior} retains the available session goal`, async t => {
+for (const prior of ["none", "task", "quick"] as const) for (const action of ["run-again", "run-new-plan"] as const) {
+  test(`H-1/F-3 [모의 API·실제 API 아님]: ${action} after ${prior} retains the session goal and prefills the expected form`, async t => {
     const app = await renderer(t, "changes"); await app.start(prior); await app.applyPlan();
     await app.finishApply(action === "run-new-plan" ? { ...result(), reason: "plan_stale", changes: [], review: null } : result());
     app.byId(action).click(); await settle();
     assert.equal(app.byId("task-goal").value, prior === "quick" ? GOAL : "");
+    // FakeElement exposes selected options; it does not synchronize HTMLSelectElement.value.
+    const selected = (id: string): string | null => {
+      const options = app.byId(id).children.filter(option => option.tagName === "option" && option.selected);
+      assert.equal(options.length, 1, `${id}: one selected option`);
+      return options[0]!.getAttribute("value");
+    };
+    assert.deepEqual({ profile: selected("task-profile"), workflow: selected("task-workflow") }, prior === "quick" ? OLD_FORM : PLAN_FORM,
+      prior === "quick" ? "workspace.lastForm precedes the applied plan's form" : "without workspace.lastForm, the applied plan's form fills both fields");
   });
 }
 
@@ -160,4 +168,14 @@ test("H-1 [모의 API·실제 API 아님]: applying a listed plan without an ear
   const app = await renderer(t, "changes"); await app.start("none"); await app.applyPlan(); await app.finishApply();
   app.byId("run-view-changes").click(); await settle();
   assert.deepEqual(app.calls.filter(call => call.name === "changes").at(-1)?.args, [A.handle, APPLY, PLAN_FORM.profile, PLAN_FORM.workflow]);
+});
+
+test("F-3 [모의 API·실제 API 아님]: an applied run plan without an earlier request marks the tree with its form", async t => {
+  const app = await renderer(t, "changes"); await app.start("none"); await app.applyPlan(); await app.finishApply();
+  const marked = app.root.findAll(element => element.getAttribute("role") === "treeitem" && element.getAttribute("data-change") !== null);
+  assert.equal(marked.length, 1, "the first apply creates its changed-file mark");
+  assert.ok(marked[0]!.textContent.includes("edit.md"));
+  const before = app.calls.length;
+  marked[0]!.click(); await settle();
+  assert.deepEqual(app.calls.slice(before).filter(call => call.name === "changes").map(call => call.args), [[A.handle, APPLY, PLAN_FORM.profile, PLAN_FORM.workflow]]);
 });

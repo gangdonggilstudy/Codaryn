@@ -167,6 +167,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "language.ko": "Korean",
   "language.en": "English",
   "settings.title": "Settings",
+  "settings.appliesNextRun": "Changes to run settings apply from the next run. A run in progress keeps the settings it started with.",
   "settings.general": "General",
   "settings.file": "Config file: {file}",
   "settings.noFile": "No config file location can be chosen (there is no default location either).",

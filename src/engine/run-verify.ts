@@ -18,7 +18,6 @@ export function createRunVerify(
   verifiers: EngineDeps["verifiers"],
   settings: ReturnType<typeof workflowSettingsOf>,
   limits: EngineDeps["task"]["limits"],
-  integrity: EngineDeps["integrity"],
   policy: EngineDeps["policy"],
   runSignal: AbortSignal,
   mask: ReturnType<typeof createRunHelpers>["mask"],

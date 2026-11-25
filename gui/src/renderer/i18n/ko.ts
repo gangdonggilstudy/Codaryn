@@ -169,6 +169,7 @@ export const KO = {
   "language.ko": "한국어",
   "language.en": "영어",
   "settings.title": "설정",
+  "settings.appliesNextRun": "실행 설정의 변경은 다음 실행부터 적용됩니다. 진행 중인 실행은 시작할 때의 설정을 유지합니다.",
   "settings.general": "일반",
   "settings.file": "설정 파일: {file}",
   "settings.noFile": "설정 파일 위치를 정할 수 없습니다(기본 위치도 없음).",

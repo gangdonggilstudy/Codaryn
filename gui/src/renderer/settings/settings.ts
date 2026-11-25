@@ -375,7 +375,7 @@ export function settingsScreen(deps: SettingsDeps): Screen {
     title: "nav.settings",
     show(root) {
       const body = el("div", undefined, { id: "settings" });
-      root.replaceChildren(el("h2", t.format("settings.title")), body);
+      root.replaceChildren(el("h2", t.format("settings.title")), el("p", t.format("settings.appliesNextRun"), { class: "notice" }), body);
       const active = (): boolean => root.contains(body) && body.isConnected !== false;
       // One proposal at a time: its changed fields, what widens, and "Write" / "Do not write".
       const proposal = el("div", undefined, { id: "settings-proposal", role: "status", "aria-live": "polite" });

@@ -17,15 +17,20 @@
 - PM 전송 경로의 고정 신원(codex-review/w3:p3)과 Codex 전용 입력 줄 판정은 변경하지 않았다. 현재 Claude PM은 file-only 운영과 별도 명시 native prompt를 사용하며 고정 신원이나 pane/환경을 위장하지 않는다.
 - Claude worker에게 `dispatch --send`를 사용하지 않는다. 현재 코드는 어느 경로에서도 Claude worker에게 prompt를 보내지 않는다. Codex 전용 입력 줄 검사까지 도달하면 화면 내용과 관계없이 `VISIBLE_UNCONFIRMED`로 보류하지만, 그 전에 PM 신원 확인에서 실패하거나 작업자 상태에 따라 먼저 보류될 수도 있다. Claude worker의 file-only dispatch와 STARTED/READY는 지원한다.
 
+## 2026-11-25 작업자 추가
+
+사용자 결정으로 Codex 세션 codex-worker-2(`w3:pK`, agent `codex`)를 추가한다. 현재 작업자는 codex-worker(`w3:pJ`)·claude-worker(`w3:pH`)·codex-worker-2(`w3:pK`) 세 명이다. 새 작업자에도 같은 이름·agent 종류·pane·terminal·cwd·session digest 확인 규칙을 적용하며, Codex 입력 줄 판정도 codex-worker와 같다. 옛 이름의 닫힌 기록 검증과 PM 전송 계약은 유지한다.
+
 ## 현재 작업자와 원래 Codex PM 전송 계약
 
-현재 w3의 두 worker와 고정된 PM 전송 경로를 위한 운영 도구다. 제품 엔진이나 범용 agent framework가 아니다. PM은 canonical 관리 main cwd에서 `node scripts/pm-session-comms.mjs --help`로 안내를 보고, 시험은 `node --test scripts/pm-session-comms.test.mjs`로 실행한다. worker의 실행 경로는 아래 절대 main 스크립트 계약을 따른다. Node의 표준 모듈만 사용한다.
+현재 w3의 세 worker와 고정된 PM 전송 경로를 위한 운영 도구다. 제품 엔진이나 범용 agent framework가 아니다. PM은 canonical 관리 main cwd에서 `node scripts/pm-session-comms.mjs --help`로 안내를 보고, 시험은 `node --test scripts/pm-session-comms.test.mjs`로 실행한다. worker의 실행 경로는 아래 절대 main 스크립트 계약을 따른다. Node의 표준 모듈만 사용한다.
 
 | 역할 | 허용 이름 | 고정 pane | agent 종류 |
 | --- | --- | --- | --- |
 | PM 전송 신원(현재 PM은 위 절 참고) | codex-review | w3:p3 | codex |
 | worker | codex-worker | w3:pJ | codex |
 | worker | claude-worker | w3:pH | claude |
+| worker | codex-worker-2 | w3:pK | codex |
 
 이름마다 agent 종류·pane을 확인하고, 제공된 agent_session은 digest로 고정한다.
 

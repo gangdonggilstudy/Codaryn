@@ -123,11 +123,10 @@ export function createRunVerify(
     if (after !== null) return after;
     const stateAfter = await checkState("after_verify", true);
     if (stateAfter !== null) return stateAfter;
-    if (integrity !== undefined) {
-      // The capture itself may have outlasted the duration limit or met a cancel.
-      const late = interrupted();
-      if (late !== null) return late;
-    }
+    // IR-E3: either capture (integrity, or the state check without one) may have outlasted the
+    // duration limit or met a cancel; a change found comes first (above). With neither, nothing ran.
+    const late = interrupted();
+    if (late !== null) return late;
     if (!outcomes.includes("fail")) {
       if (outcomes.includes("inconclusive")) return { status: "needs-input", reason: "verifier_inconclusive" };
       if (settings.completion === "human_review") return awaitReview();

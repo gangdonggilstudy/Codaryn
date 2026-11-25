@@ -154,7 +154,11 @@ export function createRunChecks(
     return STATE_CHANGED;
   };
 
-  /** DR-38: the run_end check; a change replaces the end the run would have had. */
+  /**
+   * DR-38: the run_end check; a change replaces the end the run would have had. That end was fixed
+   * when the run loop returned: a cancel or the duration limit during this check changes nothing,
+   * as in checkAtEnd (IR-E3).
+   */
   const checkStateAtEnd = async (end: End): Promise<End> => {
     if (stateGuard === undefined || end.reason === "state_changed") return end;
     return (await checkState("run_end", true)) ?? end;

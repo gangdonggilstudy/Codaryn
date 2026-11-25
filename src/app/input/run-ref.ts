@@ -13,8 +13,9 @@
  * - N-23: the caller shows the chosen run (id and start time) before it acts.
  * - U-22 (R-51 M-2): this is the one rule for `latest`. Every command and the app layer resolve it
  *   here (STORE_RUN_REFERENCE_DEPS gives the store's functions), not with a rule of their own.
- * - U-22 (DR-48, AXM-8): `latest` is the newest run. When a checked run without a result that is
- *   newer than the finished run `latestRun` would choose (or there is none) holds the workspace lock
+ * - U-22 (DR-48, AXM-8): `latest` is the newest run. When a run with no usable result (checked
+ *   without a result, or damaged before its first journal line) is
+ *   newer than the finished run `latestRun` would choose (or there is none) and holds the workspace lock
  *   with a live holder, the answer is `run_in_progress` (try again when it ends), not that older
  *   run and not `run_not_found` (PM decision). A newer run that stopped without a result (no live
  *   lock) is passed over as before. A run id given as it is shows that run.
@@ -60,9 +61,10 @@ async function pathExists(target: string): Promise<boolean> {
  */
 export const STORE_RUN_REFERENCE_DEPS: RunReferenceDeps = { exists: pathExists, listRuns };
 
-async function holdsLock(workspaceRoot: string, runId: string): Promise<boolean> {
+async function holdsLock(workspaceRoot: string, runId: string, minimumStartedAt?: string): Promise<boolean> {
   const lock = await inspectLock(workspaceRoot);
-  return lock.state === "held" && lock.holder.runId === runId;
+  return lock.state === "held" && lock.holder.runId === runId &&
+    (minimumStartedAt === undefined || Date.parse(lock.holder.startedAt) >= Date.parse(minimumStartedAt));
 }
 
 export type RunReferenceOutcome =
@@ -102,15 +104,21 @@ export async function resolveRunReference(workspaceRoot: string, runId: string, 
     return { ok: false, code: "invalid_run_record", message: "the workspace's run records cannot be listed; nothing was changed" };
   }
   const latest = latestRun(listing.runs);
-  // U-22 (AXM-8, PM): a run still going that is newer than `latest` (listRuns: newest first) is the
-  // newest run; it is not passed over for an older one, and it is not "no run".
+  // U-22: listRuns puts checked entries first and damaged entries last. Keep checking that tail
+  // after the finished run; the empty journal may belong to the run that just took the lock.
   const inProgress = deps.runInProgress ?? holdsLock;
+  let beforeLatest = true;
   for (const run of listing.runs) {
-    if (latest !== null && run.runId === latest.runId) break;
-    if (run.state !== "checked" || run.status !== null) continue;
+    if (latest !== null && run.runId === latest.runId) { beforeLatest = false; continue; }
+    if (run.state === "checked" && (!beforeLatest || run.status !== null)) continue;
+    // A damaged entry has only its id's second. The live lock's full time resolves same-second ties,
+    // without treating the random id suffix as a chronological order.
+    if (run.state === "damaged" && latest !== null && run.runId.slice(0, 16) < latest.runId.slice(0, 16)) continue;
     let going: boolean;
     try {
-      going = await inProgress(workspaceRoot, run.runId);
+      going = run.state === "damaged" && deps.runInProgress === undefined
+        ? await holdsLock(workspaceRoot, run.runId, latest?.startedAt)
+        : await inProgress(workspaceRoot, run.runId);
     } catch {
       going = false;
     }

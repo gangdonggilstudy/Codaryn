@@ -60,7 +60,7 @@ export interface IntegrityFileSystem {
   hashFile(file: string, maxBytes: number): Promise<{ readonly sha256: ContentHash; readonly bytes: number } | "too_large">;
 }
 
-/** Files at most this large are read in one call; larger ones are streamed. */
+/** Files at most this large are hashed through the first handle; larger ones are streamed. */
 const WHOLE_READ_BYTES = 1024 * 1024;
 
 const realpathNative = promisify(realpathCallback.native);
@@ -71,9 +71,17 @@ async function hashFile(file: string, maxBytes: number): Promise<{ sha256: Conte
   try {
     const { size } = await handle.stat();
     if (size <= WHOLE_READ_BYTES && size <= maxBytes) {
-      const bytes = await handle.readFile();
-      if (bytes.length > maxBytes) return "too_large";
-      return { sha256: hash.update(bytes).digest("hex"), bytes: bytes.length };
+      // The file can grow after fstat: read at most the remaining budget plus one detection byte.
+      const buffer = Buffer.alloc(Math.min(64 * 1024, maxBytes + 1));
+      let total = 0;
+      for (;;) {
+        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, maxBytes - total + 1), null);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+        if (total > maxBytes) return "too_large";
+        hash.update(buffer.subarray(0, bytesRead));
+      }
+      return { sha256: hash.digest("hex"), bytes: total };
     }
   } finally {
     await handle.close();

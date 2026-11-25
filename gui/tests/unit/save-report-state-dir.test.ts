@@ -113,7 +113,7 @@ for (const language of ["en", "ko"] as const) test(`save state dir: the report b
   root.append(...saveReportButton(textsFor(language), api, { handle: "a".repeat(32), name: "synthetic" }, RUN, "state-save") as unknown as FakeElement[]);
   const button = root.findAll(e => e.getAttribute("id") === "state-save")[0], status = root.findAll(e => e.getAttribute("id") === "state-save-status")[0];
   assert.ok(button && status); button.click(); await settle();
-  const expected = language === "en" ? "A report cannot be saved inside a Codaryn records folder (.codaryn). Choose another place." : "Codaryn 기록 폴더(.codaryn) 안에는 저장할 수 없습니다. 다른 위치를 고르세요.";
+  const expected = language === "en" ? "A report cannot be saved inside the run record folder (.codaryn). Choose another place." : "실행 기록 폴더(.codaryn) 안에는 저장할 수 없습니다. 다른 위치를 고르세요.";
   assert.ok(status.textContent.includes(expected));
   assert.equal(status.getAttribute("data-saved"), "save_state_dir");
 });

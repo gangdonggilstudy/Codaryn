@@ -14,7 +14,7 @@
  * use too; the app's hooks for the assembly are ./assemble.ts (DR-4).
  */
 
-import { lstat, mkdir, writeFile } from "node:fs/promises";
+import "node:fs/promises"; // Preserve module evaluation order.
 import path from "node:path";
 import type {
   ApplyPlan,
@@ -23,10 +23,6 @@ import type {
   PlanOutput,
   ReviewOutput,
   DefaultConfigLocation,
-  DoctorOutput,
-  InitOutput,
-  MessageCatalog,
-  ModelsOutput,
   ResolvedTaskSpec,
   RevertOutput,
   RunApprovedPlan,
@@ -34,27 +30,25 @@ import type {
 } from "../contracts/index.js";
 import { workflowSettingsOf } from "../contracts/index.js";
 import { applyPlan as engineApplyPlan } from "../engine/index.js";
-import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
+import "../i18n/index.js"; // Preserve module evaluation order.
 import { createPrivacyGateway } from "../privacy/index.js";
 import { listRuns as storeListRuns } from "../store/index.js";
-import "./revert-command.js";
-import { defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
-import { checkDoctor } from "./doctor.js";
+import "./revert-command.js"; // Preserve module evaluation order.
+import { findDefaultConfigLocation } from "./input/config-file.js";
+import "./doctor.js"; // Preserve module evaluation order.
 import type { CommandOutcome } from "./command-outcome.js";
-import { initIn } from "./init-command.js";
-import type { InitPorts } from "./init-core.js";
-import { runModelsIn, scrub } from "./models-command.js";
+import "./init-command.js"; // Preserve module evaluation order.
+import "./models-command.js"; // Preserve module evaluation order.
 import { applyLife } from "./apply-life.js";
 import type { ApplyLifeEnd } from "./apply-life.js";
-import type { ModelsCommandEnvironment } from "./models-command.js";
-import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
-import "../presentation/report-localized.js";
-import { jsonLine } from "../presentation/json.js";
-import { parseApplyArgs, parseArgs, parseDoctorArgs, parseInitArgs, parseModelsArgs, parsePlanArgs, parseReviewArgs } from "./input/args.js";
+import "./provider.js"; // Preserve module evaluation order.
+import "../presentation/report-localized.js"; // Preserve module evaluation order.
+import "../presentation/json.js"; // Preserve module evaluation order.
+import { parseApplyArgs, parseArgs, parsePlanArgs, parseReviewArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
-import "./report-read.js";
-import { hideKeys } from "./input/text-safety.js";
+import "./report-read.js"; // Preserve module evaluation order.
+import "./input/text-safety.js"; // Preserve module evaluation order.
 import { prepareFor, recordReview, showPlan } from "./plan-view.js";
 import type { PlanViewEnvironment } from "./plan-view.js";
 import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
@@ -65,21 +59,21 @@ import { knownKeyValues } from "./input/settings.js";
 import { applyArguments, deliverApply } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
 import { unsafeMoveConsentOf } from "./consent.js";
-import "./changes.js";
-import "./workspace-dir.js";
-import "./run-events.js";
+import "./changes.js"; // Preserve module evaluation order.
+import "./workspace-dir.js"; // Preserve module evaluation order.
+import "./run-events.js"; // Preserve module evaluation order.
 import { checkApplyArguments, checkApplyIn } from "./check-apply.js";
 import { changesPlanViewIn, checkChangesPlanFiles, storedPlanKindOf } from "./changes-plan.js";
-import "./workspace-text.js";
+import "./workspace-text.js"; // Preserve module evaluation order.
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { appRunHooks } from "./run-hooks.js";
-import { modelsArguments } from "./models.js";
+import "./models.js"; // Preserve module evaluation order.
 import { runIdOf, workspaceRootOf } from "./runs.js";
 import { applyCleanupIn, previewCleanupIn, stateSummaryIn } from "./cleanup.js";
-import { readSettingsIn } from "./settings.js";
-import { initArguments, suggestionsFor } from "./init.js";
-import { applySettingsChangeIn, proposeSettingsChangeIn } from "./settings-change.js";
+import "./settings.js"; // Preserve module evaluation order.
+import "./init.js"; // Preserve module evaluation order.
+import "./settings-change.js"; // Preserve module evaluation order.
 import type {
   AppCallOutcome,
   AppEnvironment,
@@ -93,21 +87,9 @@ import type {
   PlanRequest,
   ReviewRequest,
   CodarynApp,
-  DoctorRequest,
-  ListModelsRequest,
   ApplyCleanupRequest,
   CleanupPreviewRequest,
   StateSummaryRequest,
-  ApplySettingsChangeRequest,
-  CreateSettingsRequest,
-  ReadSettingsRequest,
-  SelectModelRequest,
-  SettingsChangeProposal,
-  SettingsChangeRequest,
-  SettingsSuggestions,
-  SettingsSuggestionsRequest,
-  SettingsView,
-  SettingsWritten,
   RunHandle,
   RunObserver,
   RunOutcome,
@@ -119,6 +101,7 @@ import { createReadingContext } from "./reading-context.js";
 import { createReadingCommands } from "./reading-commands.js";
 import type { AppHooks } from "./app-hooks.js";
 import { createReportCommands } from "./report-commands.js";
+import { createSettingsCommands } from "./settings-commands.js";
 
 export type { AppHooks } from "./app-hooks.js";
 
@@ -133,41 +116,6 @@ export function runArguments(request: StartRunRequest): string[] {
   if (request.workflowRef !== null) argv.push("--workflow", request.workflowRef);
   if (request.cancelFile !== null) argv.push("--cancel-file", request.cancelFile);
   return argv;
-}
-
-/** The app's init --json facade; returns the original core Promise without another await. */
-function appInitCommand(io: InitPorts & { readonly argv: readonly string[]; readonly messages: MessageCatalog }): Promise<CommandOutcome> {
-  try {
-    const parsed = parseInitArgs(io.argv);
-    if (!parsed.ok) return Promise.resolve(argumentsError(parsed));
-    const platform = io.platform ?? process.platform;
-    // Retain catalog acquisition after platform, even though JSON completion needs no text.
-    const messages = io.messages;
-    return initIn(io, parsed.args, platform, {
-      complete: (result) => ({ output: result, exitCode: result.exitCode }),
-      begin: () => undefined,
-    });
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
-
-/** The app's models command: no question, with the existing JSON and whole-text masking. */
-function appModelsCommand(io: ModelsCommandEnvironment & { readonly argv: readonly string[] }): Promise<CommandOutcome> {
-  try {
-    const parsed = parseModelsArgs(io.argv);
-    if (!parsed.ok) return Promise.resolve(argumentsError(parsed));
-    return runModelsIn(io, parsed.args, {
-      ask: () => Promise.resolve(null),
-      choice: () => null,
-      complete(output, _prompted, _places, secrets, currentKey) {
-        const printed = jsonLine(output);
-        return { text: hideKeys(scrub(printed, secrets), currentKey), exitCode: output.exitCode };
-      },
-    });
-  } catch (error) {
-    return Promise.reject(error);
-  }
 }
 
 /**
@@ -224,6 +172,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const { readingSecrets, workspaceTextSource } = createReadingContext(environment, platform, locate, relate, defaultConfigOf, PROBE_GOAL);
   const { changes, listWorkspaceDir, readWorkspaceText, writeWorkspaceText, listRunEvents } = createReadingCommands(readingSecrets, workspaceTextSource, environment, hooks);
   const { report, reportMarkdown, revert, listRuns, resolveRun } = createReportCommands(environment, platform, jsonOutcome, commandError);
+  const { doctor, listModels, selectModel, readSettings, createSettings, settingsSuggestions, proposeSettingsChange, applySettingsChange } = createSettingsCommands(environment, platform, hooks, locate, relate, defaultConfigOf, jsonOutcome);
 
   /**
    * The CLI's run environment with this environment's parts. `env` is the call's own copy; the
@@ -331,160 +280,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const stateSummary = (request: StateSummaryRequest) => stateSummaryIn(environment, request);
   const previewCleanup = (request: CleanupPreviewRequest) => previewCleanupIn(environment, request);
   const applyCleanup = (request: ApplyCleanupRequest) => applyCleanupIn(environment, request, hooks.cleanupOperations);
-
-  async function doctor(request: DoctorRequest): Promise<AppCallOutcome<DoctorOutput>> {
-    const argv = ["doctor"];
-    if (request.configPath !== null) argv.push("--config", request.configPath);
-    if (request.varsFile !== null) argv.push("--vars-file", request.varsFile);
-    if (request.taskPath !== null) argv.push("--task", request.taskPath);
-    if (request.workspace !== null) argv.push("--workspace", request.workspace);
-    argv.push("--json");
-    try {
-      const io = {
-        argv,
-        env: copyEnvironment(environment.env, platform),
-        cwd: environment.cwd,
-        nodeVersion: environment.nodeVersion,
-        installDir: environment.installDir,
-        readFile: environment.readFile,
-        isDirectory: environment.isDirectory,
-        isFile: environment.isFile,
-        locateInWorkspace: locate,
-        relatePaths: relate,
-        platform,
-        // As main.ts: the default config location (N-1), whether it is refused, and where the
-        // language comes from (N-20). The messages stay English: the app returns codes and fields.
-        defaultConfig: defaultConfigOf(),
-        defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
-        osLocale: environment.osLocale ?? null,
-        explainLanguage: explainMessageLanguage,
-      };
-      const checking = (): Promise<CommandOutcome> => {
-        try {
-          const parsed = parseDoctorArgs(io.argv);
-          if (!parsed.ok) return Promise.resolve(argumentsError(parsed));
-          return checkDoctor(parsed.args, io, (checked): CommandOutcome => {
-            if (!checked.ok) return checked.outcome;
-            const { output, currentKey } = checked;
-            return { text: hideKeys(jsonLine(output), currentKey), exitCode: output.exitCode };
-          });
-        } catch (failure) {
-          return Promise.reject(failure);
-        }
-      };
-      const outcome = await checking();
-      return jsonOutcome<DoctorOutput>(outcome, "doctor");
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  /** `codaryn models` as main.ts calls it, with this environment and no terminal question. */
-  async function models(request: ListModelsRequest | SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>> {
-    const args = modelsArguments(request);
-    if (!args.ok) return args;
-    const env = copyEnvironment(environment.env, platform);
-    try {
-      const outcome = await appModelsCommand({
-        argv: args.argv,
-        env,
-        cwd: environment.cwd,
-        readFile: environment.readFile,
-        loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
-        listModels: hooks.listModels ?? anthropicModelLister,
-        // SP-6: each provider's lister, as main.ts gives them; `--provider` (modelsArguments) picks one.
-        listers: API_MODEL_LISTERS,
-        anthropicDeps: hooks.anthropicDeps,
-        ...(hooks.providerDeps === undefined ? {} : { providerDeps: hooks.providerDeps }),
-        defaultConfig: defaultConfigOf(),
-        ...(hooks.writeConfig === undefined ? {} : { writeConfig: hooks.writeConfig }),
-      });
-      return jsonOutcome<ModelsOutput>(outcome, "models");
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  const listModels = (request: ListModelsRequest) => models(request);
-  const selectModel = (request: SelectModelRequest) => models(request);
-
-  async function readSettings(request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>> {
-    try {
-      return await readSettingsIn(
-        { env: copyEnvironment(environment.env, platform), cwd: environment.cwd, readFile: environment.readFile, defaultConfig: defaultConfigOf() },
-        request,
-      );
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  /** `codaryn init --json` as main.ts calls it, without questions (no `ask`). */
-  async function createSettings(request: CreateSettingsRequest): Promise<AppCallOutcome<InitOutput>> {
-    try {
-      const outcome = await appInitCommand({
-        argv: initArguments(request),
-        env: copyEnvironment(environment.env, platform),
-        cwd: environment.cwd,
-        platform,
-        defaultConfig: defaultConfigOf(),
-        defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
-        // --json prints no text; retain the catalog's original evaluation position.
-        messages: createMessageCatalog("en"),
-        readFile: environment.readFile,
-        isDirectory: environment.isDirectory,
-        exists: async (target) => {
-          try {
-            await lstat(target);
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        locateInWorkspace: locate,
-        makeDirectory: async (dir) => {
-          await mkdir(dir, { recursive: true });
-        },
-        writeNewFile: (file, text) => writeFile(file, text, { encoding: "utf8", flag: "wx" }),
-      });
-      return jsonOutcome<InitOutput>(outcome, "init");
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  async function settingsSuggestions(request: SettingsSuggestionsRequest): Promise<AppCallOutcome<SettingsSuggestions>> {
-    try {
-      const root = await workspaceRootOf(request.workspace, environment.cwd);
-      if (!root.ok) return root;
-      return { ok: true, output: await suggestionsFor(root.value) };
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  const settingsIo = () => ({
-    env: copyEnvironment(environment.env, platform),
-    cwd: environment.cwd,
-    readFile: environment.readFile,
-    defaultConfig: defaultConfigOf(),
-  });
-
-  async function proposeSettingsChange(request: SettingsChangeRequest): Promise<AppCallOutcome<SettingsChangeProposal>> {
-    try {
-      return await proposeSettingsChangeIn(settingsIo(), request);
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  async function applySettingsChange(request: ApplySettingsChangeRequest): Promise<AppCallOutcome<SettingsWritten>> {
-    try {
-      return await applySettingsChangeIn(settingsIo(), request, hooks.writeConfig);
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
 
   /**
    * The task form's environment for `plan`, `apply` and `review` (G-F), as main.ts builds it, with

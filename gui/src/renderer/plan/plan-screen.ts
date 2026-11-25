@@ -196,7 +196,7 @@ export function planScreen(deps: PlanDeps): PlanScreen {
           // asks first with its own dialog); the run screen shows its progress, cancel and result.
           const approval = reply.approval;
           const apply = button(t.format("plan.apply"), () => {
-            if (!run.startingApply(approval)) {
+            if (!run.startingApply(approval, target)) {
               message.replaceChildren(el("p", t.format("task.busy")));
               return;
             }

@@ -10,6 +10,16 @@ import type { CodarynApi } from "../../src/renderer/api.js";
 import { FakeElement, installFakeDom, settle } from "./fake-dom.js";
 
 const tick = async () => { await settle(); await settle(); };
+async function waitFor<T>(promise: Promise<T>, description: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<T>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`${description} was not observed within 10 seconds`)), 10000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const view = { file: { display: "synthetic.json", source: "default", exists: true }, model: null, language: null,
   profiles: [], workflows: { builtin: [], config: [] }, keyAvailable: false, providers: [],
   env: { model: false, language: false }, rules: { limits: [], commands: [], protectedPaths: [], secretEnv: [] },
@@ -21,6 +31,12 @@ test("IR-D4: repeated real language changes retain only current RunModel listene
   const changes: Record<string, unknown> = { getElementById: (id: string) => id === "app" ? root : find(id), documentElement: new FakeElement("html") };
   const before = Object.keys(changes).map(k => [k, Object.getOwnPropertyDescriptor(doc, k)] as const);
   Object.assign(doc, changes);
+  let mounted = Promise.withResolvers<void>();
+  const replaceChildren = root.replaceChildren.bind(root);
+  t.mock.method(root, "replaceChildren", (...children: FakeElement[]) => {
+    replaceChildren(...children);
+    mounted.resolve();
+  });
   const timers = new Map<number, () => void>(), active = new Set<() => void>(); let timerId = 0;
   t.mock.method(globalThis, "setInterval", ((fn: () => void) => { const id = ++timerId; timers.set(id, fn); return id; }) as unknown as typeof setInterval);
   t.mock.method(globalThis, "clearInterval", ((id: number) => timers.delete(id)) as unknown as typeof clearInterval);
@@ -52,7 +68,7 @@ test("IR-D4: repeated real language changes retain only current RunModel listene
   const click = (id: string) => { const e = find(id); assert.ok(e, id); e.click(); };
   const show = (id: string) => { const tab = root.findAll(e => e.getAttribute("data-screen") === id)[0]; assert.ok(tab); tab.click(); };
   const entry = "../../src/renderer/app.js?ir-d4-dispose";
-  await import(entry); await tick();
+  await import(entry); await waitFor(mounted.promise, "IR-D4 initial frame");
   const samples: { listeners: number; timers: number }[] = [];
   for (let i = 0; i < 4; i++) {
     show("run"); await tick();
@@ -61,7 +77,9 @@ test("IR-D4: repeated real language changes retain only current RunModel listene
     click("settings-language-change"); await tick(); click("settings-write"); await tick();
     show("run"); await tick();
     language = language === "en" ? "ko" : "en";
-    save.resolve({ ok: true, written: true, changes: [], widening: [] }); await tick(); await tick();
+    mounted = Promise.withResolvers<void>();
+    save.resolve({ ok: true, written: true, changes: [], widening: [] });
+    await waitFor(mounted.promise, `IR-D4 language frame ${i + 1}`);
     show("run"); await tick();
     // In a browser the old detached main still contains its state node. Ticks must not preserve it.
     for (const fn of [...timers.values()]) fn();

@@ -108,7 +108,7 @@
 
 ## 5. 가림이 적용되는 경로. 구현
 
-엔진(`src/engine/index.ts`)이 모델로 보내거나 기록하는 것은 모두 게이트를 지난다.
+엔진(`src/engine`)이 모델로 보내거나 기록하는 것은 모두 게이트를 지난다. 가림 함수 `mask`·`maskJson`은 `src/engine/run-helpers.ts`에 있고, 실행 모듈들이 함께 쓴다(IR-26 엔진 분할 뒤, main `46b1e3c1`).
 
 | 대상 | 처리 |
 | --- | --- |
@@ -140,10 +140,10 @@ GUI의 파일 보기(U-174·U-184, [사용 안내](usage.md) 19절)는 모델로
 
 가림 개수(DR-52, U-25). **구현**
 - 실행의 결과(`run`의 stdout JSON과 `result.json`)에 `masking: {registeredValues, maskedPlaces}`가 실린다. stdout JSON 줄은 콘솔(stdout과 stderr가 둘 다 터미널)에서는 `--json`이나 `--quiet`일 때만 나온다(사용 안내 10절 "터미널에서"). 둘 다 정수다. `report --json`의 `result`에도 같은 값이 있고, 사람용 끝 요약에 한 줄로 나온다(사용 안내 8절 "가림 개수"). 값, 위치, 길이, 해시는 싣지 않는다.
-- 없는 곳: journal(`run_finished` 포함), `report`의 Markdown 본문, 진행 줄. 모델은 개수를 볼 수 없다. 개수는 실행 끝에 결과를 지을 때만 넣는다(`src/engine/index.ts`).
+- 없는 곳: journal(`run_finished` 포함), `report`의 Markdown 본문, 진행 줄. 모델은 개수를 볼 수 없다. 개수는 실행 끝에 결과를 지을 때만 넣는다(결과 조립은 `src/engine/index.ts`의 `runWith`, 세는 곳은 `src/engine/run-converse.ts`).
 - GUI(U-40): 실행 끝 화면과 보고서의 사용량 탭에, 사용량 다음에 두 개수를 한 줄로 보인다. 등록 값이 없으면 줄이 없다.
   - 글(`run.masking`)은 CLI 끝 요약의 `summary.masking`과 두 언어 모두 같다.
-  - 엔진 호스트와 주 프로세스가 결과에서 두 개수만 다시 짓는다(`gui/src/shared/ipc.ts`의 `maskingOf`). 덧붙은 필드나 개수가 아닌 값은 넘어가지 않는다.
+  - 엔진 호스트와 주 프로세스가 결과에서 두 개수만 다시 짓는다(`gui/src/shared/ipc/core.ts`의 `maskingOf`, facade `gui/src/shared/ipc.ts`로 내보낸다). 덧붙은 필드나 개수가 아닌 값은 넘어가지 않는다.
   - 근거: 코드(`gui/src/renderer/run/run-screen.ts`, `gui/src/renderer/report/report-screen.ts`)와 검토 R-63. R-63은 실제 앱의 연기 시험과 주입 실험을 했다. 이 문서 작성자는 GUI를 띄우지 않았다.
 - `registeredValues`: 3절로 모은 서로 다른 값의 수다. 가림 게이트가 줄바꿈의 CRLF를 LF로 바꾸어 같은 값을 하나로 센다. 3절이 이미 같은 값을 하나로 치므로 출처가 달라도 하나다. 변수 파일 값의 공백을 뺀 형태는 3절에서 따로 등록되므로 따로 센다. 등록한 값이 없으면 필드가 없다.
 - `maskedPlaces`: 엔진이 모델에 보낸 글(시스템 글, 작업 메시지, 도구 결과, 재수정 메시지)에 든 토큰의 수다(`countPrivacyTokens`).

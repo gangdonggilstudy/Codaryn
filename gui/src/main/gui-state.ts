@@ -11,7 +11,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, posix, win32 } from "node:path";
 import { isLocalPathSyntax } from "./node-path.js";
 import { SCREEN_ID, TREE_WIDTH_MAX, TREE_WIDTH_MIN } from "../shared/ipc.js";
@@ -20,6 +20,8 @@ export const GUI_STATE_FILE_NAME = "gui-state.json";
 export const MAX_RECENT = 20;
 const MAX_PATH_CHARS = 4096;
 const MAX_FILE_BYTES = 256 * 1024;
+// Each decoded UTF-16 unit can account for at most three UTF-8 bytes (including U+FFFD).
+const MAX_UTF8_BYTES = 3 * MAX_FILE_BYTES;
 
 export interface RecentWorkspace {
   /** Absolute path of the folder the person opened. */
@@ -197,18 +199,82 @@ export function parseGuiState(text: string, platform: NodeJS.Platform): GuiState
 
 export async function readGuiState(file: string, platform: NodeJS.Platform): Promise<GuiState> {
   try {
-    const text = await readFile(file, "utf8");
-    return text.length > MAX_FILE_BYTES ? EMPTY_STATE : parseGuiState(text, platform);
+    const handle = await open(file, "r");
+    try {
+      if ((await handle.stat()).size > MAX_UTF8_BYTES) return EMPTY_STATE;
+      const bytes = Buffer.alloc(MAX_UTF8_BYTES + 1);
+      let used = 0;
+      while (used < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, used, bytes.length - used, null);
+        if (bytesRead === 0) break;
+        used += bytesRead;
+      }
+      // The same bound holds if the file grew after stat; decode once so split sequences stay intact.
+      if (used > MAX_UTF8_BYTES) return EMPTY_STATE;
+      const text = bytes.subarray(0, used).toString("utf8");
+      return text.length > MAX_FILE_BYTES ? EMPTY_STATE : parseGuiState(text, platform);
+    } finally {
+      await handle.close();
+    }
   } catch {
     return EMPTY_STATE;
   }
 }
 
+/** The writer's exact layout, including its last newline; the policy measures UTF-16 length. */
+function stateText(state: GuiState): string {
+  return `${JSON.stringify({ schemaVersion: 1, recentWorkspaces: state.recentWorkspaces, workspaceMemory: state.workspaceMemory, ...(state.window === undefined ? {} : { window: state.window }) }, null, 2)}\n`;
+}
+
+/** Length of an array element in the pretty-printed file, including its indentation on each line. */
+function indentedLength(value: unknown, indent: number): number {
+  const text = JSON.stringify(value, null, 2);
+  let lines = 1;
+  for (const character of text) if (character === "\n") lines += 1;
+  return text.length + indent * lines;
+}
+
+/**
+ * Fits the exact writer layout without changing the input. Oldest runs go first, then the ends
+ * of the workspace-memory and recent lists. Whole-state serialization is done only at the
+ * beginning and for the final check; removed elements are accounted for once each.
+ */
+export function fitGuiState(state: GuiState): GuiState {
+  let length = stateText(state).length;
+  if (length <= MAX_FILE_BYTES) return state;
+  const removed = state.workspaceMemory.map(() => new Set<number>());
+  const counts = state.workspaceMemory.map(memory => memory.runs.length);
+  const oldest = state.workspaceMemory.flatMap((memory, workspace) => memory.runs.map((run, index) => ({ run, workspace, index })));
+  oldest.sort((a, b) => a.run.runId < b.run.runId ? -1 : a.run.runId > b.run.runId ? 1 : a.workspace - b.workspace || a.index - b.index);
+  for (const item of oldest) {
+    if (length <= MAX_FILE_BYTES) break;
+    // Removing the only element also removes the array's line breaks and closing indent (6).
+    length -= indentedLength(item.run, 8) + (counts[item.workspace] === 1 ? 8 : 2);
+    counts[item.workspace]! -= 1;
+    removed[item.workspace]!.add(item.index);
+  }
+  const workspaceMemory = state.workspaceMemory.map((memory, i) => removed[i]!.size === 0 ? memory : { ...memory, runs: memory.runs.filter((_run, index) => !removed[i]!.has(index)) });
+  while (length > MAX_FILE_BYTES && workspaceMemory.length > 0) {
+    length -= indentedLength(workspaceMemory.at(-1), 4) + (workspaceMemory.length === 1 ? 4 : 2);
+    workspaceMemory.pop();
+  }
+  const recentWorkspaces = [...state.recentWorkspaces];
+  while (length > MAX_FILE_BYTES && recentWorkspaces.length > 0) {
+    length -= indentedLength(recentWorkspaces.at(-1), 4) + (recentWorkspaces.length === 1 ? 4 : 2);
+    recentWorkspaces.pop();
+  }
+  const fitted: GuiState = { ...state, recentWorkspaces, workspaceMemory };
+  // Valid window memory and the empty lists fit easily. Reject an unbounded invalid caller
+  // value rather than ever writing a file above the limit or silently changing its window.
+  if (stateText(fitted).length > MAX_FILE_BYTES) throw new RangeError("GUI state cannot fit within its file limit");
+  return fitted;
+}
+
 /** Writes the whole state through a temporary file and a rename, so a reader never sees half of it. */
 export async function writeGuiState(file: string, state: GuiState): Promise<void> {
+  const text = stateText(fitGuiState(state));
   await mkdir(dirname(file), { recursive: true });
   const temporary = `${file}.${randomBytes(6).toString("hex")}.tmp`;
-  const text = `${JSON.stringify({ schemaVersion: 1, recentWorkspaces: state.recentWorkspaces, workspaceMemory: state.workspaceMemory, ...(state.window === undefined ? {} : { window: state.window }) }, null, 2)}\n`;
   try {
     await writeFile(temporary, text, { encoding: "utf8", flag: "wx" });
     await rename(temporary, file);

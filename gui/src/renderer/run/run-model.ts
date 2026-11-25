@@ -126,14 +126,11 @@ export class RunModel {
     return true;
   }
 
-  /** GU-5: an apply starts (DR-2: shown as a run); the session's goal stays for running again. */
-  startingApply(approval: string): boolean {
+  /** GU-5: an apply uses its plan's form; the session's goal stays for running again. */
+  startingApply(approval: string, form: Pick<RunRequest, "profile" | "workflow"> = this.last ?? { profile: null, workflow: null }): boolean {
     if (!this.canStart) return false;
-    const last = this.last;
-    this.starting({ goal: "", profile: null, workflow: null });
-    // An apply belongs to the open plan's workspace, even after a task-file run.
-    // Keep the session's quick-run form, but not the earlier task-file marker.
-    this.last = last === null ? null : { goal: last.goal, profile: last.profile, workflow: last.workflow };
+    // The plan's form is known; an earlier task-file marker does not apply here.
+    this.starting({ goal: this.last?.goal ?? "", profile: form.profile, workflow: form.workflow });
     this.approval = approval;
     return true;
   }

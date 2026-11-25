@@ -88,7 +88,7 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView, formKno
       const message = el("div", undefined, { role: "alert" });
       const agree = button(t.format("run.consentAsk"), () => {
         deps.activateWorkspace?.();
-        if (!run.startingApply(approval)) return;
+        if (!run.startingApply(approval, run.last ?? { profile: null, workflow: null })) return;
         agree.setAttribute("disabled", "");
         void (async () => {
           const started = asStartRun(await api.applyPlan(approval, true));

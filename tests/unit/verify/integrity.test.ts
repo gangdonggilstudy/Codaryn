@@ -57,7 +57,7 @@ async function dirLink(target: string, link: string): Promise<void> {
 describe("K2 capture", () => {
   test("lists every file below the protected entries with its SHA-256; directories have no entry; missing is absent", async (t) => {
     const sb = await sandbox(t);
-    const big = Buffer.alloc(1_500_000, 7); // read as a stream (over 1 MiB)
+    const big = Buffer.alloc(1_500_000, 7); // over 1 MiB: read in 64 KiB pieces through the opened handle
     await put(sb.ws, "tests/a.test.js", "test a\n");
     await put(sb.ws, "tests/sub/b.test.js", "test b\n");
     await put(sb.ws, "tests/sub/blob.bin", big);

@@ -46,7 +46,7 @@ import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand, revertOnce, revertOutput, startRevert } from "./revert-command.js";
-import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
+import { defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { checkDoctor } from "./doctor.js";
 import type { CommandOutcome } from "./command-outcome.js";
 import { initIn } from "./init-command.js";
@@ -81,7 +81,7 @@ import { checkApplyArguments, checkApplyIn } from "./check-apply.js";
 import { changesPlanViewIn, checkChangesPlanFiles, storedPlanKindOf } from "./changes-plan.js";
 import type { ApplyCheckOperations } from "./check-apply.js";
 import { readWorkspaceTextArguments, readWorkspaceTextIn, writeWorkspaceTextArguments, writeWorkspaceTextIn } from "./workspace-text.js";
-import type { WorkspaceTextOperations, WorkspaceTextSource } from "./workspace-text.js";
+import type { WorkspaceTextOperations } from "./workspace-text.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { appRunHooks } from "./run-hooks.js";
@@ -144,6 +144,7 @@ import type {
   StartRunRequest,
   TaskForm,
 } from "./types.js";
+import { createReadingContext } from "./reading-context.js";
 
 /**
  * Replaceable parts, for tests: the Anthropic provider factory and its transport (as the CLI's
@@ -276,6 +277,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const platform = environment.platform ?? process.platform;
   const locate = (file: string, workspaceRoot: string) => locateInWorkspace(file, workspaceRoot);
   const relate = (target: string, base: string) => relateRealPaths(target, base);
+  const { readingSecrets, workspaceTextSource } = createReadingContext(environment, platform, locate, relate, defaultConfigOf, PROBE_GOAL);
 
   /**
    * The CLI's run environment with this environment's parts. `env` is the call's own copy; the
@@ -379,72 +381,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     return { ok: true, handle };
   }
 
-  /**
-   * The secrets and the workspace of these settings for a reading command (DR-7, DR-17): the CLI's
-   * own steps 1 to 7 (prepareTask), the ones `run`, `plan`, `apply` and `review` share, so the
-   * secrets are the ones a run with these settings registers now. U-17 (DR-46): as a command that
-   * runs nothing (`readOnly`), so the quick form needs no key, model or run limits. No lock,
-   * journal or file is made and nothing is sent. Used by `changes`, `listWorkspaceDir` and `listRunEvents`. U-89: also
-   * the effective policy's protected paths and every API key value set now (with the variables file).
-   */
-  async function readingSecrets(
-    settings: TaskForm,
-  ): Promise<
-    | {
-        readonly ok: true;
-        readonly secrets: readonly string[];
-        readonly workspaceRoot: string;
-        readonly protectedPaths: readonly string[] | undefined;
-        readonly keys: readonly string[];
-        readonly task: ResolvedTaskSpec;
-        /** U-172: the config, task and variables files these settings name, absolute (the config as prepareTask chose it). */
-        readonly settingsFiles: readonly string[];
-      }
-    | { readonly ok: false; readonly error: AppError }
-  > {
-    const env = copyEnvironment(environment.env, platform);
-    const args: RunArgs = {
-      command: "run",
-      input: settings.input.kind === "task" ? { kind: "task", taskPath: settings.input.taskPath } : { kind: "quick", workspace: settings.input.workspace, goal: PROBE_GOAL, oneLine: false },
-      configPath: settings.configPath,
-      varsFile: settings.varsFile,
-      cancelFile: null,
-      quiet: true,
-      profile: settings.profile,
-      workflow: settings.workflowRef,
-    };
-    const io: PrepareEnvironment = {
-      env,
-      cwd: environment.cwd,
-      readFile: environment.readFile,
-      isDirectory: environment.isDirectory,
-      loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
-      locateInWorkspace: locate,
-      relatePaths: relate,
-      installDir: environment.installDir,
-      // N-1: the same default config location the CLI reads (main.ts).
-      defaultConfig: defaultConfigOf(),
-    };
-    const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
-    const ready = await prepareTask(io, args, notes, { readOnly: true });
-    if (!("prepared" in ready)) return { ok: false, error: ready.output.kind === "error" ? fromCliError(ready.output) : INTERNAL_ERROR };
-    // U-172: with the variables file loaded, as prepareTask chose the config.
-    const settingsFiles: string[] = [];
-    if (settings.input.kind === "task") settingsFiles.push(path.resolve(environment.cwd, settings.input.taskPath));
-    if (settings.varsFile !== null) settingsFiles.push(path.resolve(environment.cwd, settings.varsFile));
-    const config = chooseConfigFile({ argument: settings.configPath, env, cwd: environment.cwd, defaultLocation: defaultConfigOf() });
-    if (config.ok && config.candidate !== null) settingsFiles.push(config.candidate.path);
-    return {
-      ok: true,
-      secrets: ready.prepared.secrets,
-      workspaceRoot: ready.prepared.task.workspaceRoot,
-      protectedPaths: ready.prepared.task.policy.protectedPaths,
-      keys: knownKeyValues(env),
-      task: ready.prepared.task,
-      settingsFiles,
-    };
-  }
-
   /** DR-7, DR-29: a run's changes. U-234 (R-107 O-1): `options.signal` is given to the reads of the current files. */
   async function changes(request: ChangesRequest, options: ChangesOptions = {}): Promise<AppCallOutcome<ChangesOutput>> {
     try {
@@ -478,18 +414,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     } catch {
       return { ok: false, error: appError("internal_error", "the directory could not be listed") };
     }
-  }
-
-  /** U-172: what the settings resolve to for a workspace text file. */
-  async function workspaceTextSource(settings: TaskForm): Promise<{ readonly ok: true; readonly source: WorkspaceTextSource } | { readonly ok: false; readonly error: AppError }> {
-    const probe = await readingSecrets(settings);
-    if (!probe.ok) return probe;
-    const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
-    if (!root.ok) return root;
-    return {
-      ok: true,
-      source: { workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys, protectedPaths: probe.protectedPaths, settingsFiles: probe.settingsFiles },
-    };
   }
 
   /** U-172 (DR-72, adapter-contract 5.15): a workspace text file for a person, and whether it can be edited here (workspace-text.ts). */

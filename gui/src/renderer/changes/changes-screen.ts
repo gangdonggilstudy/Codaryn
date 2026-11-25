@@ -167,15 +167,18 @@ function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boo
 export function changesScreen(deps: ChangesDeps): ChangesScreen {
   const { texts: t, api } = deps;
   let chosen: { runId: string; profile: string | null; workflow: string | null; file: string | null } | null = null;
+  let generation = 0;
   // U-66: the view stays while the window is open.
   let view: ChangesView = { side: false, wrap: true };
   return {
     id: "changes",
     title: "nav.changes",
     choose(runId, profile, workflow, file = null) {
+      generation += 1;
       chosen = { runId, profile, workflow, file };
     },
     show(root) {
+      const shown = ++generation;
       const workspace = deps.current();
       const body = el("div", undefined, { id: "changes" });
       root.replaceChildren(el("h2", t.format("changes.title")), body);
@@ -201,6 +204,8 @@ export function changesScreen(deps: ChangesDeps): ChangesScreen {
       void (async () => {
         body.replaceChildren(el("p", t.format("runs.loading")));
         const reply = asChanges(await api.changes(workspace.handle, target.runId, target.profile, target.workflow));
+        // Only this view's latest request may draw files or change the current tree's marks.
+        if (shown !== generation || deps.current()?.handle !== workspace.handle || !root.contains(body) || body.isConnected === false) return;
         if (!reply.ok) {
           body.replaceChildren(el("div", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { role: "alert", class: "error", "data-error": reply.code }));
           body.setAttribute("data-changes-ready", "error");

@@ -82,7 +82,7 @@ export function homeScreen(deps: HomeDeps): Screen {
             const open = button(t.format("home.recentOpen"), () => {
               void (async () => {
                 const reply = asOpen(await api.openRecent(item.id));
-                if (reply.ok) deps.opened({ handle: reply.handle, name: reply.name });
+                if (reply.ok) deps.opened({ handle: reply.handle, name: reply.name, lastForm: reply.lastForm });
                 else showError(reply.code);
               })();
             });

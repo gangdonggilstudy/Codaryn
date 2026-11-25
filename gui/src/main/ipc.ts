@@ -68,6 +68,7 @@ export function registerIpc(deps: IpcDeps): void {
   let language: "ko" | "en" = "en";
   let starting = false;
   let reverting = false;
+  let treeEpoch = 0;
   const handle = <R>(channel: string, handler: (args: unknown[]) => Promise<R>): void => {
     ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<R | null> => {
       if (!fromAppWindow(event, deps.window())) return null;
@@ -75,7 +76,7 @@ export function registerIpc(deps: IpcDeps): void {
     });
   };
   const context: IpcHandlerContext = { deps, workspaces };
-  const workspaceHandlers = createWorkspaceHandlers(context);
+  const workspaceHandlers = createWorkspaceHandlers(context, () => treeEpoch);
   const historyHandlers = createHistoryHandlers(context);
 
   handle(IPC_CHANNELS.info, async (args): Promise<InfoView | null> => {
@@ -113,6 +114,7 @@ export function registerIpc(deps: IpcDeps): void {
    * window is told to read its tree again.
    */
   const dropTreeIds = (): void => {
+    treeEpoch++;
     workspaces.treeIds.clear();
     // U-184: an edit token stands for a tree or changes entry too; a settings write drops them.
     deps.textEdits.clear();
@@ -414,9 +416,11 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const root = workspaces.path(parsed.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
+    const epoch = treeEpoch;
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
     const response = await state.host.call("changes", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    if (treeEpoch !== epoch || workspaces.path(parsed.workspace) !== root) return { ok: false, code: "unknown_entry" };
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toChangesReply(response.value);
     if (!reply.ok) return reply;
@@ -424,7 +428,10 @@ export function registerIpc(deps: IpcDeps): void {
     // U-66 (3.4): "show in folder" takes the tree's ids, given here for plain paths that are there; the page never names a path.
     // U-123 (R-87 U-66 L1): "there" is looked at on disk (lstat inside the root): a path the app layer
     // masked (a key shape shown as [key]) names nothing there and gets no id.
-    const files = await Promise.all(reply.files.map(async (file) => ({ ...file, id: revealableChange(file) && (await pathOnDisk(root, file.path)) ? workspaces.treeIds.issue(parsed.workspace, file.path) : null })));
+    const available = await Promise.all(reply.files.map(file => revealableChange(file) ? pathOnDisk(root, file.path) : false));
+    // A reset can happen during any disk check. Issue all ids synchronously after the final check.
+    if (treeEpoch !== epoch || workspaces.path(parsed.workspace) !== root) return { ok: false, code: "unknown_entry" };
+    const files = reply.files.map((file, index) => ({ ...file, id: available[index] ? workspaces.treeIds.issue(parsed.workspace, file.path) : null }));
     return { ...reply, files };
   });
 

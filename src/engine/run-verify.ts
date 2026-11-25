@@ -50,6 +50,10 @@ export function createRunVerify(
     return AWAITING_REVIEW;
   };
 
+  /**
+   * Runs every verifier once (one round). `EngineResult.verifiers` holds the latest round.
+   * Returns the end of the run, or the failed results when a repair may follow.
+   */
   const verify = async (): Promise<End | RepairNeeded> => {
     tally.state.transition("verifying");
     const interruption = interrupted();

@@ -144,6 +144,7 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
     /** U-55 (AXM-9): the model error that ended the run (EngineResult.modelError); null otherwise. */
     endingModelError: null,
   };
+  // DR-38: the state directory guard; run-checks.ts (createRunChecks) uses it.
   const stateGuard = deps.stateGuard;
 
   // Real-time deadline so that a model or tool call in flight is interrupted at the duration limit.
@@ -160,10 +161,6 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
   const { endedByModelError, budgetStop, start, converse } = createRunConverse(tally, task, model, privacy, limits, settings, approved, offeredBuiltin, offeredWorkflow, runSignal, mask, maskJson, interrupted, record, recordableCalls, noteActivity, handleCall);
   const { verify, repair, checkApprovedPlan } = createRunVerify(tally, task, verifiers, settings, limits, integrity, policy, runSignal, mask, interrupted, record, checkPoint, checkState, noteActivity, budgetStop);
 
-  /**
-   * Runs every verifier once (one round). `EngineResult.verifiers` holds the latest round.
-   * Returns the end of the run, or the failed results when a repair may follow.
-   */
   const runLoop = async (): Promise<End> => {
     const system = await start();
     if (typeof system !== "string") return system;

@@ -1,7 +1,7 @@
 /** Run start, result, confirmation and plan-check IPC checks. Public callers use ../ipc.js. */
 import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, isRunId, shortText, textList, ERROR_CODE, DIGEST, hostCodeOf, NAME, numOrNull } from "./primitives.js";
-import { toFinalMessage, toPlanActions } from "./core.js";
-import type { FinalMessageView, PlanActionView, RunItemView } from "./core.js";
+import { toFinalMessage, toPlanActions, RUN_STATUSES, maskingOf } from "./core.js";
+import type { FinalMessageView, PlanActionView, RunItemView, RunResultView, ConfirmationsView } from "./core.js";
 
 /** GU-3: the longest goal the window sends (the CLI's own checks still run in startRun). */
 export const MAX_GOAL_CHARS = 20_000;
@@ -29,75 +29,12 @@ export function parseStartRunArgs(value: unknown): { readonly workspace: string;
   return { workspace, goal, profile: profile as string | null, workflow: workflow as string | null };
 }
 
-export const RUN_STATUSES = ["done", "failed", "needs-input", "cancelled", "budget-exhausted"] as const;
 const REASON = /^[a-z][a-z_]{0,39}$/;
 export interface RunEventsPayload {
   readonly runId: string;
   readonly items: readonly RunItemView[];
   /** U-271 (3.6): `limits`, the run's limits once known (protocol.ts RunLimitsView). */
   readonly counts: { readonly turns: number; readonly tools: number; readonly limits?: { readonly turns: number; readonly tools: number; readonly durationMs: number } };
-}
-
-/**
- * U-40 (DR-52, AXM-17): whether masking worked, in counts only (EngineResult.masking): the values
- * registered for masking, and the places masked in what was sent to the model. Never a value, a
- * place or a length. The screens show it as the CLI's end summary does (`summary.masking`).
- */
-export interface MaskingView {
-  readonly registeredValues: number;
-  readonly maskedPlaces: number;
-}
-
-/**
- * The two counts rebuilt from `value`, or null: when there is none (nothing registered, a result
- * written before DR-52), and when either is not a count (a whole number from 0), as the CLI's end
- * summary shows no line then. Nothing else the field holds is carried. The engine host and the
- * main process both use it.
- */
-export function maskingOf(value: unknown): MaskingView | null {
-  if (!isObj(value)) return null;
-  const { registeredValues, maskedPlaces } = value;
-  return count(registeredValues) && count(maskedPlaces) ? { registeredValues, maskedPlaces } : null;
-}
-
-/** GU-3 (3.7 summary): what the window shows of a finished run. Texts are masked and cleaned. */
-export interface RunResultView {
-  readonly runId: string;
-  readonly status: (typeof RUN_STATUSES)[number];
-  readonly reason: string;
-  readonly exitCode: number | null;
-  readonly changes: readonly { readonly path: string; readonly created: boolean }[];
-  readonly verifiers: readonly { readonly number: number; readonly outcome: string }[];
-  readonly usage: {
-    readonly turns: number | null;
-    readonly tools: number | null;
-    readonly inputTokens: number | null;
-    readonly outputTokens: number | null;
-    readonly durationMs: number | null;
-  };
-  readonly notices: readonly string[];
-  /** U-226 (U-221): `kind` "changes" for a run plan, whose `actions` is its number of files. */
-  readonly plan: { readonly digest: string; readonly actions: number | null; readonly kind?: "changes" } | null;
-  readonly review: { readonly checklist: readonly string[] } | null;
-  readonly protectedChanged: number | null;
-  /** GU-5: "apply" for an apply run (DR-2), with its plan run, its done actions and the unsafe moves its check found. */
-  readonly kind: "run" | "apply";
-  readonly planRunId: string | null;
-  readonly unsafeMoves: number | null;
-  readonly applied: readonly PlanActionView[];
-  /** U-21 (DR-47): the agent's last message; null when there is none (a plan or apply run, an older result). */
-  readonly finalMessage?: FinalMessageView | null;
-  /** U-40 (DR-52): the masking counts; null when there are none or they are not counts. */
-  readonly masking?: MaskingView | null;
-  /** U-124: how the run's permission questions ended (counts), or null/absent when none was asked. */
-  readonly confirmations?: ConfirmationsView | null;
-  /**
-   * U-226 (U-218): a run that carried out a run plan (kind "run" with `planRunId`): its writes
-   * refused because the approved plan does not name the file (path_not_writable). Absent otherwise.
-   */
-  readonly deniedNotPlanned?: number;
-  /** U-226 (R-109, U-193): the run's (or apply's) workspace lock could not be released at its end. */
-  readonly lockLeft?: true;
 }
 
 export type RunDonePayload =
@@ -183,18 +120,6 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       ...(lockLeft === true ? { lockLeft } : {}),
     },
   };
-}
-
-/**
- * U-124 (3.6, DR-3, DR-10): how a run's permission questions ended, from its own records: allowed
- * for one call, and denied by the person, by default (no answer: the dialog could not be shown, or
- * the time limit ended the wait) or because the run was cancelled while it waited.
- */
-export interface ConfirmationsView {
-  readonly allowed: number;
-  readonly user: number;
-  readonly default: number;
-  readonly cancelled: number;
 }
 
 export function confirmationsOf(value: unknown): ConfirmationsView | null {

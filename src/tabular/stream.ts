@@ -32,7 +32,9 @@ export type TableCells = readonly string[] | ReadonlyMap<string, string>;
 export interface TableSink {
   /**
    * The columns known so far. csv and tsv give the header once, before any row. jsonl gives the list
-   * again, longer, each time a row brings a key not seen before, just before that row.
+   * again, longer, each time a row brings a key not seen before, just before that row, to a sink
+   * without `sparseRow`. A sink with `sparseRow` gets new names through `columnsAdded` instead, and
+   * `columns` only before a dense row when the width changed since its previous `columns`.
    */
   columns?(columns: readonly string[]): void;
   /**

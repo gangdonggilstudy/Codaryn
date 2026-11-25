@@ -37,7 +37,7 @@
   - **코드 기준**: main `f8fb993`의 소스를 읽어 확인했다.
   - **실제 CLI**: main `f8fb993`를 빌드한 CLI를 임시 폴더에서 실행해 확인했다(대본 모델, 키 없음, 닫힌 루프백 포트).
   - 표시가 없는 "구현"은 앞선 판의 시험과 검토가 근거다([개발 진행 현황](progress.md)).
-- 근거: [decisions.md](decisions.md). 결정 번호(C-, R-, S-, T-, N-, AC-D, VX-D, GT-D, DR- 등)의 원문은 `docs/work-orders/`와 각 설계 문서의 결정 표다. "AC 5.7"은 [어댑터 계약](design/adapter-contract.md) 5.7절이다.
+- 근거: [decisions.md](decisions.md). 결정 번호(C-, R-, S-, T-, N-, AC-D, VX-D, GT-D, DR- 등)의 원문은 `docs/work-orders/`와 각 설계 문서의 결정 표다. "AC n"은 [어댑터 계약](design/adapter-contract.md)의 n절이다.
 
 ## 1. 목표와 설계 원칙
 
@@ -397,7 +397,7 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
   - GUI의 파일 보기(DR-72, U-174·U-184)는 앱 계층이 지금 가린 글만 그린다. 가리면 글이 달라지는 파일은 읽기 전용이라, 고칠 수 있는 파일은 화면의 글과 파일의 글이 같다. 등록 값이나 키 모양이 든 새 글은 저장하지 않는다(`text_refused`). 화면은 경로를 보내지 않고 메인이 준 항목 id와 편집 토큰만 쓴다. 코드 기준.
   - 계획 보기도 다시 가린 표기가 저장된 것과 같을 때만 보인다(DR-28).
   - 자료 분석(`analyze`)이 `read_file`로 읽은 표는 원자료 행이 모델로 간다. 가림은 등록한 비밀 값에만 적용된다. 그래서 개인정보가 든 표는 읽기 제외 경로 아래에 두고 `analyze-private`로 다룬다. 모델은 `query_table`의 집계만 받는다(GT-D8 (b), 사용자 확정 DR-23, DR-70. [민감정보 처리](privacy.md) 15절).
-  - 확인 질문의 글은 화면에 보이려고 복원하지 않는다(AC 5.9). 확인 질문 자체가 아직 없다(DR-3).
+  - 확인 질문의 글은 화면에 보이려고 복원하지 않는다(AC 5.9). 실행 중 권한 확인 질문은 엔진(U-74), 앱 계층(U-108), CLI의 터미널 질문(U-110), GUI의 OS 대화상자(U-124)에 있다(DR-3).
 
 **도구 실행(`src/tools/command-runner.ts`).**
 - 자식 환경

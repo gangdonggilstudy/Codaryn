@@ -7,6 +7,7 @@
  * run registry for a run, a task file's run and an apply, started and refused, and neither the call's
  * answer nor any line written for the main process holds a field name, the marker or the language.
  * No product code changes with it.
+ * Waiting: each case waits until the registry holds no run and, when started, its "done" line is written (at most 5 s), not a fixed delay.
  */
 
 import assert from "node:assert/strict";
@@ -74,7 +75,12 @@ async function written(way: Way, refuse: boolean): Promise<{ readonly reply: unk
       : way === "task file"
         ? await registry.startTask({ taskPath: "C:\\tasks\\t.json", varsFile: null })
         : await registry.startApply({ workspace: "C:\\ws", profile: null, workflowRef: null, planRunId: "20261114T070000Z-0000b298", digest: "ab".repeat(32), consent: false });
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // A started run ends on its own (5 ms in `begin`) and the registry then writes "done" as it lets the run go; a
+  // refused start registers no run, so no flush timer or done handler is left to write. Up to 5 s, then the
+  // assertions report what was written.
+  const deadline = Date.now() + 5_000;
+  const ended = (): boolean => registry.size === 0 && (refuse || lines.some((line) => (JSON.parse(line) as { type?: unknown }).type === "done"));
+  while (!ended() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
   return { reply, lines };
 }
 

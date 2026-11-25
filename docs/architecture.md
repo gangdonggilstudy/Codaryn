@@ -54,7 +54,7 @@
   - 어댑터가 함께 쓰는 실행 준비(입력 해석, 실행 전 보안 검사, 조립, 실행 수명)를 앱 계층 `src/app`에 둔다(AC-D1). `src/app`은 있고, GUI 엔진 호스트는 앱 계층만 부른다(`gui/src/engine-host/host.ts`).
   - CLI의 `run`은 앱의 `prepareTask`·조립·`runLife`를, 계획 적용은 `applyLife`를 공유한다. `report`·`revert`·`runs`도 공통 읽기·되돌리기·작업 공간/실행 참조 규칙을 쓰며, `doctor`·`models`·`init`는 앱 core를 직접 부른다. `changes`는 앱의 공개 명령을 부른다. C1~C11의 공통 규칙 이행은 완료됐지만 CLI 고유 parser·질문·출력까지 모두 이동한 것은 아니다([어댑터 계약 7.2절](design/adapter-contract.md)). 다음 DR-65의 진행 순서·병합 조건은 이행 때 적용한 결정의 이력이다. 사용자 결정으로 이행은 "최종 설계까지 구현"에 들지만, 실행 중 권한 확인·GUI 남은 항목·사용성 지적 뒤에 직렬로 하고, 단위마다 고정 출력이 글자까지 같아야 병합한다(DR-65).
   - AC-D16이 허용한 app→CLI 임시 의존은 C11에서 제거했다. 현재 `src/app` 소스에서 CLI를 향하는 정적 import·재수출, 동적 import·require, 실행 경로 문자열 의존은 없다. 옛 CLI 경로의 재수출은 CLI→app 방향이다.
-  - 같은 대본을 CLI와 GUI 엔진 호스트로 돌려 결과와 기록을 비교하는 계약 층 시험은 한 대본 사례만 있다: 실제 CLI와 별도 엔진 호스트의 전체 저장 result·journal 비교(CP53 `823486b5`, `gui/tests/unit/cli-host-parity.test.ts`). 그 밖의 사례와 취소·권한 확인의 기본 거부·`by` 값의 비교는 아직 없다.
+  - 같은 대본을 CLI와 GUI 엔진 호스트로 돌려 결과와 기록을 비교하는 계약 층 시험은 다섯 사례다. 모두 실제 CLI와 별도 엔진 호스트의 전체 저장 result·journal을 비교한다. CP53의 한 사례(`823486b5`, `gui/tests/unit/cli-host-parity.test.ts`)와 CP-65의 C-1~C-4(`d692e8d6`, `gui/tests/unit/cli-host-contract.test.ts`: 검증 실패 뒤 재수정, 도구 호출 한도, 모델 요청 중 취소, 권한 질문의 기본 거부 `by: "default"`. C-4는 루프백 가짜 API)다. 사람의 거부(`by: "user"`), 질문 중 취소(`by: "cancelled"`), 질문 대기의 시간 한도는 아직 비교하지 않는다.
   - VS Code 확장(VX-D1)은 **중단**(DR-20)이다.
 - [선택] 공통 엔진은 Git이나 코드 테스트를 전제로 하지 않는다. Git은 후보 준비 스크립트(엔진 밖)만 쓴다. **구현**
 - [선택] 테스트 통과는 "그 검증기가 확인한 범위에서 통과"만 뜻한다. 보안이나 정확성 전체를 보장한다고 쓰지 않는다.

@@ -286,7 +286,7 @@ OpenAI의 Responses API(`POST /v1/responses`)를 쓴다. Anthropic과 다른 점
 - 자식 환경
   - 허용 목록 11개 이름(PATH, PATHEXT, SYSTEMROOT, WINDIR, COMSPEC, TEMP, TMP, TMPDIR, HOME, USERPROFILE, LANG)만 넘긴다.
   - 그 값에 등록된 가릴 값이 들어 있으면 그 변수도 뺀다(T-1). **구현**
-  - Windows에서 libuv가 스스로 넣는 변수(USERNAME 등)는 이 검사를 거치지 않는다.
+  - Windows에서 libuv가 스스로 넣는 변수 여섯(USERNAME, USERDOMAIN, HOMEDRIVE, HOMEPATH, LOGONSERVER, SYSTEMDRIVE)은 이 검사를 거치지 않는다.
 - 명령은 허용 규칙(실행 파일, 인자 접두사)으로만 실행한다. 대화형 승인은 없다. 작업 디렉터리는 허용 루트 안이다.
 - 이 조치는 OS 수준 강제가 아니다. [설계] 그래서 "네트워크 차단"이나 "파일 접근 차단"이라고 부르지 않는다. OS 격리 실행기는 [미정].
   - 실행된 명령(검증기 포함)은 디스크의 원문(스냅샷, 작업 공간 밖 파일)을 읽을 수 있다.

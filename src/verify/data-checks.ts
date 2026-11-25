@@ -67,7 +67,7 @@ import type {
 } from "../contracts/index.js";
 import type { PathSet } from "../policy/path-set.js";
 import { RunningAggregate, findColumn, parseNumber, scanTable, withinTolerance } from "../tabular/index.js";
-import type { AggregateOutcome, TableProblem, TableScanOutcome, TableSink, Tolerance } from "../tabular/index.js";
+import type { AggregateOutcome, TableCells, TableProblem, TableScanOutcome, TableSink, Tolerance } from "../tabular/index.js";
 import { createRawVerifierResult } from "./result.js";
 import { unreadablePathSet } from "./unreadable.js";
 
@@ -287,7 +287,8 @@ class ColumnAt {
   }
 
   /** The row's cell; empty while the column is not known (a jsonl row without the key, or a column the verdict refuses). */
-  cell(cells: readonly string[]): string {
+  cell(cells: TableCells): string {
+    if ("get" in cells) return cells.get(this.name) ?? "";
     return this.index === null ? "" : (cells[this.index] ?? "");
   }
 }
@@ -316,7 +317,11 @@ class SourceTally implements TableSink {
     this.key?.see(columns);
   }
 
-  row(cells: readonly string[], dataRow: number): void {
+  sparseRow(cells: ReadonlyMap<string, string>, dataRow: number): void {
+    this.row(cells, dataRow);
+  }
+
+  row(cells: TableCells, dataRow: number): void {
     const cell = this.column.cell(cells);
     if (this.key === null) {
       this.total.add(cell, dataRow);
@@ -364,7 +369,11 @@ class TargetTally implements TableSink {
     this.key?.see(columns);
   }
 
-  row(cells: readonly string[], dataRow: number): void {
+  sparseRow(cells: ReadonlyMap<string, string>, dataRow: number): void {
+    this.row(cells, dataRow);
+  }
+
+  row(cells: TableCells, dataRow: number): void {
     if (this.key === null) {
       if (dataRow === 1) this.firstCell = this.column.cell(cells);
       return;

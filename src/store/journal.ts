@@ -7,13 +7,14 @@
 
 import { createHash } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
-import { open, readFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 
-import { JOURNAL_FILE_NAME } from "../contracts/index.js";
+import { JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES } from "../contracts/index.js";
 import type { Clock } from "../contracts/index.js";
 import { assertRunId, ensureRunDir, errorCode, runDir } from "./common.js";
 import type { RunWriteNotes } from "./run-writes.js";
+import { readBoundedText } from "./read-bounded.js";
 
 export interface JournalOptions {
   /** Real absolute path of the workspace root. */
@@ -56,7 +57,7 @@ export function appendOnlyJournal<E extends { readonly type: string }>(
     if (notes !== undefined) await notes.dir(dir);
     let existing = "";
     try {
-      existing = await readFile(file, "utf8");
+      existing = await readBoundedText(file, MAX_REPORT_FILE_BYTES);
     } catch (error) {
       if (errorCode(error) !== "ENOENT") throw error;
     }

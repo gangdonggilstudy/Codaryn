@@ -24,3 +24,10 @@ export async function readBounded(file: string, max: number): Promise<Buffer | "
     await handle.close();
   }
 }
+
+/** UTF-8 as readFile(..., "utf8") decoded it; oversize follows the caller's existing read-error path. */
+export async function readBoundedText(file: string, max: number): Promise<string> {
+  const bytes = await readBounded(file, max);
+  if (bytes === "too_large") throw new RangeError("record exceeds its read budget");
+  return bytes.toString("utf8");
+}

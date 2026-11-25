@@ -23,6 +23,7 @@ import {
   CONTENT_HASH_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   MAX_READ_BYTES,
+  MAX_REPORT_FILE_BYTES,
   PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
@@ -48,6 +49,7 @@ import { ApplyRecordError, PlanRunMissingError, isApplyJournal, revertApplyRun }
 import { assertRunId, ensureRunDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir, sha256Hex } from "./common.js";
 import { recordsChangedMarkIn } from "./marks.js";
 import type { RunWriteNotes } from "./run-writes.js";
+import { readBounded, readBoundedText } from "./read-bounded.js";
 
 const INDEX_FILE_NAME = "index.json";
 /**
@@ -133,7 +135,7 @@ function parseIndex(text: string): IndexEntry[] | null {
 async function readIndex(dir: string): Promise<IndexEntry[] | "missing" | "invalid"> {
   let text: string;
   try {
-    text = await readFile(join(dir, INDEX_FILE_NAME), "utf8");
+    text = await readBoundedText(join(dir, INDEX_FILE_NAME), MAX_REPORT_FILE_BYTES);
   } catch (error) {
     const code = errorCode(error);
     if (code === "ENOENT" || code === "ENOTDIR") return "missing";
@@ -285,7 +287,7 @@ async function readShown(dir: string, entry: IndexEntry, position: number): Prom
     const file = join(dir, shownFileName(position));
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_SHOWN_FILE_BYTES) return null;
-    value = JSON.parse(await readFile(file, "utf8"));
+    value = JSON.parse(await readBoundedText(file, MAX_SHOWN_FILE_BYTES));
   } catch {
     return null;
   }
@@ -440,7 +442,9 @@ async function originalOf(
   if (change.before === null) return { reason: "missing_snapshot" };
   let bytes: Buffer;
   try {
-    bytes = await readFile(join(snapshots.dir, entry.file));
+    const read = await readBounded(join(snapshots.dir, entry.file), MAX_READ_BYTES);
+    if (read === "too_large") return { reason: "missing_snapshot" }; // MRR-1: larger than any original a run keeps, as the hash check said
+    bytes = read;
   } catch (error) {
     return { reason: errorCode(error) === "ENOENT" ? "missing_snapshot" : "io_error" };
   }
@@ -524,7 +528,7 @@ export const revertRun: RevertRun = async (request) => {
 
   let text: string;
   try {
-    text = await readFile(join(dir, JOURNAL_FILE_NAME), "utf8");
+    text = await readBoundedText(join(dir, JOURNAL_FILE_NAME), MAX_REPORT_FILE_BYTES);
   } catch (error) {
     const code = errorCode(error);
     if (code === "ENOENT" || code === "ENOTDIR") {
@@ -602,7 +606,9 @@ async function originalText(change: ChangedPath, snapshots: Snapshots): Promise<
     const info = await lstat(file);
     if (!info.isFile()) return { unavailable: "snapshot_missing" };
     if (info.size > MAX_READ_BYTES) return { unavailable: "too_large" };
-    bytes = await readFile(file);
+    const read = await readBounded(file, MAX_READ_BYTES);
+    if (read === "too_large") return { unavailable: "too_large" };
+    bytes = read;
   } catch (error) {
     const code = errorCode(error);
     return { unavailable: code === "ENOENT" || code === "ENOTDIR" ? "snapshot_missing" : "unreadable" };
@@ -640,7 +646,7 @@ export async function readRunOriginals(request: { readonly workspaceRoot: string
   if (!(await isPlainDirectory(dir))) throw new RevertRunError("invalid_run_record", "the run directory is a link; it is not read");
   let text: string;
   try {
-    text = await readFile(join(dir, JOURNAL_FILE_NAME), "utf8");
+    text = await readBoundedText(join(dir, JOURNAL_FILE_NAME), MAX_REPORT_FILE_BYTES);
   } catch (error) {
     const code = errorCode(error);
     if (code === "ENOENT" || code === "ENOTDIR") throw new RevertRunError("run_not_found", "the workspace has no journal for this run");

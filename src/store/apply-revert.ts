@@ -39,7 +39,7 @@
 
 import { createReadStream } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { link, lstat, mkdir, readFile, readdir, rename, rm, rmdir } from "node:fs/promises";
+import { link, lstat, mkdir, readdir, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -69,6 +69,7 @@ import type {
 import { createWorkspace } from "../workspace/index.js";
 import { errorCode, hasExactRunEntry, isLinkUnsupported, isPlainDirectory, runDir } from "./common.js";
 import { discardedRootPath } from "./discarded.js";
+import { readBounded } from "./read-bounded.js";
 import { canonicalActions } from "./plan.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
@@ -249,7 +250,9 @@ async function trustedPlan(workspaceRoot: string, planRunId: string, digest: Con
   try {
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_REPORT_FILE_BYTES) return bad();
-    bytes = await readFile(file);
+    const read = await readBounded(file, MAX_REPORT_FILE_BYTES);
+    if (read === "too_large") return bad();
+    bytes = read;
   } catch (error) {
     if (errorCode(error) === "ENOENT") planRunMissing();
     return bad();

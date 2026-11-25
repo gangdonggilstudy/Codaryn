@@ -50,6 +50,7 @@ import { join } from "node:path";
 import { LOCK_FILE_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { Clock } from "../contracts/index.js";
 import { StateDirNotPlainError, assertRunId, ensureStateDir, errorCode, isLinkUnsupported } from "./common.js";
+import { readBounded } from "./read-bounded.js";
 import { isRunTimestamp } from "./runs.js";
 
 export interface LockInfo {
@@ -91,7 +92,12 @@ export interface LockFileSystem {
 export const nodeLockFileSystem: LockFileSystem = {
   writeNew: (path, text) => writeFile(path, text, { encoding: "utf8", flag: "wx" }),
   link: (existingPath, newPath) => link(existingPath, newPath),
-  readText: (path) => readFile(path, "utf8"),
+  readText: async (path) => {
+    const bytes = await readBounded(path, 64 * 1024);
+    // Like an unfinished/unreadable lock: never parse or reclaim a prefix of an oversized file.
+    if (bytes === "too_large") throw new TransientLockError();
+    return bytes.toString("utf8");
+  },
   rename: (from, to) => rename(from, to),
   remove: (path) => rm(path, { force: true }),
 };

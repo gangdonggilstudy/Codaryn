@@ -16,7 +16,7 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import type { BigIntStats } from "node:fs";
-import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -64,6 +64,7 @@ import { ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, sameFsPa
 import { acquireLock, inspectLock, releaseLock } from "./lock.js";
 import { recordsChangedMarkIn } from "./marks.js";
 import { isStoredRunId, listRuns, runIdSecond } from "./runs.js";
+import { readBoundedText } from "./read-bounded.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LEFTOVER = new RegExp(CLEANUP_LEFTOVER_PATTERN_SOURCE);
@@ -152,7 +153,7 @@ async function hasOwnMark(dir: string, leftoverId: string): Promise<boolean> {
     const file = join(dir, name);
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_MARK_BYTES) throw new Error("not a mark file");
-    return JSON.parse(await readFile(file, "utf8")) as unknown;
+    return JSON.parse(await readBoundedText(file, MAX_MARK_BYTES)) as unknown;
   };
   try {
     if (isCleanupLeftoverMark(await read(CLEANUP_LEFTOVER_MARK_FILE_NAME), leftoverId)) return true;
@@ -193,7 +194,7 @@ async function appliedBy(planRunDir: string, planRunId: string): Promise<string 
   try {
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_MARK_BYTES) return null;
-    const record = JSON.parse(await readFile(file, "utf8")) as unknown;
+    const record = JSON.parse(await readBoundedText(file, MAX_MARK_BYTES)) as unknown;
     if (typeof record !== "object" || record === null || Array.isArray(record)) return null;
     const { kind, planRunId: named, applyRunId } = record as Record<string, unknown>;
     return kind === "plan_applied" && named === planRunId && typeof applyRunId === "string" ? applyRunId : null;

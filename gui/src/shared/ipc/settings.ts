@@ -1,27 +1,8 @@
 /** Settings, proposals and model selection IPC checks. Public callers use ../ipc.js. */
-import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, shortText, textList } from "./primitives.js";
+import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, shortText, textList, ERROR_CODE, DIGEST, WORD, hostCodeOf } from "./primitives.js";
 
 /** A model provider name as the app layer gives it (DR-22). */
 export const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
-const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
-
-/** The code of an engine host value that is not ok, or "host_error". */
-export function hostCodeOf(value: unknown): string {
-  const code = isObj(value) ? value["code"] : undefined;
-  return typeof code === "string" && ERROR_CODE.test(code) ? code : "host_error";
-}
-
-const HINT_ID = /^[a-z][a-z0-9_]{0,63}$/;
-
-/**
- * U-212 (bundle A): a start the engine host refused: its code, and the CLI's hint id when the app layer
- * gave one (error.hint.<hint>, e.g. unreadable_paths_required for analyze-private without an unreadable
- * path). An id only; the window shows a hint it has words for.
- */
-export function toStartFailure(value: unknown): { readonly ok: false; readonly code: string; readonly hint?: string } {
-  const hint = isObj(value) ? value["hint"] : undefined;
-  return { ok: false, code: hostCodeOf(value), ...(typeof hint === "string" && HINT_ID.test(hint) ? { hint } : {}) };
-}
 
 /** `listModels` arguments: `{provider}`. */
 export function parseProviderArgs(value: unknown): { readonly provider: string } | null {
@@ -377,9 +358,3 @@ export type ModelsReply =
 export type SelectModelReply =
   | { readonly ok: true; readonly selected: { readonly id: string; readonly created: boolean; readonly overridden: boolean } }
   | { readonly ok: false; readonly code: string };
-
-const DIGEST = /^[0-9a-f]{64}$/;
-const WORD = /^[a-z][a-z_-]{0,39}$/;
-
-// Shared with the remaining facade checks; these names are internal, not facade exports.
-export { ERROR_CODE, DIGEST, WORD };

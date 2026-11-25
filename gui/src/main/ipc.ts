@@ -649,7 +649,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const preview = deps.history.takePreview(parsed.preview);
     if (preview === null) return { ok: false, code: "unknown_preview" };
-    if (deps.runs.running) return { ok: false, code: "run_active" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
     const root = workspaces.path(preview.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
     if (!(await deps.confirmRevert(preview))) return { ok: false, code: "not_confirmed" };
@@ -672,7 +672,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const retry = deps.history.takeConsentRetry(parsed.retry);
     if (retry === null) return { ok: false, code: "unknown_retry" };
-    if (deps.runs.running) return { ok: false, code: "run_active" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
     const root = workspaces.path(retry.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
     if (!(await deps.confirmRevertConsent(retry))) return { ok: false, code: "not_confirmed" };

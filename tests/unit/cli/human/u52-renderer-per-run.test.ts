@@ -4,15 +4,17 @@
  * memory did not start again: the calls a run denied (U-18) hid the next run's failure of a call with
  * the same id (call ids are only unique within a run: the engine's replacements start again at
  * codaryn-call-1, and a model's own ids may repeat), and verifier numbers went on from the run before.
- * Now `progressLine` starts both again at `run_started` and `apply_started` (the GUI host gives every
- * record to progressLine first), and `applyProgressLine` at `apply_started` (the CLI's apply). A
+ * Now `progressLine` starts both again at `run_started` and `apply_started`, and `applyProgressLine`
+ * at `apply_started` (the CLI's apply, which draws with applyProgressLine only). Since OFG-2 the GUI
+ * host gives the apply journal's own records to applyProgressLine and every other record to
+ * progressLine, once each (gui/tests/unit/ofg2-host-routing.test.ts runs the host's own function). A
  * record of a run drawn by a renderer that drew other runs before reads as from a new renderer.
  * Real catalogs, both languages; fake values only.
  */
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { MESSAGE_LANGUAGES } from "../../../../src/contracts/index.js";
+import { APPLY_JOURNAL_EVENT_TYPES, JOURNAL_EVENT_TYPES, MESSAGE_LANGUAGES } from "../../../../src/contracts/index.js";
 import type { ApplyJournalEvent, HumanOutput, JournalEvent } from "../../../../src/contracts/index.js";
 import { createHumanOutput } from "../../../../src/cli/human/index.js";
 import { createMessageCatalog } from "../../../../src/i18n/index.js";
@@ -32,10 +34,20 @@ const failed = (callId: string): JournalEvent[] => [
 const verifier = (id: string): JournalEvent =>
   ({ type: "verifier_result", result: { id, kind: "command", outcome: "pass", evidence: "", checked: [], limits: [] } }) as unknown as JournalEvent;
 
-/** The lines one renderer gives for the records, as the GUI host draws them: progressLine, then applyProgressLine. */
+/** OFG-2: the records the GUI host gives to applyProgressLine (gui/src/engine-host/main.ts runItems). */
+const GUI_APPLY_ONLY: ReadonlySet<string> = new Set(["apply_started", "plan_checked", "file_moved", "file_discarded", "plan_item_failed"]);
+
+test("U-52: the GUI host's apply-only records are the apply journal's own, as the contract lists them (OFG-2)", () => {
+  const own = APPLY_JOURNAL_EVENT_TYPES.filter((type) => !(JOURNAL_EVENT_TYPES as readonly string[]).includes(type));
+  assert.deepEqual([...GUI_APPLY_ONLY].sort(), [...own].sort());
+});
+
+/** The lines one renderer gives for the records, as the GUI host draws them: one method per record (OFG-2). */
 const gui = (out: HumanOutput, events: readonly JournalEvent[]): string[] =>
   events.flatMap((event) => {
-    const line = out.progressLine(event) ?? out.applyProgressLine?.(event as unknown as ApplyJournalEvent) ?? null;
+    const line = GUI_APPLY_ONLY.has(event.type) && out.applyProgressLine !== undefined
+      ? out.applyProgressLine(event as unknown as ApplyJournalEvent)
+      : out.progressLine(event);
     return line === null ? [] : [line];
   });
 /** The lines as the CLI's run draws them: progressLine only. */

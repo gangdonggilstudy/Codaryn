@@ -155,7 +155,7 @@ export function changesValue(outcome: unknown, shown: Shown, shownText: Shown): 
   };
 }
 
-/** `review` → `{ok, runId, verdict, replaced}` or a failure. */
+/** `review` → `{ok, runId, verdict, replaced, lockLeft?}` or a failure. */
 export function reviewValue(outcome: unknown): Obj | HostFailure {
   const output = outputOf(outcome);
   if (output === null) return failureOf(outcome);
@@ -165,5 +165,6 @@ export function reviewValue(outcome: unknown): Obj | HostFailure {
     runId: typeof output["runId"] === "string" && RUN_ID.test(output["runId"]) ? output["runId"] : null,
     verdict: verdict === "accepted" || verdict === "rejected" ? verdict : null,
     replaced: output["replaced"] === true,
+    ...(output["lockLeft"] === true ? { lockLeft: true } : {}),
   };
 }

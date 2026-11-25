@@ -120,7 +120,9 @@ export function asPlan(value: unknown): PlanReply {
 /** GU-5: a recorded review. */
 export function asReview(value: unknown): ReviewReply {
   if (!isObj(value) || value["ok"] !== true || (value["verdict"] !== "accepted" && value["verdict"] !== "rejected")) return failed(value);
-  return { ok: true, verdict: value["verdict"], replaced: value["replaced"] === true };
+  const lockLeft = value["lockLeft"];
+  if (lockLeft !== undefined && lockLeft !== true) return failed(value);
+  return { ok: true, verdict: value["verdict"], replaced: value["replaced"] === true, ...(lockLeft === true ? { lockLeft: true } : {}) };
 }
 
 /** DR-29: a run's changed files, by path and state. Rows that do not fit are left out. U-48: the run's records-changed mark. */

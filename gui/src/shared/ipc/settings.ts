@@ -358,3 +358,11 @@ export type ModelsReply =
 export type SelectModelReply =
   | { readonly ok: true; readonly selected: { readonly id: string; readonly created: boolean; readonly overridden: boolean } }
   | { readonly ok: false; readonly code: string };
+
+/** The engine host's answer to `selectModel`, checked. */
+export function toSelectModelReply(value: unknown): SelectModelReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const selected = value["selected"];
+  if (!isObj(selected) || !shortText(selected["id"]) || typeof selected["created"] !== "boolean" || typeof selected["overridden"] !== "boolean") return { ok: false, code: "host_error" };
+  return { ok: true, selected: { id: selected["id"], created: selected["created"], overridden: selected["overridden"] } };
+}

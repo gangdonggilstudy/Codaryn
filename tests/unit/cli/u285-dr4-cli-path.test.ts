@@ -61,7 +61,13 @@ describe("U-285 (DR-4) on the CLI's path", () => {
       writeFileSync(vars, `LANG=${lang}\n`, "utf8");
       const verifier = { id: "lang", kind: "command", executable: process.execPath, args: [script], expectExitCode: 0 };
       const task = writeGeneralTask(sb, { id: "u285-lang", verifiers: [verifier] as never }, [textStep("done")]);
-      const ran = await runGuarded(sb, ["run", "--task", task, "--vars-file", vars], cliEnv());
+      // The variables file must set LANG itself: loadEnvFile does not replace inherited values.
+      const env = cliEnv();
+      for (const name of Object.keys(env)) {
+        const upper = name.toUpperCase();
+        if (upper === "LANG" || upper.startsWith("LC_")) delete env[name];
+      }
+      const ran = await runGuarded(sb, ["run", "--task", task, "--vars-file", vars], env);
       const output = json(ran);
       assert.deepEqual([output["status"], output["reason"]], ["done", "verified"], ran.stdout);
     });

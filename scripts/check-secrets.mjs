@@ -78,12 +78,15 @@ function scanLine(text) {
   return hits;
 }
 
+class CombinedDiffError extends Error {}
+
 function scanDiff(diffText) {
   const findings = [];
   let file = null;
   let line = 0;
   let inHunk = false;
   for (const raw of diffText.split("\n")) {
+    if (raw.startsWith("@@@")) throw new CombinedDiffError();
     if (raw.startsWith("diff --git ")) {
       file = null;
       inHunk = false;
@@ -112,17 +115,30 @@ function checkPaths(paths) {
   return findings;
 }
 
+/** Keep the NUL path intact after the metadata tab, including tabs and newlines in the name. */
+function indexEntries() {
+  return git(["ls-files", "--stage", "-z"]).split("\0").filter(Boolean).map((entry) => {
+    const parsed = /^([0-7]{6}) (?:[0-9a-f]{40}|[0-9a-f]{64}) ([0-3])\t([\s\S]+)$/.exec(entry);
+    if (parsed === null) throw new Error("invalid index entry");
+    return { mode: parsed[1], stage: parsed[2], file: parsed[3] };
+  });
+}
+
+// Only resolved gitlinks are opaque references to another repository, never parent blobs.
+const isGitlink = (entry) => entry.mode === "160000" && entry.stage === "0";
+
 const [mode, arg] = process.argv.slice(2);
 let findings = [];
 try {
   if (mode === "--staged") {
-    findings = scanDiff(git(["diff", "--cached", "-U0", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"]));
-    findings.push(...checkPaths(git(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]).split("\0")));
+    const gitlinks = new Set(indexEntries().filter(isGitlink).map((entry) => entry.file));
+    findings = scanDiff(git(["diff", "--cached", "-U0", "--no-color", "--submodule=short", "--src-prefix=a/", "--dst-prefix=b/"]));
+    findings.push(...checkPaths(git(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]).split("\0").filter((file) => !gitlinks.has(file))));
   } else if (mode === "--range" && arg) {
     findings = scanDiff(git(["diff", "-U0", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", arg]));
     findings.push(...checkPaths(git(["diff", "--name-only", "-z", "--diff-filter=ACMR", arg]).split("\0")));
   } else if (mode === "--tracked") {
-    const files = git(["ls-files", "-z"]).split("\0").filter(Boolean);
+    const files = indexEntries().filter((entry) => !isGitlink(entry)).map((entry) => entry.file);
     findings.push(...checkPaths(files));
     for (const file of files) {
       let text;
@@ -141,7 +157,8 @@ try {
     process.exit(2);
   }
 } catch (error) {
-  console.error(`check-secrets: git failed (${error.status ?? "unknown"})`);
+  if (error instanceof CombinedDiffError) console.error("check-secrets: combined diff is not supported");
+  else console.error(`check-secrets: git failed (${error.status ?? "unknown"})`);
   process.exit(2);
 }
 

@@ -47,9 +47,10 @@ function fixture(t: TestContext) {
   stage("README.md", "a harmless baseline\n");
   const baseTree = git(["write-tree"]).trim();
   git(["update-ref", "refs/heads/main", git(["commit-tree", baseTree], "test: base\n").trim()]);
-  const scan = (mode: Mode) => {
+  const scan = (mode: Mode, range?: string) => {
     const args: string[] = [SCRIPT, mode];
-    if (mode === "--range") {
+    if (mode === "--range" && range !== undefined) args.push(range);
+    else if (mode === "--range") {
       const tree = git(["write-tree"]).trim();
       const commit = git(["commit-tree", tree, "-p", "main"], "test: candidate\n").trim();
       git(["update-ref", "refs/heads/work", commit]);
@@ -137,4 +138,58 @@ test("IR-E5: an unreadable index object is a finding, not a clean tracked scan",
   assert.equal(run.status, 1);
   assert.ok(run.output.includes("check-secrets: lost.txt:0 index-read-failed"));
   assert.ok(!run.output.includes("fatal:"), "Git's unescaped diagnostics must not bypass the scanner formatter");
+});
+
+// A gitlink names a commit stored in the submodule, not a blob in the parent repository.
+function gitlink(r: ReturnType<typeof fixture>, file: string): void {
+  const missing = "a".repeat(40);
+  assert.ok(!fs.existsSync(path.join(r.repo, ".git", "objects", missing.slice(0, 2), missing.slice(2))));
+  r.git(["update-index", "--add", "--cacheinfo", `160000,${missing},${file}`]);
+}
+for (const mode of ["--tracked", "--staged"] as const) for (const file of ["modules/ordinary", "modules/.env"]) {
+  test(`GR-1 ${mode}: gitlink ${file} without its commit in the parent is accepted`, t => {
+    const r = fixture(t); gitlink(r, file);
+    const run = r.scan(mode);
+    t.diagnostic(JSON.stringify({ issue: "GR-1", mode, file, status: run.status }));
+    assert.equal(run.status, 0, "a submodule is not a regular file or an unreadable parent blob");
+    assert.ok(run.output.includes("check-secrets: no findings"));
+  });
+}
+test("GR-1: skipping a gitlink cannot hide an unreadable ordinary blob", t => {
+  const r = fixture(t); gitlink(r, "modules/ordinary");
+  const blob = r.stage("lost.txt", "missing ordinary blob alongside a gitlink\n");
+  const object = path.resolve(r.repo, ".git", "objects", blob.slice(0, 2), blob.slice(2));
+  assert.ok(object.startsWith(path.join(r.repo, ".git", "objects") + path.sep)); fs.unlinkSync(object);
+  const run = r.scan("--tracked");
+  assert.equal(run.status, 1); assert.ok(run.output.includes("lost.txt:0 index-read-failed"));
+  assert.ok(!run.output.includes("modules/ordinary"), "the known gitlink must not be an index-read-failed finding");
+  assert.ok(!run.output.includes("fatal:"));
+});
+test("GR-1: staged regular forbidden files remain refused next to a gitlink", t => {
+  const r = fixture(t); gitlink(r, "modules/ordinary"); r.stage("config/.env", "harmless fixture\n");
+  const run = r.scan("--staged");
+  assert.equal(run.status, 1); assert.ok(run.output.includes("config/.env:0 forbidden-path"));
+});
+test("GR-2: a merge revision producing combined hunks is refused with exit 2", t => {
+  const r = fixture(t);
+  r.stage("merge.txt", "base\n");
+  const common = r.git(["commit-tree", r.git(["write-tree"]).trim(), "-p", "main"], "test: common\n").trim();
+  r.stage("merge.txt", "left\n");
+  const left = r.git(["commit-tree", r.git(["write-tree"]).trim(), "-p", common], "test: left\n").trim();
+  r.stage("merge.txt", "right\n");
+  const right = r.git(["commit-tree", r.git(["write-tree"]).trim(), "-p", common], "test: right\n").trim();
+  r.stage("merge.txt", "resolved\n");
+  const merge = r.git(["commit-tree", r.git(["write-tree"]).trim(), "-p", left, "-p", right], "test: merge\n").trim();
+  const range = `${merge}^!`, diff = r.git(["diff", "--no-color", "-U0", range]);
+  assert.match(diff, /^@@@ /m, "real Git must produce the combined header before testing refusal");
+  const run = r.scan("--range", range);
+  t.diagnostic(JSON.stringify({ issue: "GR-2", combined: true, status: run.status }));
+  assert.equal(run.status, 2); assert.ok(!run.output.includes("check-secrets: no findings"));
+  assert.ok(run.output.includes("check-secrets: combined diff is not supported"));
+  assert.ok(!run.output.includes("resolved"), "error output must not echo the combined body");
+  const staged = r.scan("--staged"); assert.equal(staged.status, 0, "ordinary index comparison stays supported");
+});
+test("GR-2: an added body line resembling a combined header is ordinary text", t => {
+  const r = fixture(t); r.stage("notes.md", "@@@ ordinary prose\n");
+  const run = r.scan("--staged"); assert.equal(run.status, 0);
 });

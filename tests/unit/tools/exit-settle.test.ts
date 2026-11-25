@@ -5,10 +5,14 @@
  */
 
 import assert from "node:assert/strict";
+import cp from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
+import type { TestContext } from "node:test";
 
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import { createCommandRunner, createWorkspaceCommandRunner } from "../../../src/tools/index.js";
@@ -33,6 +37,47 @@ const parentEnv = (extra: Record<string, string> = {}) => ({
 });
 const live = () => new AbortController().signal;
 
+// Setup has a real safety bound; only the runner's timers use the controlled clock.
+const realSetTimeout = setTimeout;
+const realClearTimeout = clearTimeout;
+async function within<T>(pending: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([pending, new Promise<never>((_, reject) => {
+      timer = realSetTimeout(() => reject(new Error("test setup: owned command did not respond")), 15_000);
+    })]);
+  } finally { realClearTimeout(timer); }
+}
+
+/** Observe the real direct child, before the runner attaches its exit listener. Never signal a PID. */
+function observeCommand(t: TestContext, onExit: () => void = () => {}) {
+  const spawn = cp.spawn;
+  const exited = Promise.withResolvers<{ code: number | null; signal: NodeJS.Signals | null }>();
+  let child: ChildProcess | undefined, directKill: ChildProcess["kill"] | undefined, kills = 0;
+  const spawned = t.mock.method(cp, "spawn", ((...args: Parameters<typeof cp.spawn>) => {
+    const owned = spawn(...args);
+    if (child === undefined) {
+      child = owned; directKill = owned.kill.bind(owned);
+      owned.once("exit", (code, signal) => { onExit(); exited.resolve({ code, signal }); });
+      owned.once("error", error => exited.reject(error));
+      t.mock.method(owned, "kill", (...signals: Parameters<ChildProcess["kill"]>) => {
+        kills++; return directKill!(...signals);
+      });
+    }
+    return owned;
+  }) as typeof cp.spawn);
+  syncBuiltinESMExports();
+  t.after(async () => {
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      directKill!(); await within(exited.promise);
+    }
+    child?.stdout?.destroy(); child?.stderr?.destroy();
+  });
+  return { exit: () => within(exited.promise), child: () => { assert.ok(child); return child; },
+    kills: () => kills, spawns: () => spawned.mock.callCount() };
+}
+
 /**
  * Node prints "started;" and, once that line is written, starts a detached background node that
  * inherits the output pipes, then exits with 3 once that process runs (it writes a file first). The
@@ -44,13 +89,12 @@ const live = () => new AbortController().signal;
  * the exit however long that process took to start; before, a start slower than the 500 ms grace on
  * a busy machine left it out.
  *
- * N-28: the test ends no process by its pid. The background process has no handle here, so it is
- * short-lived instead: 4 s from its start, which comes before the command's exit, still outlasts
- * every time limit below (at most 3.5 s) and the 500 ms grace, so it holds the pipes for as long as
- * each test needs. Starting it only after the command's own line is written keeps "started;" first
- * under any load.
+ * N-28: the background process has no handle here and is never ended by PID; it expires after 4 s.
+ * Controlled-clock tests check the inherited pipe is still open at the real command exit. Their
+ * 15 s bound is setup protection, separate from the 500 ms post-exit grace. Starting the background
+ * process only after the command's own line is written keeps "started;" first under any load.
  */
-function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: string, exitSignal?: string): CommandRunRequest {
+function backgroundRequest(cwdAbsolute: string, timeoutMs: number): CommandRunRequest {
   // The file the background process writes as it starts (inside the workspace, which exists until the run ends).
   const running = path.join(cwdAbsolute, "background-running");
   const body = `require('node:fs').writeFileSync(${JSON.stringify(running)}, ''); setTimeout(() => process.stdout.write('early;\\n'), 100); setTimeout(() => process.stdout.write('late;\\n'), 1500); setTimeout(() => {}, 4000);`;
@@ -61,12 +105,7 @@ function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: 
     // Its working directory is outside the workspace, which the after hook removes while it may still run.
     `  spawn(process.execPath, ['-e', ${JSON.stringify(body)}], { stdio: ['ignore', 'inherit', 'inherit'], detached: true, cwd: require('node:os').tmpdir() }).unref();`,
     "  const exit = () => {",
-    // Optional: tells the test that the command is about to exit.
-    ...(exitMarker === undefined ? [] : [`    fs.writeFileSync(${JSON.stringify(exitMarker)}, '');`]),
-    // Optional: exits only once the test's signal file is there, so the test chooses when the exit comes.
-    ...(exitSignal === undefined
-      ? ["    process.exit(3);"]
-      : [`    const exitWhenSignalled = () => (fs.existsSync(${JSON.stringify(exitSignal)}) ? process.exit(3) : setTimeout(exitWhenSignalled, 10));`, "    exitWhenSignalled();"]),
+    "    process.exit(3);",
     "  };",
     // U-271: the exit comes once the background process runs.
     `  const whenRunning = () => (fs.existsSync(${JSON.stringify(running)}) ? exit() : setTimeout(whenRunning, 10));`,
@@ -76,30 +115,26 @@ function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: 
   return { executable: process.execPath, args: ["-e", script], cwdAbsolute, timeoutMs };
 }
 
-test("T-2: a command that exits while a background descendant holds the pipes is settled at its exit, not as a timeout", async () => {
+test("T-2: a command that exits while a background descendant holds the pipes is settled at its exit, not as a timeout", async (t) => {
   const ws = workspaceDir();
   const runner = createCommandRunner({ parentEnv: parentEnv(), workspaceRoot: ws });
-  // U-271: timed from the command's exit (its marker), not from the run's start: a bound from the start
-  // (1,900 ms) had to fit two Node starts, which a busy machine does not promise.
-  const marker = path.join(ws, "exiting");
-  const exit: { at: number | null } = { at: null };
-  const watch = setInterval(() => {
-    if (exit.at === null && fs.existsSync(marker)) exit.at = Date.now();
-  }, 10);
-  try {
-    const result = await runner.run(backgroundRequest(ws, 3_500, marker), live());
-    const settledAt = Date.now();
-    assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-    assert.equal(result.exitCode, 3);
-    assert.equal(result.timedOut, false);
-    // The background process holds the pipes 4 s from its start, which came before the exit: the run
-    // settled with the 500 ms grace after the exit, not when the pipes closed.
-    const exitAt = exit.at ?? settledAt;
-    assert.ok(exit.at !== null, "the command reached its exit");
-    assert.ok(settledAt - exitAt < 2_500, `settled ${settledAt - exitAt} ms after the exit`);
-  } finally {
-    clearInterval(watch);
-  }
+  const command = observeCommand(t);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let settled = false;
+  const running = runner.run(backgroundRequest(ws, 15_000), live()).then(result => { settled = true; return result; });
+  assert.deepEqual(await command.exit(), { code: 3, signal: null });
+  assert.equal(command.child().stdout?.readableEnded, false, "the descendant still holds the output pipe");
+  t.mock.timers.tick(499); await Promise.resolve();
+  assert.equal(settled, false, "the runner keeps the pipe through the grace");
+  t.mock.timers.tick(1);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(settled, true, "500 ms settles without waiting for the descendant to close the pipe");
+  const result = await within(running);
+  assert.ok(!("spawnFailed" in result), JSON.stringify(result));
+  assert.equal(result.exitCode, 3);
+  assert.equal(result.timedOut, false);
+  assert.match(result.stdout, /^started;\n/);
+  assert.equal(result.truncated, false);
 });
 
 test("T-2: output in flight right after the exit is kept for a short grace; later output is not waited for", async () => {
@@ -125,26 +160,26 @@ test("T-2: a command still running at its time limit is ended and reported as ti
   assert.ok(Date.now() - started < 5_000);
 });
 
-test("T-2: cancelling after the command exited returns at once with its exit code", async () => {
+test("T-2: cancelling after the command exited returns at once with its exit code", async (t) => {
   const ws = workspaceDir();
   const runner = createCommandRunner({ parentEnv: parentEnv(), workspaceRoot: ws });
   const controller = new AbortController();
-  const marker = path.join(ws, "exiting");
-  const running = runner.run(backgroundRequest(ws, 10_000, marker), controller.signal);
-  // The command writes the marker right before it exits. A fixed wait from the start was not
-  // enough under the load of the full unit run. 150 ms after the marker the exit has been seen,
-  // well inside the 500 ms grace.
-  const deadline = Date.now() + 10_000;
-  while (!fs.existsSync(marker)) {
-    if (Date.now() > deadline) throw new Error("test setup: the command did not reach its exit");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  const abortedAt = Date.now();
+  const command = observeCommand(t);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let settled = false;
+  const running = runner.run(backgroundRequest(ws, 15_000), controller.signal).then(result => { settled = true; return result; });
+  // A marker before process.exit does not prove the child has ended. Await its actual exit;
+  // the controlled clock leaves all 500 ms of grace available even if this parent was delayed.
+  assert.deepEqual(await command.exit(), { code: 3, signal: null });
+  assert.equal(command.child().stdout?.readableEnded, false);
   controller.abort();
-  const result = await running;
+  // No clock advance: waiting for a kill/close/grace timer would leave this promise pending.
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(settled, true, "abort settles now, without advancing the grace or kill/close timers");
+  const result = await within(running);
   assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-  assert.ok(Date.now() - abortedAt < 400, "no kill and no close wait after the exit");
+  assert.equal(command.kills(), 0, "an exited child must never be signalled");
+  assert.equal(command.spawns(), 1, "no tree killer is started after the exit");
   assert.equal(result.exitCode, 3, "the exit code stays final: nothing was stopped");
   assert.equal(result.timedOut, false);
   // V-2 (revised): closing the pipes early drops only an unfinished last line; whole lines stay
@@ -153,27 +188,28 @@ test("T-2: cancelling after the command exited returns at once with its exit cod
   assert.match(result.stdout, /^started;\n/);
 });
 
-test("T-2: a time limit that falls in the grace after the exit does not turn the run into a timeout", async () => {
+test("T-2: a time limit that falls in the grace after the exit does not turn the run into a timeout", async (t) => {
   const ws = workspaceDir();
   const runner = createCommandRunner({ parentEnv: parentEnv(), workspaceRoot: ws });
-  // The command exits once the test's signal file is there, which the test makes about 250 ms before the
-  // 3000 ms limit, so the limit comes during the 500 ms grace that follows. A 450 ms limit that the
-  // command's own start and its background child had to fit in failed once under the load of the full
-  // unit run (U-270): the start alone takes 114-365 ms on an idle machine.
+  // Place the observed real exit at logical 2750 ms, before the runner handles that event.
+  // Startup takes no logical time; the original 3000 ms deadline lies inside the 500 ms grace.
   const limitMs = 3_000;
-  const exitSignal = path.join(ws, "exit-now");
-  const started = Date.now();
-  const signalled = setTimeout(() => fs.writeFileSync(exitSignal, ""), limitMs - 250);
-  try {
-    const result = await runner.run(backgroundRequest(ws, limitMs, undefined, exitSignal), live());
-    assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-    assert.equal(result.timedOut, false);
-    assert.equal(result.exitCode, 3);
-    // The background child holds the pipes, so the run ends with the grace: after the limit's time.
-    assert.ok(Date.now() - started >= limitMs, "the limit fell in the grace after the exit");
-  } finally {
-    clearTimeout(signalled);
-  }
+  const command = observeCommand(t, () => t.mock.timers.tick(limitMs - 250));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let settled = false;
+  const running = runner.run(backgroundRequest(ws, limitMs), live()).then(result => { settled = true; return result; });
+  assert.deepEqual(await command.exit(), { code: 3, signal: null });
+  assert.equal(command.child().stdout?.readableEnded, false);
+  t.mock.timers.tick(250); await Promise.resolve();
+  assert.equal(settled, false, "crossing the original deadline neither times out nor skips the grace");
+  t.mock.timers.tick(250);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(settled, true, "the grace settles at logical 3250 ms despite the earlier deadline");
+  const result = await within(running);
+  assert.ok(!("spawnFailed" in result), JSON.stringify(result));
+  assert.equal(result.timedOut, false);
+  assert.equal(result.exitCode, 3);
+  assert.match(result.stdout, /^started;\n/);
 });
 
 // ---- The exported way to build the runner for a run (used by the CLI assembly, T-1) ----

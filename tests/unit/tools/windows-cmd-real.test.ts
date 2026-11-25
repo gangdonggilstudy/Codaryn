@@ -5,10 +5,14 @@
  */
 
 import assert from "node:assert/strict";
+import cp from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
+import type { TestContext } from "node:test";
 
 import { createCommandRunner } from "../../../src/tools/index.js";
 import type { CommandRunner, CommandRunRequest } from "../../../src/tools/index.js";
@@ -65,6 +69,42 @@ function writeEchoArgs(bin: string): void {
 }
 
 const live = () => new AbortController().signal;
+
+// Only runner timers are controlled; real setup has an independent 15 s safety bound.
+const realSetTimeout = setTimeout;
+const realClearTimeout = clearTimeout;
+async function within<T>(pending: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([pending, new Promise<never>((_, reject) => {
+      timer = realSetTimeout(() => reject(new Error("test setup: owned command did not respond")), 15_000);
+    })]);
+  } finally { realClearTimeout(timer); }
+}
+
+/** Observe the actual cmd child, not a file written before it exits. Cleanup uses its own handle. */
+function observeCommand(t: TestContext) {
+  const spawn = cp.spawn, exited = Promise.withResolvers<{ code: number | null; signal: NodeJS.Signals | null }>();
+  let child: ChildProcess | undefined, directKill: ChildProcess["kill"] | undefined;
+  t.mock.method(cp, "spawn", ((...args: Parameters<typeof cp.spawn>) => {
+    const owned = spawn(...args);
+    if (child === undefined) {
+      child = owned; directKill = owned.kill.bind(owned);
+      owned.once("exit", (code, signal) => exited.resolve({ code, signal }));
+      owned.once("error", error => exited.reject(error));
+    }
+    return owned;
+  }) as typeof cp.spawn);
+  syncBuiltinESMExports();
+  t.after(async () => {
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      directKill!(); await within(exited.promise);
+    }
+    child?.stdout?.destroy(); child?.stderr?.destroy();
+  });
+  return { exit: () => within(exited.promise), child: () => { assert.ok(child); return child; } };
+}
 
 async function waitFor(check: () => boolean, ms: number): Promise<boolean> {
   const end = Date.now() + ms;
@@ -236,24 +276,42 @@ test("T-2 real: a .cmd that starts a background process with start /b and exits 
   const box = sandbox(t);
   if (box === null) return;
   const pidFile = path.join(box.bin, "bg-pid.txt");
-  // N-28: the background process ends by itself after 4 s; the test has no handle to it and never
-  // ends it by its pid. 4 s outlasts the 2000 ms limit, so it holds the pipes past the time the
-  // run must settle by.
+  const exitSignal = path.join(box.bin, "exit-now");
+  // N-28: no PID is signalled; the background process expires after 4 s. Check that its pipe is
+  // still open at the actual cmd exit, then verify the separate 500 ms grace with a controlled clock.
   fs.writeFileSync(
     path.join(box.bin, "sleeper.mjs"),
     LEAVE_SANDBOX + "import fs from 'node:fs'; fs.writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 4000);\n",
   );
-  writeScript(path.join(box.bin, "bgstart.cmd"), `start "" /b "${process.execPath}" "%~dp0sleeper.mjs" "${pidFile}"\r\nexit /b 0`);
-  const started = Date.now();
-  const result = await box.runner.run(box.request("bgstart", [], 2_000), live());
-  const elapsed = Date.now() - started;
-  await waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").length > 0, 5_000);
-  const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8") : "0");
+  writeScript(path.join(box.bin, "bgstart.cmd"),
+    `start "" /b "${process.execPath}" "%~dp0sleeper.mjs" "${pidFile}"\r\n:wait_for_exit\r\nif not exist "${exitSignal}" goto wait_for_exit\r\nexit /b 0`);
+  const command = observeCommand(t);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  // 15 s protects setup only: starting cmd and Node no longer consumes the post-exit budget.
+  let settled = false;
+  const running = box.runner.run(box.request("bgstart", [], 15_000), live()).then(result => { settled = true; return result; });
+  await within((async () => {
+    const deadline = Date.now() + 15_000;
+    while (!fs.existsSync(pidFile) || fs.readFileSync(pidFile, "utf8").length === 0) {
+      if (Date.now() >= deadline) throw new Error("test setup: background child did not become ready");
+      await new Promise(resolve => realSetTimeout(resolve, 10));
+    }
+  })());
+  const pid = Number(fs.readFileSync(pidFile, "utf8"));
+  assert.ok(pid > 0, "the background process started before cmd is allowed to exit");
+  fs.writeFileSync(exitSignal, "");
+  assert.deepEqual(await command.exit(), { code: 0, signal: null });
+  assert.equal(command.child().stdout?.readableEnded, false, "the background child still holds the pipe");
+  t.mock.timers.tick(499); await Promise.resolve();
+  assert.equal(settled, false, "the inherited pipe stays open for the grace");
+  t.mock.timers.tick(1);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(settled, true, "500 ms settles while the background child still holds the pipe");
+  const result = await within(running);
   assert.ok(!("spawnFailed" in result), JSON.stringify(result));
   assert.equal(result.exitCode, 0);
   assert.equal(result.timedOut, false);
-  assert.ok(pid > 0, "the background process started");
-  assert.ok(elapsed < 1_900, `settled after ${elapsed} ms, before the 2000 ms limit`);
+  assert.equal(command.child().stdout?.destroyed, true, "500 ms settles without waiting for the background child");
 });
 
 test("T-4 real: an .exe inside the workspace is not started, by path or through PATH", { skip: !IS_WINDOWS }, async (t) => {

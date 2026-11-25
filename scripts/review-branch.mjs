@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 // PM merge gate: checks a work branch against main before it is merged.
 // Usage: node scripts/review-branch.mjs <branch> <owned-path-prefix> [<owned-path-prefix> ...]
-// Checks: commit author, no trailers or attribution lines, changed files inside the owned
-// prefixes, whitespace errors, and the secret scan over the added lines.
+// Checks: commit author and committer, no Git trailer of any key (Git's own trailer parsing) and no
+// attribution line, for every commit of the branch, its merge commits included; changed files inside
+// the owned prefixes, whitespace errors, and the secret scan over the added lines.
 // It does not run tests. Run typecheck and tests in the branch's worktree separately.
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const AUTHOR = "gangdonggil <gangdonggilstudy@gmail.com>";
-const TRAILER = /^(co-authored-by|signed-off-by|reviewed-by|acked-by|claude-session|generated with|🤖)/im;
+// Attribution lines anywhere in a message (a trailer block or not). Trailers themselves are found by
+// Git (%(trailers:only)), so a key outside this list is refused too (IR-B6).
+const ATTRIBUTION = /^(co-authored-by|signed-off-by|reviewed-by|acked-by|claude-session|generated with|🤖)/im;
 const BASE = "main";
 
 const [branch, ...prefixes] = process.argv.slice(2);
@@ -20,14 +23,18 @@ if (!branch || prefixes.length === 0) {
 const git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const problems = [];
 
-const log = git(["log", "--no-merges", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e", `${BASE}..${branch}`]);
+// Every commit of the branch, merge commits included (IR-B6): a merge the candidate made carries an
+// author, a committer and a message like any other commit. Fields: hash, author, committer, parents,
+// the message's trailers as Git parses them, the message.
+const log = git(["log", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%P%x1f%(trailers:only,unfold)%x1f%B%x1e", `${BASE}..${branch}`]);
 const commits = log.split("\x1e").map((s) => s.trim()).filter(Boolean).map((s) => s.split("\x1f"));
 if (commits.length === 0) problems.push("no commits ahead of main");
-for (const [hash, author, committer, body] of commits) {
-  const short = hash.slice(0, 7);
+for (const [hash, author, committer, parents, trailers, body] of commits) {
+  const short = `${hash.slice(0, 7)}${parents.trim().split(/\s+/).length > 1 ? " (merge)" : ""}`;
   if (author !== AUTHOR) problems.push(`${short}: author is ${author}`);
   if (committer !== AUTHOR) problems.push(`${short}: committer is ${committer}`);
-  if (TRAILER.test(body)) problems.push(`${short}: trailer or attribution line in message`);
+  if (trailers.trim() !== "") problems.push(`${short}: git trailer in message`);
+  if (ATTRIBUTION.test(body)) problems.push(`${short}: attribution line in message`);
 }
 
 // Files touched by the branch's own (non-merge) commits. A three-dot diff is wrong when the
@@ -61,7 +68,7 @@ const scan = spawnSync(process.execPath, [scanner, "--range", `${BASE}...${branc
 if (scan.status !== 0) problems.push(`secret scan failed:\n${(scan.stderr || scan.stdout).trim()}`);
 
 console.log(`branch ${branch}: ${commits.length} commit(s), ${files.length} file(s) changed`);
-for (const [hash, , , body] of commits) console.log(`  ${hash.slice(0, 7)} ${body.split("\n")[0]}`);
+for (const [hash, , , , , body] of commits) console.log(`  ${hash.slice(0, 7)} ${body.split("\n")[0]}`);
 if (problems.length === 0) {
   console.log("review-branch: PASS (author, trailers, ownership, whitespace, secrets)");
   process.exit(0);

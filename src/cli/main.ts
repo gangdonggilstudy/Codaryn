@@ -34,6 +34,7 @@ import { runCleanup } from "./cleanup.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "../app/input/config-file.js";
 import { runDoctor } from "./doctor.js";
 import { runGuardedCommand, stdoutText } from "./guard.js";
+import { STDOUT_WRITE_FAILED_EXIT_CODE, STDOUT_WRITE_FAILED_LINE } from "./stdout-failure.js";
 import type { CommandOutcome } from "./guard.js";
 import { helpRequest, helpText, versionText } from "./help.js";
 import { createHumanOutput } from "./human/index.js";
@@ -435,5 +436,27 @@ if ("output" in outcome && outcome.output.kind === "error") {
 // DR-49 (U-23): at a terminal the JSON line after the human text is left out (stdoutText);
 // U-45 (R-58 Q-1): only when stderr, where that text goes, is a terminal too.
 const written = stdoutText(outcome, { argv, stdoutIsTerminal: process.stdout.isTTY === true, stderrIsTerminal: process.stderr.isTTY === true });
-if (written.length > 0) process.stdout.write(written);
-process.exitCode = outcome.exitCode;
+// IR-B5 (S-6): stdout's own write errors, which reach neither the guard nor a listener otherwise
+// (a raw error and stack on stderr). A reader that went away (EPIPE) leaves the run as it ended: its
+// stored result and its exit code. Any other write error: one fixed line on stderr, exit code 1.
+let stdoutFailed = false;
+const stdoutFailure = (error: unknown): void => {
+  if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EPIPE") return;
+  if (stdoutFailed) return;
+  stdoutFailed = true;
+  try {
+    process.stderr.write(STDOUT_WRITE_FAILED_LINE);
+  } catch {
+    // stderr is best effort, as for human output.
+  }
+  process.exitCode = STDOUT_WRITE_FAILED_EXIT_CODE;
+};
+process.stdout.on("error", stdoutFailure);
+if (written.length > 0) {
+  try {
+    process.stdout.write(written);
+  } catch (error) {
+    stdoutFailure(error);
+  }
+}
+process.exitCode = stdoutFailed ? STDOUT_WRITE_FAILED_EXIT_CODE : outcome.exitCode;

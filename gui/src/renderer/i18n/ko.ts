@@ -302,6 +302,7 @@ export const KO = {
   "widen.min_group_size_lowered": "묶음 최소 크기 k 낮춤(읽기 제외 경로의 표에서 더 작은 묶음이 모델에게 보임)",
   "widen.other": "그 밖의 넓히기",
   "error.bad_number": "1 이상의 정수를 넣으세요.",
+  "error.bad_repair_number": "0 이상의 정수를 넣으세요.",
   "error.empty_value": "값을 먼저 넣으세요.",
   "error.bad_name": "환경 변수 이름은 영문자, 숫자, 밑줄만 쓰고 숫자로 시작하지 않습니다.",
   "error.already_present": "이미 들어 있습니다.",

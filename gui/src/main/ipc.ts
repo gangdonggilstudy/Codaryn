@@ -198,6 +198,7 @@ export function registerIpc(deps: IpcDeps): void {
   const { workspaces } = deps;
   let language: "ko" | "en" = "en";
   let starting = false;
+  let reverting = false;
   const handle = <R>(channel: string, handler: (args: unknown[]) => Promise<R>): void => {
     ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<R | null> => {
       if (!fromAppWindow(event, deps.window())) return null;
@@ -551,6 +552,7 @@ export function registerIpc(deps: IpcDeps): void {
     const parsed = args.length === 1 ? parseStartRunArgs(args[0]) : null;
     if (parsed === null) return { ok: false, code: "invalid_args" };
     if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    if (reverting) return { ok: false, code: "revert_active" };
     const root = workspaces.path(parsed.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
     starting = true;
@@ -587,6 +589,7 @@ export function registerIpc(deps: IpcDeps): void {
     const parsed = args.length === 1 ? parseStartTaskArgs(args[0]) : null;
     if (parsed === null) return { ok: false, code: "invalid_args" };
     if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    if (reverting) return { ok: false, code: "revert_active" };
     if (workspaces.path(parsed.workspace) === null) return { ok: false, code: "unknown_workspace" };
     starting = true;
     try {
@@ -649,21 +652,27 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const preview = deps.history.takePreview(parsed.preview);
     if (preview === null) return { ok: false, code: "unknown_preview" };
-    if (deps.runs.running) return { ok: false, code: "run_active" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    if (reverting) return { ok: false, code: "revert_active" };
     const root = workspaces.path(preview.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
-    if (!(await deps.confirmRevert(preview))) return { ok: false, code: "not_confirmed" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("revert", { workspace: root, runId: preview.runId, dryRun: false }, REVERT_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    const checked = toRevertView(response.value);
-    if (!checked.ok) return checked;
-    if (checked.view.runId !== preview.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
-    // DR-25: files skipped because their drive has no hard links may go back with the person's consent.
-    const unsafe = checked.view.skipped.filter((file) => file.reason === "unsafe_move").length;
-    const consentRetry = unsafe > 0 ? deps.history.issueConsentRetry({ workspace: preview.workspace, runId: preview.runId, files: unsafe }) : null;
-    return { ok: true, view: checked.view, preview: null, consentRetry };
+    reverting = true;
+    try {
+      if (!(await deps.confirmRevert(preview))) return { ok: false, code: "not_confirmed" };
+      const state = await deps.host();
+      if (!("host" in state)) return { ok: false, code: state.failure };
+      const response = await state.host.call("revert", { workspace: root, runId: preview.runId, dryRun: false }, REVERT_TIMEOUT_MS);
+      if (!response.ok) return { ok: false, code: response.error.code };
+      const checked = toRevertView(response.value);
+      if (!checked.ok) return checked;
+      if (checked.view.runId !== preview.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
+      // DR-25: files skipped because their drive has no hard links may go back with the person's consent.
+      const unsafe = checked.view.skipped.filter((file) => file.reason === "unsafe_move").length;
+      const consentRetry = unsafe > 0 ? deps.history.issueConsentRetry({ workspace: preview.workspace, runId: preview.runId, files: unsafe }) : null;
+      return { ok: true, view: checked.view, preview: null, consentRetry };
+    } finally {
+      reverting = false;
+    }
   });
 
   // DR-25: the same run once more with the consent, only from a revert's own result and the person's answer.
@@ -672,18 +681,24 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const retry = deps.history.takeConsentRetry(parsed.retry);
     if (retry === null) return { ok: false, code: "unknown_retry" };
-    if (deps.runs.running) return { ok: false, code: "run_active" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    if (reverting) return { ok: false, code: "revert_active" };
     const root = workspaces.path(retry.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
-    if (!(await deps.confirmRevertConsent(retry))) return { ok: false, code: "not_confirmed" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("revert", { workspace: root, runId: retry.runId, dryRun: false, consent: true }, REVERT_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    const checked = toRevertView(response.value);
-    if (!checked.ok) return checked;
-    if (checked.view.runId !== retry.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
-    return { ok: true, view: checked.view, preview: null, consentRetry: null };
+    reverting = true;
+    try {
+      if (!(await deps.confirmRevertConsent(retry))) return { ok: false, code: "not_confirmed" };
+      const state = await deps.host();
+      if (!("host" in state)) return { ok: false, code: state.failure };
+      const response = await state.host.call("revert", { workspace: root, runId: retry.runId, dryRun: false, consent: true }, REVERT_TIMEOUT_MS);
+      if (!response.ok) return { ok: false, code: response.error.code };
+      const checked = toRevertView(response.value);
+      if (!checked.ok) return checked;
+      if (checked.view.runId !== retry.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
+      return { ok: true, view: checked.view, preview: null, consentRetry: null };
+    } finally {
+      reverting = false;
+    }
   });
 
   // GU-5 (3.9, 3.7): the plan view, its apply (asked first, DR-21 consent asked separately) and a review.
@@ -718,6 +733,7 @@ export function registerIpc(deps: IpcDeps): void {
     // U-226 (U-218): a run plan is applied as a plan of moves is (its own dialog, confirmApply), as a
     // run that carries it out. It never asks the DR-21 consent: no apply of it ends consent_required.
     if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    if (reverting) return { ok: false, code: "revert_active" };
     const root = workspaces.path(approval.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
     starting = true;

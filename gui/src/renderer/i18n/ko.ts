@@ -328,6 +328,7 @@ export const KO = {
   "limit.maxSameFailures": "같은 실패",
 
   "error.run_active": "이미 실행 중인 작업이 있습니다. 끝난 뒤에 새 작업을 시작하세요.",
+  "error.revert_active": "되돌리기를 처리하고 있습니다. 끝난 뒤에 다시 하세요.",
   "nav.newtask": "새 작업",
   "nav.run": "실행",
   "task.title": "새 작업",

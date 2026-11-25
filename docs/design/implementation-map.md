@@ -11,6 +11,18 @@
 | 보고서 읽기와 표시 | [app/report-read.ts](../../src/app/report-read.ts), [presentation/json.ts](../../src/presentation/json.ts), [presentation/report.ts](../../src/presentation/report.ts) | [공개 renderer 회귀](../../tests/unit/presentation/report.test.ts), CP50·CP51. 기존 CLI binding·형 유지 |
 | 점검·초기 설정 | [app/doctor.ts](../../src/app/doctor.ts), [app/init-command.ts](../../src/app/init-command.ts) | [어댑터 계약 7.2절](adapter-contract.md): CLI/앱 공유 core. 질문·사람용 표시는 CLI에 남음 |
 
+IR-26 분할 뒤의 위치(현재 상태 2026-11-26, main `1d42acc6`). 아래 원본 위치표의 `engine/index`는 2026-11-12 당시 위치이고, 지금은 다음 모듈에 있다. 구조는 [architecture.md](../architecture.md) 4.3·4.4절에 있다.
+
+| 대상 | 현재 구현 위치 |
+| --- | --- |
+| 취소(엔진 쪽) | 중단 판정 [engine/run-helpers.ts](../../src/engine/run-helpers.ts)(`interrupted`). 기한·취소 신호의 연결은 [engine/index.ts](../../src/engine/index.ts)(`runWith`) |
+| 상태 기계, 모델↔도구 반복, 한도, 결과를 모르는 호출 | [engine/state.ts](../../src/engine/state.ts), 반복·한도 [engine/run-converse.ts](../../src/engine/run-converse.ts), 도구 호출 [engine/run-tools.ts](../../src/engine/run-tools.ts), 실행·결과를 모르는 호출 [engine/run-helpers.ts](../../src/engine/run-helpers.ts), 회차 반복 `runLoop`은 `engine/index.ts` |
+| 재수정 반복(판단, 메시지, 서명) | [engine/run-verify.ts](../../src/engine/run-verify.ts), [engine/feedback.ts](../../src/engine/feedback.ts) |
+| 무결성·상태 디렉터리 점검 시점과 종료 점검 | [engine/run-checks.ts](../../src/engine/run-checks.ts)(`checkPoint`·`checkState`·`checkAtEnd`·`checkStateAtEnd`), 목록·비교는 `verify/integrity` |
+| 엔진의 가림 적용(JSON 가림, 고정 문구) | [engine/run-helpers.ts](../../src/engine/run-helpers.ts)(`mask`·`maskJson`), [engine/model-texts.ts](../../src/engine/model-texts.ts) |
+| 앱 명령 | [app/app.ts](../../src/app/app.ts)(조립·facade), `app/*-commands.ts`, `app/reading-context.ts`, `app/run-hooks.ts` |
+| 사람용 고정 문구 표 | [contracts/human-messages.ts](../../src/contracts/human-messages.ts)(`contracts/human.ts`가 같은 이름으로 다시 내보냄) |
+
 C11은 지정 source union/fresh runtime 모델의 app→CLI0 검증 완료이며 모든 CLI parser·질문·출력을 옮기거나 단계5 전체를 완료했다는 뜻은 아니다. 기존 인프로세스 앱/GUI bridge·잠금/취소 시험과 별도로 [cli-host-parity.test.ts](../../gui/tests/unit/cli-host-parity.test.ts)·[support](../../gui/tests/unit/cli-host-parity-support.ts)는 실제 CLI와 별도 host의 한 문서 대본 전체 저장물·독립 IPC·비교기 controls를 검증한다([CP53 검토](../reviews/2026-11-15-cli-host-parity-probe.md)). 모든 모델/시나리오/OS의 동등성으로 확대하지 않는다.
 문서 보완 자체는 시험·빌드를 실행하지 않았다. CP53 추가 시험의 실제 실행과 기존 CP51 전체 검사 기록은 구분하며 아래 684/343 등은 원래 판의 측정으로 유지한다.
 

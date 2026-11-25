@@ -109,7 +109,7 @@
 - `journal.ts`, `changes.ts`, `engine.ts`: 기록 사건, 스냅샷, 결과, 종료 코드.
 - `plan.ts`, `workflow.ts`: 계획과 적용(행동, 다이제스트, 적용 기록 사건), 작업 종류 정의와 사람 확인.
 - `state.ts`: 상태 디렉터리 점검(DR-38). `cleanup.ts`: 정리.
-- `config.ts`: 설정 파일과 제공자 표 `API_PROVIDERS`. `integrity.ts`: 무결성. `commands.ts`: report, doctor, models. `human.ts`: 사람용 문구 계약. `workspace.ts`: 작업 공간.
+- `config.ts`: 설정 파일과 제공자 표 `API_PROVIDERS`. `integrity.ts`: 무결성. `commands.ts`: report, doctor, models. `human.ts`: 사람용 문구 계약(고정 문구 표 `FIXED_MESSAGES`와 그 id 형은 IR-26으로 `human-messages.ts`에 있고, `human.ts`가 같은 이름으로 다시 내보내 공개 경로는 그대로다). `workspace.ts`: 작업 공간.
 
 어댑터 계약([어댑터 계약](design/adapter-contract.md) 4·5절)
 - 타입은 계약 폴더가 아니라 `src/app/types.ts`에 있다(`StartRunRequest`, `RunHandle`, `RunEvent`, `RunObserver`, `AppError` 등, 코드 기준). **일부**
@@ -171,7 +171,24 @@
 - 잠금과 journal은 엔진이 아니라 조립 단계가 연다. 실행이 끝나면 result.json을 쓰고 잠금을 푼다.
 - GUI 쪽은 앱 계층의 `app/assemble.ts`가 같은 일을 한다.
 
-### 4.3 엔진(`src/engine/index.ts`)
+### 4.3 엔진(`src/engine`)
+
+모듈 구성(현재 상태 2026-11-26, main `1d42acc6`; IR-26 엔진 분할). 아래 1~8의 흐름은 그대로이고 코드의 자리만 나뉘었다.
+- `index.ts`: 공개 facade(`runTask`, `runApprovedPlan`과 상태 기계·적용·사전 점검·인자 검사·고정 문구의 재수출)이자 조립 뿌리다. `runWith`(156줄)에는 실행 상수, 공유 상태 `RunTally`의 초기화, 기한·취소 신호, 아래 factory 일곱의 조립, `runLoop`, 끝 점검·사용량·결과 조립과 `finally`만 남았다.
+- 실행 모듈. 각 `create…` factory는 실행마다 한 번 만들어지고, 만들 때 아무것도 읽거나 부르지 않는다.
+  - `run-helpers.ts`: 상수만 쓰는 도우미(가림 `mask`·`maskJson`, 중단 판정 `interrupted`, 기록, 거부·오류 결과, 실행기 호출과 결과를 모르는 호출의 처리).
+  - `run-calls.ts`: 기록할 호출 id의 정리와 권한 질문(`askPermission`). 각자 비공개 상태를 둔다.
+  - `run-checks.ts`: 무결성·상태 디렉터리 점검과 끝 점검(2, 4, 6, 7). 기준선은 비공개이고, 결과가 끝에 읽는 `protectedChanged`·`stateChanged`는 getter다.
+  - `run-tally.ts`: 여러 묶음이 함께 쓰는 값의 형 `RunTally`(사용량, 계획·검토 표, 마지막 답, 모델 오류, 모음 다섯 등 16필드).
+  - `run-tools.ts`: 도구 호출 하나의 처리(3의 1~8, 계획·변경 계획 도구, workflow 도구).
+  - `run-converse.ts`: 시작(1의 가림과 `run_started` 기록. 타이머는 `runWith`)과 대화 반복(3), 모델 오류 끝, 예산 멈춤. 호출 결과 캐시와 보낸 메시지 위치는 비공개다.
+  - `run-verify.ts`: 검증 회차(4), 재수정 판단과 재수정(5), 사람 확인 대기, 승인한 계획의 사전 점검. 같은 실패 서명의 계수는 비공개다.
+- `model-texts.ts`(모델에 가는 고정 문구)와 `pure.ts`(실행 문맥 없는 순수 판단·상수)는 IR-26 1단계에서 나뉘었다.
+- 결정(IR-26 엔진 2단계 설계, PM 채택)
+  - 실행 시 연결은 `index.ts` 하나가 한다. `run-*`끼리는 `import type`(factory의 형)만 쓴다. 새 모듈은 `contracts`와 엔진 형제만 import하고 `./index.js`를 가져오지 않는다.
+  - 여러 묶음이 쓰는 값은 `RunTally` 객체 하나를 그대로 넘기고, 늘 `tally.필드`로 그때 읽는다. 지역으로 구조 분해하거나 값을 복사하지 않는다. 모음(`notices`·`messages`·`changes`·`verifierResults`·`state`)은 다시 대입하지 않고 제자리에서 바꾼다.
+  - 끝 점검(6)이 쓰는 "마지막 점검 뒤 무엇이 돌았나"(`sinceCheck`)는 `run-checks`가 갖는다. 대화와 검증은 `noteActivity("model" | "verifiers")`로 알린다.
+  - 단위마다 본문을 바이트 그대로 옮겼고, 대본 결과·journal·경계 호출의 bytes 대조와 독립 검토를 거쳤다.
 
 1. 실행 시간 타이머를 건다. 시스템 문구, 목표, workflow, 작업 종류 지시문(GT-E2)을 가리고 `run_started`를 기록한다.
 2. 무결성 기준선을 잡는다(`run_start`). 확인할 수 없는 경로가 있으면 바로 `needs-input`/`protected_changed`로 끝난다(U-1, U-2). 상태 디렉터리 점검의 기준선도 잡는다(DR-38).
@@ -222,6 +239,15 @@
 ### 4.4 앱 계층과 단계 4 흐름
 
 앱 계층([어댑터 계약](design/adapter-contract.md)). **일부**
+- 모듈 구성(현재 상태 2026-11-26, main `1d42acc6`; IR-26 앱 분할). `src/app/app.ts`(300줄)는 `createCodarynApp`의 조립과 26개 메서드 facade다. 명령은 factory로 나뉘었다.
+  - `reading-context.ts`: 설정 읽기 문맥. 호출마다 다시 해석한다.
+  - `reading-commands.ts`: `changes`, 작업 공간 목록, 텍스트 읽기·쓰기, 실행 기록 페이지.
+  - `report-commands.ts`: `report`·`reportMarkdown`·`revert`·`listRuns`·`resolveRun`.
+  - `settings-commands.ts`: `doctor`, 모델 목록·선택, 설정 읽기·만들기·제안·적용.
+  - `plan-commands.ts`: `plan`·`review`. `apply-commands.ts`: `applyPlan`·`checkApply`.
+  - `run-hooks.ts`의 `appRunHooks`가 실행 하나의 관찰자 중계, 시작 관문, 취소 통로를 만든다. `startRun`, 함께 쓰는 `cliEnvironmentOf`·`defaultConfigOf`, 정리 세 메서드는 `app.ts`에 있다.
+  - `app-hooks.ts`는 시험이 바꿔 끼우는 부품의 형 `AppHooks`다. 실제 사용에서는 비운다.
+  - factory는 만들 때 아무것도 읽지 않는다. 환경·설정·키는 호출 때 읽는다. 옮긴 뒤 이름을 쓰지 않게 된 import는 같은 자리의 부수효과 import로 남겨 모듈 평가 순서를 지킨다(`// Preserve module evaluation order.`, 32곳).
 - `startRun`이 4.1의 준비와 4.2의 조립을 앱 환경으로 한다. GUI 엔진 호스트가 이것을 부른다. CLI의 `run`은 이 공개 메서드를 직접 부르지는 않지만 `prepareTask`·조립·`runLife`의 공통 core를 쓴다(`src/cli/run.ts`의 `runThroughApp`). 이행 2의 원래 단일 창구 목표와 C1~C11의 공통 규칙 이동 완료 범위는 구분한다.
   - 변수 파일은 `process.env`에 적재하지 않고 환경 사본에 합친다(AC 4절).
   - 환경 사본은 Windows에서 이름을 대소문자 없이 맞춘다(`app/environment.ts`). 앱 계층의 조립은 명령 실행기의 부모 환경을 이 사본에서 넘긴다(DR-4, `app/assemble.ts`, 코드 기준). DR-4의 두 경우는 [어댑터 계약 7.1절](design/adapter-contract.md)의 이행 검증 기준이다. 이행 당시의 검증 결과는 [CP51](pm-status.md)의 기존 기록을 따른다.

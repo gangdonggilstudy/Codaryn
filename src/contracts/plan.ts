@@ -35,6 +35,10 @@
  * then a later model run writes those files only. Its contract starts at PLANNED_FILE_CHANGES.
  * U-180 (B-3): the `propose_changes` tool stores such a plan (PlanRecorder.saveChangesPlan); the
  * run that carries one out follows with the next unit, and the CLI and the app with B-4.
+ *
+ * IR-26 step 3 (P0-P2): the common part is in plan-core.ts, the file write plan in plan-changes.ts
+ * and the apply, journal and result contract in plan-apply.ts; this module passes them on and keeps
+ * the recorder and loaders of both plan kinds, the preflight and the outputs.
  */
 
 import type { PolicyGate } from "./policy.js";
@@ -42,7 +46,6 @@ import "./text.js"; // Preserve module evaluation order.
 import type { ContentHash, MaskedText } from "./text.js";
 import type { PlanActionKind, ResolvedPlanAction, MaskedPlanAction, MaskedParts, StoredPlanAction, StoredPlan } from "./plan-core.js";
 import type { StoredPlannedFile, AnyStoredPlan, MaskedPlannedFile } from "./plan-changes.js";
-
 import type { PlanExecutor, PlanItemProblem } from "./plan-apply.js";
 
 export { PLAN_MODES, PLAN_ACTION_KINDS, MAX_PLAN_ACTIONS, MAX_PLAN_SOURCE_BYTES, MAX_PLAN_SUMMARY_CHARS, MIN_PLAN_DIGEST_PREFIX, PLAN_FILE_NAME, PLAN_APPLIED_FILE_NAME, DISCARDED_DIR_NAME, PLAN_PROBLEMS, PLAN_ACTION_DESCRIPTORS, maskedParts, maskedPartsEncoding, sameMaskedParts, planActionShown, planActionShownMatches, APPROVAL_CHANNELS, DISCARDED_STORED_NAME_PATTERN_SOURCE, discardedStoredName, UNSAFE_MOVE_CONSENT_ARGUMENT } from "./plan-core.js";

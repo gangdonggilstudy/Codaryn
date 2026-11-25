@@ -1,12 +1,12 @@
 /**
  * Family boundaries (IR-26 step 3): the modules split out of one file form a family around the file
- * that kept the old path (the facade). A family's members are found by listing, so a new member
- * (P2's plan-apply.ts, P3's plan-output.ts) is covered without a change here. No compiler API or
- * runtime loading. (1) A member other than the facade never imports its facade. (2) A domain module
- * imports no member of its family but the core; the composition layer may import domain modules
- * with type-only statements. (3) The core imports no other member. (4) src and gui/src outside a
- * family reach it through its facade only. (5) No `export *` in a family. (6) Each name the facade
- * exports is declared in at most one member. The app family's type-only rule is app-boundaries'.
+ * that kept the old path (the facade). A family's members are found by listing, so a new member is
+ * covered without a change here. No compiler API or runtime loading. (1) A member other than the
+ * facade never imports its facade. (2) A domain module imports no member of its family but the core,
+ * not even as types (D3-2 has no exception: plan's type-only composition layer, P3, was not made).
+ * (3) The core imports no other member. (4) src and gui/src outside a family reach it through its
+ * facade only. (5) No `export *` in a family. (6) Each name the facade exports is declared in at
+ * most one member. The app family's type-only rule is app-boundaries'.
  */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -124,22 +124,20 @@ export interface Family {
   /** The file that kept the old path. Members are it and `<its name>-<name>.ts` in the same folder. */
   readonly facade: string;
   readonly core: string | null;
-  /** Members that may import domain modules with type-only statements (the composition layer). */
-  readonly composition: readonly string[];
 }
 
 export const FAMILIES: readonly Family[] = [
-  { name: "app", dir: "src/contracts", facade: "app.ts", core: "app-core.ts", composition: [] },
-  { name: "engine", dir: "src/contracts", facade: "engine.ts", core: null, composition: [] },
-  { name: "plan", dir: "src/contracts", facade: "plan.ts", core: "plan-core.ts", composition: ["plan-output.ts"] },
-  { name: "task", dir: "src/app/input", facade: "task.ts", core: "task-core.ts", composition: [] },
-  { name: "output", dir: "src/cli/human", facade: "output.ts", core: "output-layout.ts", composition: [] },
+  { name: "app", dir: "src/contracts", facade: "app.ts", core: "app-core.ts" },
+  { name: "engine", dir: "src/contracts", facade: "engine.ts", core: null },
+  { name: "plan", dir: "src/contracts", facade: "plan.ts", core: "plan-core.ts" },
+  { name: "task", dir: "src/app/input", facade: "task.ts", core: "task-core.ts" },
+  { name: "output", dir: "src/cli/human", facade: "output.ts", core: "output-layout.ts" },
 ];
 
 /** Rule (4)'s known exceptions ("importer -> member"), when the guard was written. Only new ones fail. */
 export const OUTSIDE_ALLOWED: readonly string[] = [];
 
-type Role = "facade" | "core" | "domain" | "composition";
+type Role = "facade" | "core" | "domain";
 export interface Member { readonly family: Family; readonly role: Role; readonly key: string; readonly file: string; readonly text: string }
 /** The repository, and files (by repository-relative path) added or replaced in place of the real ones. */
 export interface Tree { readonly repo: string; readonly extra?: ReadonlyMap<string, string> }
@@ -164,7 +162,7 @@ export function familyMembers(tree: Tree): Member[] {
     if (family.core !== null) assert.ok(names.has(family.core), `${family.name}: no core ${family.core}`);
     for (const name of [...names].sort()) {
       const key = `${family.dir}/${name}`;
-      const role: Role = name === family.facade ? "facade" : name === family.core ? "core" : family.composition.includes(name) ? "composition" : "domain";
+      const role: Role = name === family.facade ? "facade" : name === family.core ? "core" : "domain";
       members.push({ family, role, key, file: path.join(tree.repo, key), text: tree.extra?.get(key) ?? readFileSync(path.join(tree.repo, key), "utf8") });
     }
   }
@@ -178,12 +176,6 @@ export function addressed(repo: string, fromFile: string, specifier: string): st
   if (target === null) return null;
   const relative = relativePath(repo, target);
   return withoutExtension(relative.startsWith("dist/") ? relative.slice("dist/".length) : relative);
-}
-
-/** Whether the import or export at `at` is a statement-level `import type` / `export type` (erased whole). */
-function typeOnly(ts: readonly Token[], at: number): boolean {
-  const i = ts.findIndex(t => t.at === at);
-  return i >= 0 && ts[i + 1]?.value === "type" && !["from", "=", ","].includes(ts[i + 2]?.value ?? "");
 }
 
 const DECLARATION = new Set(["const", "let", "var", "function", "class", "interface", "type", "enum"]);
@@ -258,7 +250,6 @@ export function familyViolations(tree: Tree): string[] {
       if (target.role === "facade") { if (role !== "facade") fail(1, ref.at, `imports its facade ${target.key}`); continue; }
       if (role === "core") fail(3, ref.at, `the core imports ${target.key}`);
       else if (role === "domain" && target.role !== "core") fail(2, ref.at, `a domain module imports ${target.key}`);
-      else if (role === "composition" && target.role !== "core" && (target.role !== "domain" || ref.calculated || !typeOnly(ts, ref.at))) fail(2, ref.at, `the composition layer imports ${target.key} at run time`);
     }
     for (let i = 0; i < ts.length; i++) {
       const t = ts[i]!;
@@ -277,7 +268,7 @@ export function familyViolations(tree: Tree): string[] {
   return failures;
 }
 
-/** Rule (4) over src and gui/src (with `tree.extra` laid over them): a core, domain or composition member is reached only from its own family. */
+/** Rule (4) over src and gui/src (with `tree.extra` laid over them): a core or domain member is reached only from its own family. */
 export function outsideViolations(tree: Tree, sources?: readonly SourceFile[]): string[] {
   const members = familyMembers(tree), failures: string[] = [];
   const byKey = new Map(members.map(member => [withoutExtension(member.key), member]));
@@ -327,11 +318,10 @@ test("families: each rule rejects a source that breaks it, and only that rule", 
     [1, [plus("src/contracts/plan-changes.ts", 'import type { PlanRecorder } from "./plan.js";')]],
     [1, [plus("src/app/input/task-limits.ts", 'const later = () => import("./task.js");')]],
     [1, [plus("src/cli/human/output-history.ts", 'export type { HumanOutput } from "./output.js";')]],
-    [1, [["src/contracts/plan-apply.ts", 'import type { PlanRecorder } from "./plan.js";\nexport type Applied = PlanRecorder;\n']]],
+    [1, [["src/contracts/plan-extra.ts", 'import type { PlanRecorder } from "./plan.js";\nexport type Extra = PlanRecorder;\n']]],
     [2, [plus("src/app/input/task-limits.ts", 'import { parseVerifiers } from "./task-verifiers.js";')]],
     [2, [plus("src/contracts/app-files.ts", 'import type { PlanCheck } from "./app-plans.js";')]],
-    [2, [["src/contracts/plan-output.ts", 'import { plannedFileStale } from "./plan-changes.js";\nexport const stale = plannedFileStale;\n']]],
-    [2, [["src/contracts/plan-output.ts", 'import { type StoredPlannedFile } from "./plan-changes.js";\nexport type Shown = StoredPlannedFile;\n']]],
+    [2, [["src/contracts/plan-extra.ts", 'import type { StoredPlannedFile } from "./plan-changes.js";\nexport type Extra = StoredPlannedFile;\n']]],
     [3, [plus("src/cli/human/output-layout.ts", 'import type { createErrorOutput } from "./output-errors.js";')]],
     [4, [plus("src/app/prepare.ts", 'import { fail } from "./input/task-core.js";')]],
     [4, [plus("src/contracts/app-plans.ts", 'import type { MaskedParts } from "./plan-core.js";')]],
@@ -345,8 +335,8 @@ test("families: each rule rejects a source that breaks it, and only that rule", 
     const failures = all(new Map(files));
     assert.ok(failures.length > 0 && failures.every(failure => failure.startsWith(`(${rule})`)), `(${rule}) ${files.map(([key]) => key).join(", ")} -> ${failures.join(" | ")}`);
   }
-  const allowed = new Map([["src/contracts/plan-output.ts", 'import type { StoredPlannedFile } from "./plan-changes.js";\nexport type { MaskedPlannedFile } from "./plan-changes.js";\nimport { PLAN_MODES } from "./plan-core.js";\nexport type Shown = StoredPlannedFile | (typeof PLAN_MODES)[number];\n']]);
-  assert.deepEqual(all(allowed), [], "the composition layer may read domain modules as types and the core at run time");
+  const allowed = new Map([["src/contracts/plan-extra.ts", 'import { PLAN_MODES } from "./plan-core.js";\nimport type { MaskedParts } from "./plan-core.js";\nexport type Extra = MaskedParts | (typeof PLAN_MODES)[number];\n']]);
+  assert.deepEqual(all(allowed), [], "a new domain module found by listing may import the core, at run time or as types");
 });
 
 test("families: comments, strings and regex text are not imports, exports or declarations", () => {

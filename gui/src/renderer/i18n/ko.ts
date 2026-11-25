@@ -654,6 +654,7 @@ export const KO = {
   "report.saved": "보고서를 저장했습니다: {name}",
   "report.notSaved": "저장하지 않았습니다.",
   "error.save_failed": "보고서 파일을 쓰지 못했습니다. 다른 곳을 골라 다시 저장하세요.",
+  "error.save_state_dir": "Codaryn 기록 폴더(.codaryn) 안에는 저장할 수 없습니다. 다른 위치를 고르세요.",
   "report.none": "볼 보고서가 없습니다. 실행 결과나 실행 목록에서 여세요.",
   "report.tab.summary": "요약",
   "report.tab.checks": "검증",

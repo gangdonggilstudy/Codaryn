@@ -6,7 +6,20 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { rename, rm, writeFile } from "node:fs/promises";
+import { realpath, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+
+/** Exact path components only; Windows names are case insensitive. No filesystem access. */
+export function isCodarynStatePath(file: string, platform: NodeJS.Platform): boolean {
+  const parts = file.split(platform === "win32" ? /[\\/]+/ : /\//);
+  return parts.some(part => (platform === "win32" ? part.toLowerCase() : part) === ".codaryn");
+}
+
+/** Resolve the parent before checking, so directory links into records cannot hide the destination. */
+export async function reportPathInStateDir(file: string): Promise<boolean> {
+  const parent = await realpath(dirname(file));
+  return isCodarynStatePath(file, process.platform) || isCodarynStatePath(join(parent, basename(file)), process.platform);
+}
 
 export async function writeTextFile(path: string, text: string): Promise<void> {
   const temporary = `${path}.${randomBytes(6).toString("hex")}.tmp`;

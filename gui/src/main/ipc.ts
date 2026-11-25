@@ -60,7 +60,7 @@ import { cleanupQuestions } from "../shared/cleanup.js";
 import { parseCleanupPreviewArgs, toCleanupResultReply, toHostCleanupPreview, toStateSummaryReply } from "../shared/ipc.js";
 import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from "../shared/ipc.js";
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
-import { reportFileName, writeTextFile } from "./save-file.js";
+import { reportFileName, reportPathInStateDir, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
 import { copyablePath, parseCheckPlanArgs, toPlanCheckReply, toStartFailure, parseCopyArgs, parseRunEventsArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
 import type { PlanCheckReply, RunEventsReply } from "../shared/ipc.js";
@@ -428,6 +428,7 @@ export function registerIpc(deps: IpcDeps): void {
     const path = await deps.chooseSavePath(reportFileName(parsed.runId));
     if (path === null) return { ok: false, code: "not_saved" };
     try {
+      if (await reportPathInStateDir(path)) return { ok: false, code: "save_state_dir" };
       await writeTextFile(path, report.text);
     } catch {
       return { ok: false, code: "save_failed" };

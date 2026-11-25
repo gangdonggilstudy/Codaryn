@@ -75,6 +75,9 @@ const RECORD_TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
 
 /** GU-3: a run's events as progress items in `language`: the CLI's sentences, on one line, cleaned. */
 function runItems(human: ReturnType<EngineHumanModule["createHumanOutput"]>, shown: (text: string) => string): RunItemOf {
+  // OFG-2: apply-only shown records; the contract also lists shared and recovery records.
+  // ofg2-host-routing.test.ts checks this set against the contracts and the real renderer.
+  const applyOnly = new Set(["apply_started", "plan_checked", "file_moved", "file_discarded", "plan_item_failed"]);
   const oneLine = (text: string): string => shown(text.replace(/\r?\n+$/, "").replace(/\r?\n/g, " ")).slice(0, MAX_RUN_ITEM_CHARS);
   return (event) => {
     if (typeof event !== "object" || event === null) return null;
@@ -85,16 +88,11 @@ function runItems(human: ReturnType<EngineHumanModule["createHumanOutput"]>, sho
     if (typeof type !== "string" || !RECORD_TYPE.test(type)) return null;
     let line: string | null = null;
     try {
-      line = human.progressLine(record);
+      line = applyOnly.has(type) && human.applyProgressLine !== undefined
+        ? human.applyProgressLine(record)
+        : human.progressLine(record);
     } catch {
       line = null;
-    }
-    if (line === null && human.applyProgressLine !== undefined) {
-      try {
-        line = human.applyProgressLine(record);
-      } catch {
-        line = null;
-      }
     }
     if (line === null) return null;
     // A denied tool call is its own kind, so the window can show denials only (3.6 filter).

@@ -162,8 +162,7 @@ for (const language of ["ko", "en"] as const) {
     assert.ok(summary(b).includes(count(1)), "one renderer's changed flag must not suppress another's summary");
   });
 
-  // OFG-2: PM must choose the GUI fallback policy before either behavior becomes a guard.
-  test.todo(`output family ${language}: CLI/GUI run-to-apply summary agreement awaits OFG-2 routing decision`);
+  // OFG-2 ko/en coverage moved to gui/tests/unit/ofg2-host-routing.test.ts: it executes the real GUI host factory.
 
   test(`output family ${language}: revert groups keep the exact 20/21 boundary and hide unavailable paths`, () => {
     const renderer = output.createHumanOutput(createMessageCatalog(language));

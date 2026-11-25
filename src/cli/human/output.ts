@@ -143,8 +143,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     runSummary: summary.runSummary,
 
     progressLine(event: JournalEvent): string | null {
-      // U-52: a run's or an apply's start begins a new one, well formed or not (the GUI host gives
-      // every record to progressLine first, an apply's too).
+      // U-52: a run start, or an apply start passed by another reader, begins anew, well formed or not.
+      // OFG-2: the GUI host sends apply-only records directly to applyProgressLine.
       const type: unknown = (event as { readonly type?: unknown }).type;
       if (type === "run_started" || type === "apply_started") startAgain();
       let line: string | null;

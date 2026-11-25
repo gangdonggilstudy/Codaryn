@@ -27,19 +27,17 @@ import type {
   InitOutput,
   MessageCatalog,
   ModelsOutput,
-  ReportOutput,
   ResolvedTaskSpec,
   RevertOutput,
   RunApprovedPlan,
   RunTask,
-  RunsOutput,
 } from "../contracts/index.js";
 import { workflowSettingsOf } from "../contracts/index.js";
 import { applyPlan as engineApplyPlan } from "../engine/index.js";
 import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
-import { createRevertCommand, revertOnce, revertOutput, startRevert } from "./revert-command.js";
+import { listRuns as storeListRuns } from "../store/index.js";
+import "./revert-command.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { checkDoctor } from "./doctor.js";
 import type { CommandOutcome } from "./command-outcome.js";
@@ -50,13 +48,13 @@ import { applyLife } from "./apply-life.js";
 import type { ApplyLifeEnd } from "./apply-life.js";
 import type { ModelsCommandEnvironment } from "./models-command.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
-import { renderLocalizedApplyReport, renderLocalizedReport } from "../presentation/report-localized.js";
+import "../presentation/report-localized.js";
 import { jsonLine } from "../presentation/json.js";
-import { parseApplyArgs, parseArgs, parseDoctorArgs, parseInitArgs, parseModelsArgs, parsePlanArgs, parseReportArgs, parseRevertArgs, parseReviewArgs } from "./input/args.js";
+import { parseApplyArgs, parseArgs, parseDoctorArgs, parseInitArgs, parseModelsArgs, parsePlanArgs, parseReviewArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
-import { readReport } from "./report-read.js";
-import { hideKeys, hideKeysInStrings } from "./input/text-safety.js";
+import "./report-read.js";
+import { hideKeys } from "./input/text-safety.js";
 import { prepareFor, recordReview, showPlan } from "./plan-view.js";
 import type { PlanViewEnvironment } from "./plan-view.js";
 import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
@@ -66,7 +64,7 @@ import { tallyOf } from "./tally.js";
 import { knownKeyValues } from "./input/settings.js";
 import { applyArguments, deliverApply } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
-import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
+import { unsafeMoveConsentOf } from "./consent.js";
 import "./changes.js";
 import "./workspace-dir.js";
 import "./run-events.js";
@@ -77,14 +75,13 @@ import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { appRunHooks } from "./run-hooks.js";
 import { modelsArguments } from "./models.js";
-import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
+import { runIdOf, workspaceRootOf } from "./runs.js";
 import { applyCleanupIn, previewCleanupIn, stateSummaryIn } from "./cleanup.js";
 import { readSettingsIn } from "./settings.js";
 import { initArguments, suggestionsFor } from "./init.js";
 import { applySettingsChangeIn, proposeSettingsChangeIn } from "./settings-change.js";
 import type {
   AppCallOutcome,
-  RevertCallOutcome,
   AppEnvironment,
   AppError,
   ApplyHandle,
@@ -100,13 +97,10 @@ import type {
   ListModelsRequest,
   ApplyCleanupRequest,
   CleanupPreviewRequest,
-  ListRunsRequest,
   StateSummaryRequest,
   ApplySettingsChangeRequest,
   CreateSettingsRequest,
   ReadSettingsRequest,
-  ReportMarkdown,
-  ReportRequest,
   SelectModelRequest,
   SettingsChangeProposal,
   SettingsChangeRequest,
@@ -114,9 +108,6 @@ import type {
   SettingsSuggestionsRequest,
   SettingsView,
   SettingsWritten,
-  ResolvedRun,
-  ResolveRunRequest,
-  RevertRequest,
   RunHandle,
   RunObserver,
   RunOutcome,
@@ -127,6 +118,7 @@ import type {
 import { createReadingContext } from "./reading-context.js";
 import { createReadingCommands } from "./reading-commands.js";
 import type { AppHooks } from "./app-hooks.js";
+import { createReportCommands } from "./report-commands.js";
 
 export type { AppHooks } from "./app-hooks.js";
 
@@ -231,6 +223,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const relate = (target: string, base: string) => relateRealPaths(target, base);
   const { readingSecrets, workspaceTextSource } = createReadingContext(environment, platform, locate, relate, defaultConfigOf, PROBE_GOAL);
   const { changes, listWorkspaceDir, readWorkspaceText, writeWorkspaceText, listRunEvents } = createReadingCommands(readingSecrets, workspaceTextSource, environment, hooks);
+  const { report, reportMarkdown, revert, listRuns, resolveRun } = createReportCommands(environment, platform, jsonOutcome, commandError);
 
   /**
    * The CLI's run environment with this environment's parts. `env` is the call's own copy; the
@@ -334,125 +327,10 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     return { ok: true, handle };
   }
 
-  async function report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>> {
-    try {
-      // U-316: keep parsing and final masking, while the app reader owns the stored-record rules.
-      const io = {
-        argv: ["report", "--workspace", request.workspace, "--run", request.runId, "--json"],
-        cwd: environment.cwd,
-        env: copyEnvironment(environment.env, platform),
-        platform,
-        listRuns: storeListRuns,
-      };
-      const parsed = parseReportArgs(io.argv);
-      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
-      const read = await readReport(io, { workspace: parsed.args.workspace, run: parsed.args.runId, planApplyLine: false });
-      if (!read.ok) return { ok: false, error: commandError(read.outcome) };
-      const currentKey = knownKeyValues(io.env);
-      let text: string;
-      try {
-        text = jsonLine(hideKeysInStrings(read.report, currentKey));
-      } catch {
-        return { ok: false, error: fromCliError(cliError("invalid_run_record", "the run's records cannot be shown").output) };
-      }
-      // Preserve the second, whole-text masking pass and JSON parsing failure behavior.
-      return jsonOutcome<ReportOutput>({ text: hideKeys(text, currentKey), exitCode: read.report.exitCode }, "report");
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  /** GU-3: `codaryn report` without `--json`, as main.ts prints it. */
-  async function reportMarkdown(request: ReportRequest): Promise<AppCallOutcome<ReportMarkdown>> {
-    // The values go after their flags; one that starts with "-" could be read as a flag instead.
-    if (request.workspace.startsWith("-") || request.runId.startsWith("-")) {
-      return { ok: false, error: appError("invalid_arguments", "the workspace and the run id cannot start with '-'") };
-    }
-    try {
-      const io = {
-        argv: ["report", "--workspace", request.workspace, "--run", request.runId],
-        cwd: environment.cwd,
-        env: copyEnvironment(environment.env, platform),
-        platform,
-        listRuns: storeListRuns,
-      };
-      const parsed = parseReportArgs(io.argv);
-      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
-      const read = await readReport(io, { workspace: parsed.args.workspace, run: parsed.args.runId, planApplyLine: true });
-      if (!read.ok) return { ok: false, error: commandError(read.outcome) };
-      const currentKey = knownKeyValues(io.env);
-      let text: string;
-      try {
-        text = "runKind" in read.report
-          ? renderLocalizedApplyReport(request.language ?? "en", read.report, currentKey)
-          : renderLocalizedReport(request.language ?? "en", read.report, currentKey, read.failedToolCalls, read.planApply);
-      } catch {
-        return { ok: false, error: fromCliError(cliError("invalid_run_record", "the run's records cannot be shown").output) };
-      }
-      return { ok: true, output: { kind: "report_markdown", markdown: hideKeys(text, currentKey), exitCode: read.report.exitCode } };
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  async function revert(request: RevertRequest): Promise<RevertCallOutcome> {
-    // DR-25: only the consent the person gave on screen for this run, as the adapter's consent.
-    const consent = revertConsentOf(request);
-    if (!consent.ok) return consent;
-    try {
-      // U-322: keep the request/parser order and app-specific store options. The app rules own
-      // one revert; an adapter never asks at a terminal or starts the CLI's second attempt.
-      const io = {
-        argv: ["revert", "--workspace", request.workspace, "--run", request.runId, ...(request.dryRun === true ? ["--dry-run"] : [])],
-        cwd: environment.cwd,
-        isDirectory: environment.isDirectory,
-        clock: environment.clock,
-        randomBytes: environment.randomBytes,
-        revert: createRevertCommand(revertRun, {
-          dryRun: revertRun,
-          listRuns: storeListRuns,
-          readRecord: readRevertRecord,
-          writeRecord: writeRevertRecord,
-          inspect: inspectRun,
-        }),
-        adapter: { unsafeMoveConsent: consent.consent },
-      };
-      const parsed = parseRevertArgs(io.argv);
-      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
-      const { runId, dryRun, allowUnsafeMove, workspace } = parsed.args;
-      const start = await startRevert(io, { workspace, dryRun, allowUnsafeMove });
-      if (!start.ok) return { ok: false, error: fromCliError(start.outcome.output) };
-      const result = await revertOnce(io, start.started, runId, dryRun, start.started.consent);
-      if (result === null) return { ok: false, error: fromCliError(cliError("internal_error", "the revert stopped because of an internal error").output) };
-      if (!result.ok) return { ok: false, error: fromCliError(cliError(result.code, result.message).output) };
-      const { output } = revertOutput(result, dryRun);
-      // U-229 (R-106 L-1, after U-220): a lock the revert could not release is told beside its output.
-      return result.lockLeft === true ? { ok: true, output, lockLeft: true } : { ok: true, output };
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  async function listRuns(request: ListRunsRequest): Promise<AppCallOutcome<RunsOutput>> {
-    try {
-      return await listRunsIn(environment, request);
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
   // DR-39: the store's summary, plan and cleanup with the app layer's checks (cleanup.ts).
   const stateSummary = (request: StateSummaryRequest) => stateSummaryIn(environment, request);
   const previewCleanup = (request: CleanupPreviewRequest) => previewCleanupIn(environment, request);
   const applyCleanup = (request: ApplyCleanupRequest) => applyCleanupIn(environment, request, hooks.cleanupOperations);
-
-  async function resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>> {
-    try {
-      return await resolveRunIn(environment, request);
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
 
   async function doctor(request: DoctorRequest): Promise<AppCallOutcome<DoctorOutput>> {
     const argv = ["doctor"];

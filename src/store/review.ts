@@ -6,13 +6,14 @@
  * here and never sent to a model. Run directories that are links are not read or written through.
  */
 
-import { lstat, readFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { MAX_REVIEW_NOTE_CHARS, REVIEW_FILE_NAME, REVIEW_VERDICTS } from "../contracts/index.js";
 import type { MaskedText, ReviewRecord, ReviewVerdict } from "../contracts/index.js";
 import { assertRunId, errorCode, isOwnRunDir, replaceAtomically, runDir } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
+import { readBoundedText } from "./read-bounded.js";
 
 /** Largest review.json read: the note is at most MAX_REVIEW_NOTE_CHARS. */
 const REVIEW_RECORD_MAX_BYTES = 16 * 1024;
@@ -67,7 +68,7 @@ export async function reviewRecordIn(dir: string, runId: string): Promise<Review
   }
   let value: unknown;
   try {
-    value = JSON.parse(await readFile(file, "utf8"));
+    value = JSON.parse(await readBoundedText(file, REVIEW_RECORD_MAX_BYTES));
   } catch {
     throw new Error("the run's review record cannot be read");
   }

@@ -4,13 +4,14 @@
  * (ApplyDeps.planRecordsUnchecked, notice kind plan_records_unchecked) and goes on.
  */
 
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { StateUncheckedSince } from "../contracts/index.js";
 import { assertRunId } from "./common.js";
 import { isStoredRunId, runIdSecond } from "./runs.js";
+import { readBoundedText } from "./read-bounded.js";
 
 /**
  * Whether the journal at `file` cannot be read (missing, not a plain file, too large, empty, a line
@@ -22,7 +23,7 @@ async function uncheckedIn(file: string): Promise<boolean> {
   try {
     const info = await lstat(file);
     if (!info.isFile() || info.size === 0 || info.size > MAX_REPORT_FILE_BYTES) return true;
-    text = await readFile(file, "utf8");
+    text = await readBoundedText(file, MAX_REPORT_FILE_BYTES);
   } catch {
     return true;
   }

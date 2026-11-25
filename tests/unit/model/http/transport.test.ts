@@ -109,12 +109,17 @@ ${shaped.slice(9)} . end`), "key [redacted] . end");
     assert.equal(wide.seenBodies[0]?.length, 5000);
   });
 
-  test("DR-36 (d), R-22 I-3: the key-material check reads a bounded text; a longer one counts as key material", () => {
+  test("DR-36 (d), R-22 I-3: the key-material check reads a bounded text; a longer one counts as key material", { timeout: 15_000 }, (t) => {
     const holds = createKeyMaterialCheck("codaryn-fake-key-not-a-credential", API_KEY_MASK_PATTERN_SOURCES);
     assert.equal(holds("a ".repeat(2048)), false, "4096 characters: read");
-    const started = performance.now();
-    assert.equal(holds("a ".repeat(32_768)), true, "65,536 characters with separators: refused unread");
-    assert.ok(performance.now() - started < 200, "and at once");
+    // Observe matching work directly. A scheduler pause while preparing this input must not
+    // turn a correct refusal into a performance failure; the test timeout is only a watchdog.
+    const overlong = "a ".repeat(32_768);
+    const matching = t.mock.method(RegExp.prototype, "exec");
+    assert.equal(holds(overlong), true, "65,536 characters with separators: refused unread");
+    const evaluations = matching.mock.callCount();
+    matching.mock.restore();
+    assert.equal(evaluations, 0, "overlong text never enters regular-expression matching");
     assert.equal(MAX_KEY_MATERIAL_CHECK_CHARS, 4096);
     assert.equal(holds(`${"a".repeat(4096)}`), false, "the limit itself is read");
     assert.equal(holds(`${"a".repeat(4097)}`), true, "one more is not");

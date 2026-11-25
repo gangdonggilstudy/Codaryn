@@ -6,14 +6,15 @@
  *   fixed phrase: no part of the key the provider's message echoes is in any output or record.
  * - A 302 from the API address: the real fetch (`redirect: "manual"`) gives an opaque redirect, which
  *   the transport refuses; the Location server is never asked, and the key goes nowhere else.
- * - A closed loopback port: the connection error is retried and told by its code. The port is one
- *   the system just gave and took back: fetch refuses the ports of the Fetch standard's bad-port
- *   list (port 9 among them) before connecting, which the transport rightly reads as a format error.
+ * - An owned loopback TCP listener resets each connection. The listener keeps its port for the
+ *   whole run; ECONNRESET is retried and told by its fixed code, without assuming that a released
+ *   ephemeral port stays unused. Mock transport failure only, not an API response.
  */
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { createServer as createTcpServer } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { test } from "node:test";
 import { CODARYN_OPENAI_API_BASE_URL_ENV } from "../../src/contracts/index.js";
 import type { JournalRecord } from "../../src/contracts/index.js";
@@ -27,13 +28,26 @@ import { findLeaks } from "../support/leak.js";
 
 const SEED = "seed.txt";
 const SEED_RULE = { id: "seed", kind: "file_rules" as const, rules: [{ type: "exists" as const, path: SEED }] };
-/** A loopback port nothing listens on: one the system gives for a listener that is closed at once. */
-async function closedPort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
+/** Own the port until the test ends, and fail each real connection with a controlled TCP reset. */
+async function resetServer(t: Parameters<typeof createSandbox>[0]) {
+  const sockets = new Set<Socket>();
+  let connections = 0;
+  const tcp = createTcpServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => undefined);
+    socket.once("close", () => sockets.delete(socket));
+    connections += 1;
+    socket.resetAndDestroy();
+  });
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    if (tcp.listening) await new Promise<void>((resolve, reject) => tcp.close((error) => error ? reject(error) : resolve()));
+  });
+  await new Promise<void>((resolve, reject) => {
+    tcp.once("error", reject);
+    tcp.listen(0, "127.0.0.1", () => { tcp.off("error", reject); resolve(); });
+  });
+  return { port: (tcp.address() as AddressInfo).port, connections: () => connections };
 }
 
 async function openAIRun(t: Parameters<typeof createSandbox>[0], baseUrl: string) {
@@ -94,10 +108,13 @@ test(`${MOCK_LABEL} U-143 SP-U05 a 302 from the API address: refused through the
   assert.equal(elsewhere.seen.length, 0, "the Location is never asked, so the key is sent nowhere else");
 });
 
-test(`${MOCK_LABEL} U-143 SP-U05 a closed loopback port: the connection error is retried and told by its code`, { timeout: 120_000 }, async (t) => {
-  const { run, result, errors } = await openAIRun(t, `http://127.0.0.1:${await closedPort()}/v1`);
+test(`${MOCK_LABEL} U-143 SP-U05 an owned reset server: the connection error is retried and told by its code`, { timeout: 120_000 }, async (t) => {
+  const api = await resetServer(t);
+  const { run, result, errors } = await openAIRun(t, `http://127.0.0.1:${api.port}/v1`);
   assert.deepEqual([result.status, result.reason, run.exitCode], ["failed", "model_error", 1]);
   assert.deepEqual(errors.map((record) => record.kind), ["api_error"]);
-  assert.match(errors[0]?.message ?? "", /^network error: connection failed \(ECONNREFUSED\) \(after \d+ attempts\)$/);
+  assert.match(errors[0]?.message ?? "", /^network error: connection failed \(ECONNRESET\) \(after \d+ attempts\)$/);
   assert.equal(result.modelError?.retryable, true);
+  assert.ok(api.connections() >= 2, "the owned server observed repeated connection attempts");
+  t.diagnostic(JSON.stringify({ connections: api.connections(), kind: errors[0]?.kind, message: errors[0]?.message, retryable: result.modelError?.retryable }));
 });

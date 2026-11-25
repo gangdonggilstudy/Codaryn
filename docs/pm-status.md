@@ -40,6 +40,15 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-77, 2026-11-27) — G7·G8 채택, G11 독립 검토 통과
+
+- **G7·G8 채택:** Codex 보고 `678028e8…a5f2a93`를 PM이 읽고 독립 검토·ACK했다. 작업 branch `fecdb088`, main `60185c7f`. 합친 판에서 타입 검사 0, unit 4,673건(4,662 통과·10 건너뜀·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), 실패 0. 검토 도구·트리/패치 일치·별도 비밀 검사 뒤 커밋했다.
+  - G7은 반납된 빈 포트 대신 TCP listener를 시험 수명 동안 소유하고 연결을 통제된 RST로 끝낸다. PM이 허용한 fixture 코드 차이는 ECONNREFUSED→ECONNRESET뿐이며 api_error·retryable·고정 문구·누출 없음의 뜻을 유지한다. 경쟁 포트 대조 실패 5/5→0/5, 소유 중 경쟁 bind는 EADDRINUSE 5/5다.
+  - G8은 handle을 얻은 뒤 finally에서 cancel→done을 기다려 fixture 삭제보다 먼저 정리한다. 고의 기능 실패는 계속 실패하지만 정리 누락/after-hook 실패는 각각 5/5→0/5다. 정상 관련 파일은 o06 3/3·n7 7/7이다.
+- **G11 독립 검토:** PM이 구현한 write 콜백의 실제 done 대기를 codex-worker-2가 검토했고 최종 보고 `747b84e9…715a36a`에서 새 발견 0·채택 권고다. 기존 48개 assert 문장 보존, 350ms fake 완료 지연 실패 5/5→0/5, 관련 6/6을 확인했다. 작업 branch `b24fdaef`, review-branch PASS이며 아직 main 합친 GUI 보드 전이다.
+- **운영 정정:** PM이 G11 보고 초안을 먼저 읽고 임시 해시로 ACK를 시도한 뒤 다음 branch를 너무 일찍 준비했다. 실제 READY·화면을 확인해 이전 branch를 복원하고 최종 보고를 다시 읽어 올바른 해시로 ACK한 뒤 재배정했다. 소스 손상은 없고 정적 검토 패킷도 불변이다. 앞으로 의존 동작은 READY·ACK 성공을 확인한 뒤 진행하고 checkout은 clean 상태를 강제 확인한다.
+- **다음:** G11의 전체 GUI 보드와 채택, G12 합성 환경 비교·G13 명시적 자식 출발 barrier. G10은 현재 즉시 Promise 대역의 정보 의견으로 남기며 미재현 미래 가정만으로 바꾸지 않는다.
+
 ## 진행 요약 (CP-76, 2026-11-27) — G5·G6·G9 채택과 전체 GUI 보드, 남은 시험 수명 보완
 
 - **G5·G6·G9 채택:** PM 자신의 구현은 codex-worker-2의 독립 검토·보완 재검토를 거쳤다(`48dfcf33…4ea523d`, 새 발견 0). 작업 branch `70660220`, main `b1b58ee4`이며 제품 변경 없이 시험 네 파일만 합쳤다. staged patch와 검토 patch 및 검증한 트리의 일치를 확인했고 check-secrets는 별도 실행 뒤 커밋했다.

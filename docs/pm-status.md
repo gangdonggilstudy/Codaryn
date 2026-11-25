@@ -40,6 +40,17 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-68, 2026-11-26) — IR-26 첫 범위 끝(엔진·GUI 공유 IPC), 구조 문서와 지킴 시험
+
+- **IR-26 엔진 2단계 끝(이동만, 단위마다 구현하지 않은 세션의 정적 검토, 합친 판마다 PM 전체 시험):** U4 공유 상태 `RunTally`(`af754be7`), U5 도구 호출 → `run-tools.ts`(`25de0050`), U6 대화 → `run-converse.ts`(`4f5bc0d5`), U7 검증·재수정·승인 계획 점검 → `run-verify.ts`(`1d42acc6`). 정리(`6cf0cc46`, codex-worker-2 구현, claude-worker 검토): 쓰이지 않는 import 바인딩 59개 제거(모듈 요청 순서는 부수효과 import로 유지), 떠돌던 doc 주석 둘을 제 함수로, 상태 디렉터리 guard에 한 줄 주석. **`engine/index.ts` 1,792 → 274줄**(공개 facade와 조립 뿌리 `runWith`).
+- **IR-26 GUI 공유 IPC 끝:** 2 설정·제안·모델(`03886e48`), 3a 실행 시작·결과·확인·계획 점검(`8da16246`), 공통 도우미를 primitives·core로(`b1931ff7`), 3b 텍스트 열기·저장(`6523b3b6`), 4a 실행 사건·계획·변경·검토(`b1a28b6f`), 4b 실행 결과 보기·보고서(`708f357e`), 4c 실행 목록·되돌리기·정리·설정 만들기(`dfdcc730`). **`shared/ipc.ts` 1,838 → 92줄**(채널·이벤트 목록과 157개 이름의 명시 재수출만). 방향은 facade → 분야 → core → primitives, 분야끼리 import 0. 4a·4b의 구현자는 분야끼리 공유가 드러나자 지시대로 멈추고 보고했다 — PM이 공유 항목(`TIME`, `RunItemView`, 실행 상태·가림 보기·결과 보기)을 primitives·core로 옮기도록 소유를 넓혀 다시 보냈다.
+- **지킴(`46b1e3c1`, codex-worker 구현, claude-worker 검토):** 새 시험 `gui/tests/unit/ipc-guards.test.ts`가 `gui/src` 소스에서 `shared/` 밖의 `shared/ipc/*` 직접 import 0(정적·동적·`require`·`import type`·재수출)과 내부 방향을 고정한다. 텍스트 보기의 비공개 문자 집합이 `primitives`의 `UNSAFE_IN_MESSAGE`와 모든 코드 포인트(1,114,112개)에서 같아 한 선언으로 합쳤다. 남은 선택 보강: IG-1(계산 경로 동적 import 허용 목록), IG-2(BMP 전체 집합 고정).
+- **문서(claude-worker):** IR-26 뒤 엔진·앱·계약 모듈 구성과 설계 결정 넷(`7bd50f49`). GUI 공유 IPC의 facade와 열 모듈, `standalone-gui.md` 6.4의 결정 "검사기의 자리"(facade로만, 분야끼리 import 0, 보안 문자 집합 한 선언, 지킴 시험이 고정), 개인정보 문서의 가림 위치(`27baf5fc`).
+- **PM 측정(합친 판마다 프로젝트 스크립트, 실패 0):** 마지막 `46b1e3c1`에서 unit 4,364건(4,357 통과·6 건너뜀·1 TODO), integration 684건(682 통과·1 건너뜀·1 TODO), GUI 587건(585 통과·2 건너뜀; 지킴 시험 5건 추가), 연기 시험 227/227. 로그는 `.codaryn/pm-tools/evidence/main-*`.
+- **운영:** claude-worker 창에 읽기 명령이 안전 검사에서 `rm`으로 오인돼 권한 확인 창이 한 번 떴다. 작업자 창 UI에는 답하지 않았고, 약 110초 뒤 자동 거절된 다음 작업자가 보고 폴더의 스크립트로 같은 확인을 마쳤다. Codex 세션 ID 변동으로 ACK가 거절되면 보고를 끝까지 읽고 해시를 확인한 뒤 수동 수신 기록을 남겼다.
+- 진행 중: G-4(되돌리기 처리기가 시작 예약을 보지 않음 — 재현 먼저, codex-worker), IR-26 다음 단계 설계 초안(남은 600줄 이상 파일, codex-worker-2).
+- 남은 것: 사용자의 꾸러미 화면 확인(M-3.19), 실제 API 3.1, 키 없는 수동 12항목, 서명·설치 파일·외부 게시(GUI-D9, 미승인), E-5·E-6 보류.
+
 ## 진행 요약 (CP-67, 2026-11-25~26) — 계약 층 분기 모두 비교, IR-26 앱 분할 끝, 엔진 2단계 U1~U3, H-1
 
 - **사용자 결정(2026-11-25):** 계약 층 남은 분기 설계(claude-worker)의 Q-4에 "규칙으로 적기" — 제품 코드(`src/`, `gui/src/`)에 시험할 때만 읽는 환경 변수·플래그를 두지 않고, 시험 주입은 코드로 넘기는 선택지와 `tests/` 아래 preload로만 한다(`docs/development-workflow.md` 7절, `4bccd1c4`). 사용자가 다시 로그인해 claude-worker 주간 한도(11-29 21시 KST 해제 예정)와 무관하게 이어 썼다.

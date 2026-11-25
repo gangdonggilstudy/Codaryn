@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { createReadStream, realpath as realpathCallback } from "node:fs";
+import { realpath as realpathCallback } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -60,9 +60,6 @@ export interface IntegrityFileSystem {
   hashFile(file: string, maxBytes: number): Promise<{ readonly sha256: ContentHash; readonly bytes: number } | "too_large">;
 }
 
-/** Files at most this large are hashed through the first handle; larger ones are streamed. */
-const WHOLE_READ_BYTES = 1024 * 1024;
-
 const realpathNative = promisify(realpathCallback.native);
 
 async function hashFile(file: string, maxBytes: number): Promise<{ sha256: ContentHash; bytes: number } | "too_large"> {
@@ -70,33 +67,22 @@ async function hashFile(file: string, maxBytes: number): Promise<{ sha256: Conte
   const handle = await fs.open(file, "r");
   try {
     const { size } = await handle.stat();
-    if (size <= WHOLE_READ_BYTES && size <= maxBytes) {
-      // The file can grow after fstat: read at most the remaining budget plus one detection byte.
-      const buffer = Buffer.alloc(Math.min(64 * 1024, maxBytes + 1));
-      let total = 0;
-      for (;;) {
-        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, maxBytes - total + 1), null);
-        if (bytesRead === 0) break;
-        total += bytesRead;
-        if (total > maxBytes) return "too_large";
-        hash.update(buffer.subarray(0, bytesRead));
-      }
-      return { sha256: hash.digest("hex"), bytes: total };
+    if (size > maxBytes) return "too_large";
+    // The file can grow after fstat: read at most the remaining budget plus one detection byte.
+    // Use this handle and one bounded buffer for every file size, without reopening the path.
+    const buffer = Buffer.alloc(Math.min(64 * 1024, maxBytes + 1));
+    let total = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, maxBytes - total + 1), null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maxBytes) return "too_large";
+      hash.update(buffer.subarray(0, bytesRead));
     }
+    return { sha256: hash.digest("hex"), bytes: total };
   } finally {
     await handle.close();
   }
-  let total = 0;
-  const stream = createReadStream(file);
-  for await (const chunk of stream as AsyncIterable<Buffer>) {
-    total += chunk.length;
-    if (total > maxBytes) {
-      stream.destroy();
-      return "too_large";
-    }
-    hash.update(chunk);
-  }
-  return { sha256: hash.digest("hex"), bytes: total };
 }
 
 /** The real file system: native realpath, so 8.3 names cannot hide a path. */

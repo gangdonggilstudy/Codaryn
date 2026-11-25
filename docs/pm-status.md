@@ -40,6 +40,25 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-73, 2026-11-27) — 오케스트레이터 임시 이관(Claude w3:pG → Codex w3:pJ), 개선 검토 G 높음 넷
+
+- **이관:** 사용자 직접 지시 "codex 중 하나에 오케스트레이터 임시로 이관하고 작업도 codex들만 하도록 이관".
+  - 새 위임은 `pm-20261127-codex-01`, 담당은 codex-worker(w3:pJ)다. 작업자는 codex-worker-2(w3:pK)만이고, claude-worker(w3:pH)에게는 새 일을 주지 않는다.
+  - 진행 중 단위·작업 방식·첫 순서는 [2026-11-27 이관 문서](operations/pm-handoff-2026-11-27.md)에 있다. Claude w3:pG는 이 기록을 push한 뒤 배정·합치기·push를 멈췄다.
+- **CP-72 이후 main에 들어간 것:**
+  - U-22 준비 대기(`42179c82`)
+  - RR-1·D4 시험의 실제 사건 대기(`68a48c9a`)
+  - 작은 정리 셋(`a9a8dd37`): 쓰이지 않는 `integrity` 인자, OFG-2 `plan_checked`, 설정 화면 "다음 실행부터 적용" 안내
+  - 개선 검토 G(시험의 시간·순서 가정, 읽기만, 후보 13) 가운데 높음 넷
+    - G2·G3(`ff822763`): 잠금 방해 핸들을 부모가 풀 때까지 유지, n03의 running 대기
+    - G1·G4(`4705b8ba`): 실제 exit 관측과 runner 시계 제어
+  - 넷 모두 통제 지연 재현에서 실패하다가 0으로 줄었다.
+- **진행 중(이관 문서의 표):**
+  - G5·G6·G9 시험 견고화(codex-worker)
+  - `latest` 시작 직후 틈의 재작업(codex-worker-2, "잠금 한 번" 규칙). 첫 판은 검토에서 시각 추정의 문제 셋이 나왔다.
+  - F1·F2·F4(claude-worker가 미커밋으로 남김, Codex가 이어받을 것)
+- **PM 측정:** `4705b8ba`에서 unit 4,631건(4,620 통과·10 건너뜀·1 TODO), integration 686건(684·1·1), 실패 0. GUI는 `a9a8dd37`에서 780건(778·2), 연기 시험 227/227.
+
 ## 진행 요약 (CP-72, 2026-11-27) — 개선 검토 C·D·E 수정 끝, 개선 검토 F의 F3, taskkill 대비책
 
 - **개선 검토 C:** IR-C2 data_checks가 표를 읽는 중에도 취소 신호를 본다. 검토 의견 C2R-1·C2R-2에 따라 규칙이 끝난 뒤 신호가 있으면 그 규칙은 늘 "취소됨"이다(`fc4852a4`). 이로써 C2·C3·C3R-1·C4가 끝났고, C1(POSIX FIFO)은 한계로 남는다.

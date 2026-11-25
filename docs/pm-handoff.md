@@ -1,5 +1,12 @@
 # 현재 오케스트레이터 인수인계
 
+**2026-11-27 임시 이관(현재):** 사용자가 직접 지시했다: "codex 중 하나에 오케스트레이터 임시로 이관하고 작업도 codex들만 하도록 이관".
+
+- 현재 위임은 **pm-20261127-codex-01**이고, 담당은 **codex-worker (w3:pJ)**다. 작업자는 Codex(codex-worker-2, w3:pK)만이다.
+- 이전 위임 pm-20261115-claude-01(Claude w3:pG)은 끝났다.
+- 상태와 진행 중 단위, 작업 방식, 첫 순서는 [2026-11-27 이관 문서](operations/pm-handoff-2026-11-27.md)에 있다.
+- 아래 2026-11-15 이하 내용은 이력이다.
+
 2026-11-15 사용자가 기존 Claude에게 오케스트레이터를 인계하고 codex-review를 일반 작업자로 전환하라고 직접 지시했다. 현재 위임 ID는 **pm-20261115-claude-01**, 수신자는 **Claude w3:pG**(session9d6ad963-02c1-4d06-848f-f3c59b3a04e9, 관리 main)다. 아래 2026-11-12 위임과 11월 14일 회수는 보존한 이력이며 현재 미완료 목록이나 현재 담당 pane으로 읽지 않는다.
 
 - 2026-11-22 이후 바뀐 점(pm-status CP-59): 작업자는 codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude Code) 둘이고 옛 Codex 세션(codex-review 포함)은 없다. 아래 줄의 "기존 Codex 세션에 배정"과 "codex-review는 helper worker 허용 목록 밖" 설명은 당시 것이다. 통신 도구는 두 작업자만 받도록 채택했다(`1c6f5751`).

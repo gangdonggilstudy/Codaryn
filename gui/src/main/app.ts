@@ -16,7 +16,7 @@ import type { QuestionAnswer } from "./runs.js";
 import type { PermissionQuestion } from "../shared/protocol.js";
 import type { MessageBoxOptions, OpenDialogOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
-import type { OpenReply } from "../shared/ipc.js";
+import type { OpenReply, RunFormView } from "../shared/ipc.js";
 import { APP_INDEX_URL } from "./app-url.js";
 import { folderArgument } from "./cli-args.js";
 import { startEngineHost } from "./engine-client.js";
@@ -223,7 +223,7 @@ export function startGui(options: GuiOptions): void {
     now: () => new Date(),
     isDirectory,
   });
-  let initialWorkspace: { readonly handle: string; readonly name: string } | null = null;
+  let initialWorkspace: { readonly handle: string; readonly name: string; readonly lastForm: RunFormView | null } | null = null;
   let language: DialogLanguage = "en";
   const history = new RunHistory((size) => randomBytes(size), () => Date.now());
   const approvals = new PlanApprovals((size) => randomBytes(size), () => Date.now());
@@ -293,7 +293,7 @@ export function startGui(options: GuiOptions): void {
   async function openFromOutside(folder: string): Promise<OpenReply> {
     const opened = await workspaces.open(folder);
     if (opened.ok && window !== null && !window.isDestroyed()) {
-      window.webContents.send(IPC_EVENTS.workspaceOpened, { handle: opened.handle, name: opened.name });
+      window.webContents.send(IPC_EVENTS.workspaceOpened, { handle: opened.handle, name: opened.name, lastForm: opened.lastForm ?? null });
     }
     return opened;
   }
@@ -342,7 +342,7 @@ export function startGui(options: GuiOptions): void {
     const startFolder = folderArgument(process.argv, app.isPackaged, process.cwd(), process.platform);
     if (startFolder !== null) {
       const opened = await workspaces.open(startFolder);
-      if (opened.ok) initialWorkspace = { handle: opened.handle, name: opened.name };
+      if (opened.ok) initialWorkspace = { handle: opened.handle, name: opened.name, lastForm: opened.lastForm ?? null };
     }
     registerIpc({
       window: () => window,

@@ -64,11 +64,20 @@ const EVENTS = {
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
 const count = (value: unknown): number => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0);
 
+/** RR-1: project only the remembered form's nullable strings into a fresh plain object. */
+function lastForm(value: unknown): { profile: string | null; workflow: string | null } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const form = value as Record<string, unknown>;
+  const profile = form["profile"], workflow = form["workflow"];
+  if (!(profile === null || typeof profile === "string") || !(workflow === null || typeof workflow === "string")) return null;
+  return { profile, workflow };
+}
+
 let workspaceListener: ((payload: unknown) => void) | null = null;
 ipcRenderer.on(EVENTS.workspaceOpened, (_event, payload: unknown) => {
   // Only the payload goes on, as a plain copy; the event object never reaches the page.
   const value = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
-  workspaceListener?.({ handle: text(value["handle"]), name: text(value["name"]) });
+  workspaceListener?.({ handle: text(value["handle"]), name: text(value["name"]), lastForm: lastForm(value["lastForm"]) });
 });
 
 /** A plain data copy of a payload: no prototype, function or event object reaches the page. */

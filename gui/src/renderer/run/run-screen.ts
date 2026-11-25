@@ -249,10 +249,17 @@ function resultView(t: Texts, api: CodarynApi, result: RunResultView, labels: { 
 export function runScreen(deps: RunScreenDeps): Screen {
   const { texts: t, api, run } = deps;
   let filter: RunFilter = "all";
+  let stopShowing: (() => void) | null = null;
+  const dispose = (): void => {
+    stopShowing?.();
+    stopShowing = null;
+  };
   return {
     id: "run",
     title: "nav.run",
+    dispose,
     show(root) {
+      dispose();
       const head = el("div", undefined, { class: "screen-head" });
       const state = el("p", undefined, { id: "run-state", role: "status" });
       const counts = el("p", undefined, { id: "run-counts" });
@@ -337,7 +344,7 @@ export function runScreen(deps: RunScreenDeps): Screen {
       render();
       const unsubscribe = run.subscribe(() => {
         if (!root.contains(state)) {
-          unsubscribe();
+          stop();
           return;
         }
         render();
@@ -345,12 +352,17 @@ export function runScreen(deps: RunScreenDeps): Screen {
       // The elapsed time moves while the run goes on; the timer stops when the screen is gone.
       const timer = setInterval(() => {
         if (!root.contains(state)) {
-          clearInterval(timer);
-          unsubscribe();
+          stop();
           return;
         }
         if (run.phase === "running" || run.phase === "cancelling") render();
       }, 1000);
+      const stop = (): void => {
+        unsubscribe();
+        clearInterval(timer);
+        if (stopShowing === stop) stopShowing = null;
+      };
+      stopShowing = stop;
     },
   };
 }

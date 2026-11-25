@@ -102,11 +102,18 @@ export function textScreen(deps: TextDeps): TextScreen {
     dirty = value;
     void api.textDirty(value);
   };
-  deps.watchRun?.(() => followRun?.());
+  let unwatchRun = deps.watchRun?.(() => followRun?.());
 
   const screen: TextScreen = {
     id: "text",
     title: "nav.text",
+    dispose() {
+      unwatchRun?.();
+      unwatchRun = undefined;
+      followRun = null;
+      askToLeave = null;
+      current += 1;
+    },
     get dirty() {
       return dirty;
     },

@@ -171,7 +171,7 @@ export interface InfoView {
   /** "ready", or the code of why the engine host is not available. */
   readonly engine: string;
   /** A workspace named on the command line, already opened by the main process. */
-  readonly initialWorkspace: { readonly handle: string; readonly name: string } | null;
+  readonly initialWorkspace: { readonly handle: string; readonly name: string; readonly lastForm?: RunFormView | null } | null;
   /** U-70 (4.5): the last screen and the file panel's width. */
   readonly ui?: UiMemoryView;
 }

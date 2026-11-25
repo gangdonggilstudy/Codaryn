@@ -1,5 +1,5 @@
 /** Text open/save IPC checks. Public callers use ../ipc.js. */
-import { count, hasOnlyKeys, isHandle, isObj, hostCodeOf } from "./primitives.js";
+import { count, hasOnlyKeys, isHandle, isObj, hostCodeOf, UNSAFE_IN_MESSAGE } from "./primitives.js";
 
 /**
  * U-174 (DR-72, standalone-gui 3.14, adapter-contract 5.15): the text view of one workspace file.
@@ -14,8 +14,6 @@ export const TEXT_NOT_OPENED = ["not_found", "not_file", "refused", "too_large",
 export type TextNotOpened = (typeof TEXT_NOT_OPENED)[number];
 /** The longest text the view takes in UTF-16 units: a file of MAX_READ_BYTES (256 KiB) UTF-8 bytes has no more. */
 export const MAX_TEXT_CHARS = 262_144;
-/** What the app layer replaced already; a text with one of these did not come from it (host_error). */
-const UNSHOWN_TEXT_CHAR = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028-\u202E\u2066-\u2069]/;
 
 export type TextReply =
   | {
@@ -48,7 +46,7 @@ export function toTextReply(value: unknown): TextReply {
   }
   const { text, masked, editable, readOnlyReasons, digest, lineEnding, bom, bytes } = value;
   const marked = value["protected"];
-  if (typeof text !== "string" || text.length > MAX_TEXT_CHARS || UNSHOWN_TEXT_CHAR.test(text)) return fail;
+  if (typeof text !== "string" || text.length > MAX_TEXT_CHARS || UNSAFE_IN_MESSAGE.test(text)) return fail;
   if (typeof masked !== "boolean" || typeof marked !== "boolean" || typeof editable !== "boolean" || typeof bom !== "boolean") return fail;
   if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest) || !["lf", "crlf", "none", "mixed"].includes(lineEnding as string) || !count(bytes) || bytes > MAX_TEXT_CHARS) return fail;
   if (!Array.isArray(readOnlyReasons) || readOnlyReasons.length > TEXT_READ_ONLY_REASONS.length) return fail;

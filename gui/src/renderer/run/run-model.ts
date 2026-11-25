@@ -127,7 +127,7 @@ export class RunModel {
   }
 
   /** GU-5: an apply uses its plan's form; the session's goal stays for running again. */
-  startingApply(approval: string, form: Pick<RunRequest, "profile" | "workflow"> = this.last ?? { profile: null, workflow: null }): boolean {
+  startingApply(approval: string, form: Pick<RunRequest, "profile" | "workflow">): boolean {
     if (!this.canStart) return false;
     // The plan's form is known; an earlier task-file marker does not apply here.
     this.starting({ goal: this.last?.goal ?? "", profile: form.profile, workflow: form.workflow });

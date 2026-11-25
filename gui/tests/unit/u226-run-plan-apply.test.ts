@@ -165,7 +165,7 @@ const shownRoots: FakeElement[] = [];
 
 async function resultScreen(language: "ko" | "en", view: RunResultView): Promise<FakeElement> {
   const model = new RunModel();
-  model.startingApply(APPROVAL);
+  model.startingApply(APPROVAL, { profile: null, workflow: null });
   model.started(CARRY, Date.now());
   model.finished({ runId: CARRY, ok: true, result: view, labels: { status: "S", reason: "R" } });
   const deps: RunScreenDeps = {

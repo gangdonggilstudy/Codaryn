@@ -1,6 +1,6 @@
 # PM 상태
 
-현재 운영자: 2026-11-15 사용자 재위임(CP55)의 Claude w3:pG. canonical main pm-control.json의 pm-20261115-claude-01 active를 기준으로 하며 codex-review는 인계 후 일반 작업자다. 2026-11-22부터 작업자는 codex-worker(w3:pJ)와 claude-worker(w3:pH)이고 옛 Codex 세션은 없다(CP-59). 아래 이전 위임 표와 CP54까지의 Codex PM 표기는 당시 이력이다.
+현재 운영자: 2026-11-15 사용자 재위임(CP55)의 Claude w3:pG. canonical main pm-control.json의 pm-20261115-claude-01 active를 기준으로 하며 codex-review는 인계 후 일반 작업자다. 2026-11-22부터 작업자는 codex-worker(w3:pJ)와 claude-worker(w3:pH)이고 옛 Codex 세션은 없다(CP-59). 2026-11-25에 codex-worker-2(w3:pK)가 더해졌고 구현은 Codex 우선이다(CP-66). 아래 이전 위임 표와 CP54까지의 Codex PM 표기는 당시 이력이다.
 
 PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로 codex-review(w3:p3)가 PM과 통합을 회수했다. 아래 임시 위임 기록과 active 조건은 Claude 임시 PM에게 적용되며, 회수 후 Codex의 원래 관리 권한을 중단시키지 않는다. 작업별 상세는 [개발 진행 현황](progress.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 둔다.
 
@@ -39,6 +39,24 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
+
+## 진행 요약 (CP-66, 2026-11-25) — Codex 작업자 추가, 개선 검토 A·B와 수정, IR-26 나누기 1단계
+
+- **사용자 지시(2026-11-25):** "codex 작업 세션 추가했으니 교육 후 활용하고 codex 위주로 작업 할당해줘", 외부 검토 의견(IR-26 큰 파일, IR-27 libuv 변수 등의 끝부분)을 "참고해서 지너릭하게 적용". 사용자 결정: 받은 끝부분만으로 판단하지 않고 **Codex가 같은 형식으로 새로 검토**, 그 형식을 **개발 절차 문서에 검토 틀로 추가**, IR-A2(토큰 한도)는 **추가 요청만 금지(지금 동작) + 문서 고침**.
+- **작업자:** codex-worker-2(w3:pK, Codex, 작업 공간 codex-verify)를 교육하고 통신 도구에 넣었다(`17563630`, 통신 시험 128/128). 작업자는 codex-worker(w3:pJ), codex-worker-2(w3:pK), claude-worker(w3:pH) 셋이고 구현은 Codex 우선, 검토는 구현하지 않은 세션이 맡는다.
+- **검토 틀(`95e150e3`):** `docs/development-workflow.md` 8절 "개선 검토 보고 틀" — 발견 표(사실과 경로:줄, 동작 보존 제안, 등급), 이미 기록된 한계, 막혀 있음을 확인한 것, 역할별 배정, 재현 먼저, 금지 확인. 같은 커밋에 낡은 현재형 문장 셋과 IR-27(`docs/privacy.md`에 libuv가 넣는 여섯 변수)을 고쳤다. 아키텍처의 "AC n" 참조 규칙과 권한 질문의 현재 위치(`6c7e01d8`).
+- **개선 검토 A(핵심 모듈, codex-worker)와 수정(`0903b857`, codex-worker-2 구현):** 검증 없는 실행이 마지막 답을 기록하는 중 취소·기한이 오면 `no_verifier`/`awaiting_review`로 끝나던 것을 공통 중단 검사 뒤로 옮겨 `cancelled`/`max_duration`으로 끝낸다. 승인된 실행 계획의 파일 확인이 기한을 포함한 실행 신호를 받는다. 토큰 한도는 지금 동작(도달하면 추가 요청 금지, 받은 응답은 처리)을 계약 주석과 문서에 적었다.
+- **개선 검토 B(CLI·앱·저장·GUI·스크립트, codex-worker-2)와 수정:**
+  - IR-B4·B5·B6(`7a55009d`, claude-worker 구현, codex-worker-2 검토): GUI 설정이 `maxRepairAttempts` 0을 받는다(그 필드만). CLI stdout 읽는 쪽이 사라지면(EPIPE) 실행의 저장 결과와 종료 코드를 그대로 두고 스택을 찍지 않으며, 그 밖의 stdout 쓰기 오류는 고정 한 줄과 종료 1. 그 상수는 `src/cli/stdout-failure.ts`에 두었다 — 처음 `guard.ts`에 둔 판은 PM 전체 시험에서 guard 이름 목록 고정 시험 1건을 깨뜨려 고정값을 바꾸지 않고 옮겼다. `scripts/review-branch.mjs`가 어떤 Git trailer든 거부하고 병합 커밋도 본다.
+  - IR-B1·B2·B3(`742d1918`, codex-worker 구현, claude-worker 검토 두 번): GUI의 세 시작 처리기가 시작 예약 하나를 함께 써 동시에 둘이 시작되지 않는다. 결과의 다음 행동이 결과를 낸 폴더로 간다. 명령 찾기가 떠난 화면·옛 응답을 버린다. 검토 G-1(task 파일 실행 뒤 적용 결과가 지금 폴더로 감)을 재현(46건 중 9 실패) 뒤 고쳤다.
+  - 남은 검토 의견: H-1(낮음, 개인정보 가능성[추정]) 적용 결과의 `last`가 적용한 계획의 form이 아니라 앞 요청의 form이라, 검토 메모의 가림이 계획의 프로필과 다를 수 있다 — 재현 먼저로 배정 예정. G-4(되돌리기 처리기가 시작 예약을 보지 않음, 기존)는 따로 판단.
+- **IR-26 큰 파일 나누기(codex-worker-2의 설계 초안, 기능 수정과 분리, 단위마다 다른 세션 검토):**
+  - 엔진 1단계(`bc017ae8`, codex-worker): 고정 모델 문구를 `src/engine/model-texts.ts`, 순수 판정·상수·내부 형을 `src/engine/pure.ts`로. `engine/index.ts` 1,792→1,542줄, 공개 export 같음, 공개 값 덤프 전후 bytes 같음(12,566 bytes). codex-worker-2 정적 검토 발견 0.
+  - 앱 1단계(`6aa8422a`, codex-worker-2): `appRunHooks`를 본문 그대로 `src/app/run-hooks.ts`로. `app.ts` 1,247→1,146줄. claude-worker 정적 검토 채택(정보 A-1: 새 모듈의 `hooks`는 구조적 부분형이라 `AppHooks` 필드 이름이 바뀌어도 컴파일러가 알리지 않는다 — 다음 단계 참고).
+  - 진행 중: 앱 2단계 첫 단위(읽기 문맥, codex-worker-2), GUI 공유 IPC 1단계(`gui/src/shared/ipc.ts` 1,838줄, codex-worker).
+- **PM 측정(합친 판마다 프로젝트 스크립트):** `6aa8422a`에서 unit 4,364건(4,357 통과·6 건너뜀·1 TODO·실패 0), integration 684건(682 통과·실패 0), GUI 511건(509 통과·2 건너뜀·실패 0), 연기 시험 227/227. `742d1918`에서 unit·integration 같은 수치, GUI 557건(555 통과·2 건너뜀·실패 0; 실행 흐름 시험 46건 추가), 연기 시험 227/227. `bc017ae8`의 첫 integration에서 n13 잠금 시험 1건이 `doctor.lock.held`로 실패했다 — 다른 작업자 빌드가 겹친 부하에서 Windows 시작 시각 조회가 늦어 "알 수 없음 = 잡혀 있음"으로 판정하는 기록된 한계(`src/store/lock.ts` Z-1)와 맞고, 그 파일 단독 2/2와 integration 재실행 682/684·실패 0을 확인한 뒤 push했다. 로그는 `.codaryn/pm-tools/evidence/main-*`.
+- **운영:** Codex 창의 세션 ID가 READY 뒤 바뀌어 도구 ACK가 거절되는 일이 되풀이됐다(engine-split-1, fix-gui-run-flow-codex-02 등). 보고를 끝까지 읽고 해시를 확인한 뒤 수동 수신 기록(`.codaryn/pm-tools/receipts/*-manual-ack.json`)과 이름 복구로 처리했다. Codex 보안 검토는 정적 검토로만 맡긴다(재현 코드 작성이 제공자 필터에 한 번 걸렸다).
+- 남은 것: 사용자의 꾸러미 화면 확인(M-3.19), 실제 API 3.1, 키 없는 수동 12항목, 계약 층의 남은 세 분기, H-1, IR-26의 나머지 단계, 서명·설치 파일·외부 게시(GUI-D9, 미승인), E-5·E-6 보류.
 
 ## 진행 요약 (CP-65, 2026-11-24) — 계약 층 시험 넓힘, CLI 구조 문서 현행화, 문서 정리
 

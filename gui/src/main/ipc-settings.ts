@@ -1,3 +1,4 @@
+/** Doctor, settings and model IPC callbacks; ipc.ts owns authentication and registration. */
 import { unnamedWidening } from "./dialog-texts.js";
 import type { EngineHost } from "./engine-client.js";
 import { doctorMessageIds, isNoArgs, parseDoctorArgs, parseEntryArgs, parseProviderArgs, parseTokenArgs, parseWorkspaceArgs, toDoctorView, toHostModelList, toHostProposal, toSelectModelReply, toSettingsView, toWrittenReply, parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";

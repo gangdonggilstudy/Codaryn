@@ -294,15 +294,27 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
     if (pid === undefined) return undefined;
     if (isWindows) {
       const taskkill = path.win32.join(systemRoot, "System32", "taskkill.exe");
+      let usedFallback = false;
+      const killChild = (): void => {
+        // error, exit and close may all report the same failure; never signal an ended child (T-2).
+        if (usedFallback || child.exitCode !== null || child.signalCode !== null) return;
+        usedFallback = true;
+        child.kill();
+      };
+      const failed = (code: number | null): void => {
+        if (code !== 0) killChild();
+      };
       try {
         const killer = spawn(taskkill, ["/PID", String(pid), "/T", "/F"], {
           stdio: "ignore",
           windowsHide: true,
           shell: false,
         });
-        killer.on("error", () => child.kill());
+        killer.once("error", killChild);
+        killer.once("exit", failed);
+        killer.once("close", failed);
       } catch {
-        child.kill();
+        killChild();
       }
       return undefined;
     }

@@ -791,6 +791,9 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
   - 보낸 쪽: 요청이 앱 창의 주 프레임이고 그 프레임의 주소가 `app://codaryn/`인지 본다. 아니면 거부한다.
   - 인자: 함수마다 손으로 쓴 검사기(형식, 길이 상한, 허용 값 목록)로 본다. 목표 길이 상한은 CLI와 같다. 모르는 필드가 있으면 거부한다. 검사 라이브러리를 새로 들이지 않는다(7절).
   - [결정] 검사기의 자리(현재 상태 2026-11-26, main `46b1e3c1`; IR-26 IPC 분할). 검사기는 `gui/src/shared/ipc/`의 열 모듈에 있고, 주 프로세스·엔진 호스트·화면은 facade `gui/src/shared/ipc.ts`로만 쓴다. 분야 모듈끼리는 import하지 않는다(분야 → `core` → `primitives`). 같은 보안 문자 집합(LF·TAB 밖의 제어 문자, 줄·문단 구분자, 방향 문자)은 `primitives`의 `UNSAFE_IN_MESSAGE` 한 선언만 두고, 텍스트 보기·마지막 답·계획 요약 행·계획 파일 경로가 함께 쓴다. 지킴 시험 `gui/tests/unit/ipc-guards.test.ts`가 `shared/` 밖의 직접 import 0, 이 방향, 텍스트 보기와 마지막 답이 같은 문자를 거부함을 고정한다. 이유: 검사기가 복제되거나 깊은 경로로 우회되면 한쪽만 고쳐져 경계가 어긋난다.
+  - [결정] 처리기의 자리(현재 상태 2026-11-26, main `05cbedf0`; IR-26 G). 보낸 쪽 검사와 41채널 등록은 `gui/src/main/ipc.ts`의 `ipcMain.handle` 래퍼 하나가 한다. 그때의 상태(언어, 실행 시작, 되돌리기 예약, 텍스트 파일)를 쓰는 처리기와 계획 승인·보고·실행 수명 처리기(17채널)는 `ipc.ts`에 남는다. 나머지 24채널의 본문은 `ipc-workspace.ts`·`ipc-settings.ts`·`ipc-history.ts`의 factory에 있고, 등록문은 원래 순서대로 `ipc.ts`에 있다.
+    - factory는 만들 때 아무것도 읽지 않고, `deps`는 처리기를 부를 때 읽는다. 설정을 쓴 뒤의 무효화(`dropTreeIds`)는 `ipc.ts`가 함수로 넘긴다. `deps` 계약·시간 한도·`texts`는 `ipc-context.ts`에 있고 `ipc.ts`가 다시 내보낸다.
+    - 분야 모듈은 `ipcMain`, `ipc.ts`, 서로를 import하지 않는다. 지킴 시험 `gui/tests/unit/ipc-main-split.test.ts`가 이것과 등록 순서, 만들 때 무동작, 미리보기 token을 발급하는 곳과 소비하는 곳(되돌리기, `ipc.ts`)이 같은 기록 저장소를 읽음을 고정한다.
   - 실패하면 엔진을 부르지 않고 `invalid_arguments` 성격의 어댑터 오류를 돌려준다.
 - 이벤트는 위 표의 다섯 구독(`onRunEvents`, `onRunDone`, `onWorkspaceOpened`, `onEngineState`, `onTreeReset`)으로만 받는다. preload가 콜백에 넘기는 값은 복사본이다.
 
@@ -943,18 +946,23 @@ gui/                          (U-60에서 실제에 맞추고 U-271에서 다시
         report.ts             보고서 보기와 Markdown
         cleanup-replies.ts    정리 인자와 응답(shared/cleanup.ts를 쓰는 유일한 IPC 모듈)
     main/                     main.ts(진입), app.ts(수명, 창, 알림, 작업 표시줄), security.ts·security-policy.ts,
-                              protocol.ts·app-url.ts, ipc.ts, handles.ts, tree-ids.ts, engine-client.ts,
+                              protocol.ts·app-url.ts, handles.ts, tree-ids.ts, engine-client.ts,
                               environment.ts, node-path.ts, cli-args.ts, workspaces.ts, gui-state.ts,
                               runs.ts, history.ts, plans.ts, cleanup-previews.ts, settings-proposals.ts,
                               model-entries.ts, save-file.ts, dialog-texts.ts(메인 확인 대화상자의 글),
                               on-disk.ts(U-123), window-bounds.ts(U-70), text-files.ts·text-edits.ts(3.14)
+                              ipc.ts(IPC 등록 root: 보낸 쪽 검사, 41채널 등록, 그때의 상태를 쓰는 처리기)
+                              ipc-context.ts(deps 계약·시간 한도·texts), 처리기 본문 ipc-workspace.ts·
+                              ipc-settings.ts·ipc-history.ts(IR-26 G, main 05cbedf0. 6.4, 8.3)
     preload/                  preload.cts (한 파일, CommonJS)
     engine-host/              main.ts(Node 26 진입), host.ts(요청 처리), transport.ts(시험 전송),
                               runs.ts, report.ts, plans.ts, history.ts, cleanup.ts, settings.ts, setup.ts,
                               tree.ts(앱 계층 작업 공간 목록의 확인, 3.3), model-text.ts, plan-check.ts(U-119),
                               run-events.ts(U-118), text.ts(3.14)
     renderer/
-      index.html, styles.css, app.ts(화면 진입), api.ts(window.codaryn의 형과 응답 읽기)
+      index.html, styles.css, app.ts(화면 진입), api.ts(window.codaryn의 형과 응답 읽기의 facade)
+      api-core.ts(응답 기본 검사·작업 공간 식별), api-workspace.ts, api-settings.ts, api-runs.ts
+      (응답 읽기의 본문, IR-26 R. 화면은 api.ts로만 쓴다)
       shell/ workspace/ diff/ run/ runs/ plan/ changes/ report/ checks/ settings/ setup/ text/ i18n/
   tests/
     unit/                     Node 기본 러너(루트 Node 26)로 도는 시험. Electron 없음. fake-dom.ts로 화면도 본다
@@ -985,7 +993,7 @@ gui/                          (U-60에서 실제에 맞추고 U-271에서 다시
 
 | 층 | 무엇 | 실행 |
 | --- | --- | --- |
-| 유닛 | `shared`(통로, 인자 검사, 보기, IPC 구조 지킴 `ipc-guards.test.ts`: `shared/` 밖 직접 import 0·의존 방향·같은 보안 문자 집합), `main`의 순수 부분(환경 걸러내기, Node 찾기, 핸들, 앱 URL, 보안 값), 엔진 호스트(가짜 앱), 실제 Node 26 호스트와 실제 엔진, 가짜 엔진·가짜 호스트의 실패, preload 채널 일치, 화면의 `*.model.ts` | `gui`에서 `npm test`(빌드, lock 검사, `node --test build/tests/unit/**/*.test.js`). Electron 없이 루트 Node 26 |
+| 유닛 | `shared`(통로, 인자 검사, 보기, IPC 구조 지킴 `ipc-guards.test.ts`: `shared/` 밖 직접 import 0·의존 방향·같은 보안 문자 집합), `main`의 순수 부분(환경 걸러내기, Node 찾기, 핸들, 앱 URL, 보안 값)과 주 프로세스 IPC 분할 지킴 `ipc-main-split.test.ts`(41채널 등록 순서, 처리기 factory의 만들 때 무동작과 `deps`를 부를 때 읽음, 분야 모듈의 `ipcMain`·`ipc.ts`·서로 import 0, 등록 래퍼 하나), 엔진 호스트(가짜 앱), 실제 Node 26 호스트와 실제 엔진, 가짜 엔진·가짜 호스트의 실패, preload 채널 일치, 화면의 `*.model.ts` | `gui`에서 `npm test`(빌드, lock 검사, `node --test build/tests/unit/**/*.test.js`). Electron 없이 루트 Node 26 |
 | 연기(smoke) | 실제 Electron과 실제 엔진 호스트로 창의 점검 표시, 핸들로 다시 점검, 경로·모르는 핸들 거부, 화면에 Node 객체 없음, 바깥 요청·`file://`·새 창·탐색 막힘, 앱 프로세스의 TCP 대기 소켓과 UDP 끝점 0, 맞춤법 사전 받지 않음 | `npm run test:smoke`: `scripts/build/smoke.mjs`가 키 없는 환경, 없는 설정 파일, 새 Chromium 프로필로 `build/tests/smoke/smoke.js`를 Electron에서 실행하고 판정한다. 제품 진입(`main.ts`)에는 들어가지 않는다 |
 | 계약 | 같은 대본 사례를 CLI와 엔진 호스트로 각각 실행해 `EngineResult`와 기록 사건이 같은지 | Node 기본 러너, 대본 제공자(GU-3 뒤) |
 | 보안 | 6.10 GS-1~GS-17 | 연기 시험 안(PM 결정, 8.1). 보강은 구현자가 아닌 세션(G-sec) |

@@ -41,6 +41,7 @@
   - 통합 CLI 프로세스에 `--import`로 넣는다. 전역 `fetch`가 루프백 밖으로 나가면 막고 그 출처를 기록한다.
   - `node:http`·`node:https` 직접 사용은 막지 않는다.
 - 완료를 주장할 때는 어느 층까지 실행했는지 적는다. "오프라인 검증 통과", "모의 API 통과", "실제 API 통과"는 서로 다른 주장이다.
+- 원문을 읽는 구조 지킴(유닛, 현재 상태 2026-11-26, main `f8d1e156`): 나눈 파일의 가족 경계 `tests/unit/contracts/family-boundaries.test.ts`·`app-boundaries.test.ts`, GUI IPC 경계 `gui/tests/unit/ipc-guards.test.ts`·`ipc-main-split.test.ts`. 컴파일러 API나 실행 적재 없이 원문을 토큰으로 읽고, 규칙마다 일부러 깨뜨린 사례가 실패함도 단언한다([아키텍처](architecture.md) 2절 끝).
 
 ## 3. 실행 방법과 현재 구성
 

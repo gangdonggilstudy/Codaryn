@@ -15,7 +15,6 @@
  */
 
 import "node:fs/promises"; // Preserve module evaluation order.
-import path from "node:path";
 import type {
   PlanOutput,
   DefaultConfigLocation,
@@ -40,7 +39,7 @@ import "../presentation/report-localized.js"; // Preserve module evaluation orde
 import "../presentation/json.js"; // Preserve module evaluation order.
 import { parseArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
-import { argumentsError, cliError, prepareTask } from "./prepare.js";
+import { argumentsError, prepareTask } from "./prepare.js";
 import "./report-read.js"; // Preserve module evaluation order.
 import "./input/text-safety.js"; // Preserve module evaluation order.
 import "./plan-view.js"; // Preserve module evaluation order.
@@ -48,7 +47,7 @@ import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
 import { runLife } from "./run-life.js";
 import type { RunLifeEnd, RunLifeEnvironment } from "./run-life.js";
 import { tallyOf } from "./tally.js";
-import { knownKeyValues } from "./input/settings.js";
+import "./input/settings.js"; // Preserve module evaluation order.
 import "./apply.js"; // Preserve module evaluation order.
 import "./plans.js"; // Preserve module evaluation order.
 import "./consent.js"; // Preserve module evaluation order.
@@ -59,7 +58,7 @@ import "./check-apply.js"; // Preserve module evaluation order.
 import "./changes-plan.js"; // Preserve module evaluation order.
 import "./workspace-text.js"; // Preserve module evaluation order.
 import { copyEnvironment, loadVarsInto } from "./environment.js";
-import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
+import { INTERNAL_ERROR, fromCliError } from "./errors.js";
 import { appRunHooks } from "./run-hooks.js";
 import "./models.js"; // Preserve module evaluation order.
 import "./runs.js"; // Preserve module evaluation order.

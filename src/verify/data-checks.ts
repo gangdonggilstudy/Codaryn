@@ -149,7 +149,12 @@ interface Reading {
   readonly unreadable: PathSet | null;
   /** U-258: the run's group size k, never below 5 (a grouped aggregate over such a source compares groups of at least k rows). */
   readonly minGroupSize: number;
+  /** IR-C2: the run's signal, looked at before each chunk and each table and before comparing. */
+  readonly signal: AbortSignal;
 }
+
+/** IR-C2: the run's signal stopped a rule while it read its tables; the rule ends undecided. */
+class RuleCancelled extends Error {}
 
 /** U-223 (R-6): what the evidence says, once per rule, in place of the numbers read from such a source. */
 export const UNREADABLE_SOURCE_NOTE = "the source is under unreadable paths, so no number read from it is written";
@@ -216,7 +221,9 @@ function errorCode(error: unknown): string | undefined {
  * error: it passes through to the verifier's "check failed".
  */
 async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, sink: TableSink = {}): Promise<Loaded> {
-  const { maxBytes } = reading;
+  const { maxBytes, signal } = reading;
+  // IR-C2: a rule's second table is not opened after the run's signal (RuleCancelled).
+  if (signal.aborted) throw new RuleCancelled();
   const resolved = await workspace.resolve(ref.path, "read");
   if (!resolved.ok) return { ok: false, fixable: false, note: `path rejected (${resolved.code})` };
   const relative = resolved.path.relative;
@@ -229,7 +236,7 @@ async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, 
     if (code === "ENOENT" || code === "ENOTDIR") return failed(true, "file not found");
     return failed(false, `file could not be opened (${code ?? "unknown error"})`);
   }
-  const read = { bytes: 0, failed: false, error: undefined as unknown };
+  const read = { bytes: 0, failed: false, error: undefined as unknown, cancelled: false };
   let scanned: TableScanOutcome;
   try {
     let info: Awaited<ReturnType<fs.FileHandle["stat"]>>;
@@ -246,6 +253,11 @@ async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, 
     const file = handle;
     const chunks = async function* (): AsyncGenerator<Uint8Array> {
       while (read.bytes < limit) {
+        // IR-C2: no chunk is read after the run's signal; the scan ends here and the rule is cancelled.
+        if (signal.aborted) {
+          read.cancelled = true;
+          return;
+        }
         let bytesRead: number;
         try {
           ({ bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, limit - read.bytes), read.bytes));
@@ -264,6 +276,8 @@ async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, 
   } finally {
     await handle.close().catch(() => undefined);
   }
+  // IR-C2: a table cut short by the signal, or a signal after the last chunk, decides nothing (no comparison follows).
+  if (read.cancelled || signal.aborted) throw new RuleCancelled();
   if (read.failed) return failed(false, `file could not be read (${errorCode(read.error) ?? "unknown error"})`);
   if (read.bytes > maxBytes) return failed(true, `larger than ${maxBytes} bytes`);
   if (!scanned.ok) {
@@ -774,6 +788,7 @@ export async function runDataChecksVerifier(
     chunkBytes: Math.max(1, Math.floor(options.chunkBytes ?? DATA_TABLE_CHUNK_BYTES)),
     unreadable: unreadableSet(options.unreadablePaths),
     minGroupSize: effectiveMinGroupSize(options.minGroupSize, []),
+    signal,
   };
   const rules = Array.isArray(config.rules) ? config.rules : [];
   if (rules.length === 0) {
@@ -802,7 +817,9 @@ export async function runDataChecksVerifier(
       try {
         verdict = await checkRule(rule, workspace, reading);
       } catch (error) {
-        verdict = undecided(`check failed: ${error instanceof Error ? error.message : String(error)}`);
+        // IR-C2: as the file rules' read cut short by the signal (verify/index.ts).
+        if (error instanceof RuleCancelled) verdict = undecided("cancelled while this rule was checked");
+        else verdict = undecided(`check failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     if (verdict.state === "not_held") failed = true;

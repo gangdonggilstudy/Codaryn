@@ -51,6 +51,7 @@ export function reviewPanel(deps: ReviewPanelDeps, ids: { readonly panel: string
         return;
       }
       outcome.replaceChildren(el("p", t.format(reply.verdict === "accepted" ? "review.accepted" : "review.rejected")));
+      if (reply.lockLeft === true) outcome.append(el("p", t.format("review.lockLeft")));
       outcome.setAttribute("data-verdict", reply.verdict);
       deps.announce?.(t.format(reply.verdict === "accepted" ? "review.accepted" : "review.rejected"));
     })();

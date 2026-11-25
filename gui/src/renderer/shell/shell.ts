@@ -116,6 +116,7 @@ export class Shell {
   }
 
   show(id: string): void {
+    if (this.destroyed) return;
     const screen = this.screens.find((candidate) => candidate.id === id);
     if (screen === undefined) return;
     // U-184: a screen holding an unsaved edit asks before it is left or drawn again.
@@ -183,6 +184,7 @@ export class Shell {
 
   /** Shows the current screen again (after the workspace changed). */
   refresh(): void {
+    if (this.destroyed) return;
     if (this.current !== null) this.show(this.current);
   }
 
@@ -204,9 +206,11 @@ export class Shell {
     this.setEngine(code);
     const message = el("p", this.texts.format("engine.ended", { code }), { id: "engine-ended-text" });
     const again = button(this.texts.format("engine.restart"), () => {
+      if (this.destroyed) return;
       again.setAttribute("disabled", "");
       void (async () => {
         const result = await restart();
+        if (this.destroyed) return;
         if (result === "ready") {
           this.engineReady();
           return;

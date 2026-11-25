@@ -503,6 +503,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "review.confirmReject": "Record it as rejected?",
   "review.accepted": "Needs input → accepted by a person",
   "review.rejected": "Needs input → rejected by a person",
+  "review.lockLeft": "The verdict was saved, but the workspace lock could not be released. The next run clears it once Codaryn has closed; if a run is refused before then, look at the Checks screen.",
   "nav.changes": "Changes",
   "nav.text": "File",
   "nav.setup": "First setup",

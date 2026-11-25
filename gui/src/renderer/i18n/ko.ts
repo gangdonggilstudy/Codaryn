@@ -505,6 +505,7 @@ export const KO = {
   "review.confirmReject": "거절함으로 남길까요?",
   "review.accepted": "확인 필요 → 사람이 받아들임",
   "review.rejected": "확인 필요 → 사람이 거절함",
+  "review.lockLeft": "판정은 저장했지만 작업 공간 잠금을 풀지 못했습니다. Codaryn을 모두 닫으면 다음 실행이 정리합니다. 그 전에 실행이 거부되면 점검 화면에서 확인하세요.",
   "nav.changes": "변경",
   "nav.text": "파일 보기",
   "nav.setup": "처음 설정",

@@ -239,12 +239,14 @@ export function toChangesReply(value: unknown): ChangesReply {
   return { ok: true, runId, recordsChanged, files: items };
 }
 
-export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };
+export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean; readonly lockLeft?: true } | { readonly ok: false; readonly code: string };
 
 /** The engine host's review value, checked. */
 export function toReviewReply(value: unknown): ReviewReply {
   if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
   const { verdict, replaced } = value;
   if ((verdict !== "accepted" && verdict !== "rejected") || typeof replaced !== "boolean") return { ok: false, code: "host_error" };
-  return { ok: true, verdict, replaced };
+  const lockLeft = value["lockLeft"];
+  if (lockLeft !== undefined && lockLeft !== true) return { ok: false, code: "host_error" };
+  return { ok: true, verdict, replaced, ...(lockLeft === true ? { lockLeft: true } : {}) };
 }

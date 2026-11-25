@@ -40,6 +40,30 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-72, 2026-11-27) — 개선 검토 C·D·E 수정 끝, 개선 검토 F의 F3, taskkill 대비책
+
+- **개선 검토 C:** IR-C2 data_checks가 표를 읽는 중에도 취소 신호를 본다. 검토 의견 C2R-1·C2R-2에 따라 규칙이 끝난 뒤 신호가 있으면 그 규칙은 늘 "취소됨"이다(`fc4852a4`). 이로써 C2·C3·C3R-1·C4가 끝났고, C1(POSIX FIFO)은 한계로 남는다.
+- **개선 검토 D(GUI) 끝:**
+  - IR-D4: 렌더러 `Screen.dispose`. Shell이 버려질 때 구독·타이머·키 리스너를 한 번 정리한다.
+  - RR-1: 둘째 실행·명령줄 열기에서도 마지막 형태를 보낸다. preload는 고정 쌍만 복사한다(`94db3a4c`).
+  - DR-1: 버린 Shell은 늦은 재시작 응답에도 아무것도 만들지 않는다. GUI review가 `lockLeft` 안내를 보인다(`90acd0a2`).
+- **개선 검토 E(저장소·엔진·스크립트) 끝:**
+  - E1 후속(E1R-1·E1R-2): 현재 run mark도 상태 폴더 검사를 거친다(`66f8d179`). cleanup의 요약·미리보기·적용도 `state_dir_not_plain`으로 거부한다(`d17e55bd`).
+  - E2 후속: 잠금 파일(64 KiB)·journal·변경 색인·원문과, 읽기 전에만 상한을 보던 7곳을 같은 handle 제한 읽기로 바꿨다. 넘으면 그 자리의 기존 실패다. 검토 의견 MRR-1에 따라 큰 원문은 전처럼 `missing_snapshot`이다(`e35ce004`).
+  - E3R-2: 끝 점검 중 취소에 대한 안내를 사용 문서와 구조 문서에 적었다(`68e934a2`).
+  - 남은 상한 없는 읽기(현재 파일 해시, Linux `/proc`, revert stream 해시)는 위험이 낮다고 기록한다.
+- **개선 검토 F(앱·CLI·모델, 읽기만):** 중간 1, 낮음 3.
+  - F3(review 판정은 저장됐는데 잠금 해제 실패가 `internal_error`): U-220과 같게, 성공 결과에 `lockLeft: true`를 단다. 검토 의견 F3R-1에 따라 release가 false인 경우도 같다. 공개 결과 필드 추가는 PM 결정이다(`37d84ea4`).
+  - F1(HTTP 취소 경계)·F2(설정 임시 파일)·F4(이동 계획 잠금 수명)는 구현이 끝났다. 보고 전에 작업자 창의 피드백 화면에서 멈췄다(아래 운영).
+- **taskkill 대비책(새 발견):** Codex 작업 공간에서 `taskkill`이 OS 접근 거부로 실패하면 runner가 자식을 살려 둔 채 돌아가, 시험 정리가 EPERM으로 막혔다. 이제 taskkill이 실패하면 살아 있는 직접 자식을 한 번 끝낸다. 손자는 DR-11 경계에 남는다. 정상 taskkill 보드에서 `windows-cmd-real` 10/10이다(`eedfa9f4`).
+- **시험 견고화:** U-285가 상속된 LANG에 흔들리지 않게 했다. 통합 시험 목록에 o06·u321 행을 넣었다(`6f17b610`). 부하에서 한 번씩 실패한 U-22(report latest, `run_not_found`)와 RR-1 second-instance(두 tick 가정)는 원인 조사·수정 중이다.
+- **운영:**
+  - claude-worker가 F1·F2·F4 보고 직전에 금지된 `git add -N`을 실행한 것을 스스로 피드백 초안으로 남기고 멈췄다. PM이 확인한 바로는 그 작업 공간의 인덱스가 깨끗하다(staged·intent-to-add 0).
+  - 작업자 창의 피드백 화면에는 응답하지 않는 원칙이라 사용자 처리를 기다린다.
+  - cleanup 단위는 PM의 범위 누락으로 두 번 더 멈췄다. 이후 지시에는 옛 결과를 단언하는 시험도 미리 허용한다.
+- **PM 측정(합친 판마다 프로젝트 스크립트, 실패 0):** `90acd0a2`에서 unit 4,631건(4,620 통과·10 건너뜀·1 TODO), GUI 780건(778 통과·2 건너뜀), 연기 시험 227/227. `eedfa9f4`에서 integration 686건(684 통과·1 건너뜀·1 TODO), `windows-cmd-real` 10/10. `37d84ea4` 첫 보드의 U-22 한 건은 재실행에서 통과했다(불안정 시험으로 기록).
+- 남은 것: F1·F2·F4 보고와 검토, 작은 정리 셋(쓰이지 않는 인자·OFG-2 `plan_checked`·설정 "다음 실행부터" 안내, `ebbda7ea`) 채택, U-22·RR-1 불안정 시험, 사용자의 꾸러미 화면 확인(M-3.19), 실제 API 3.1, 키 없는 수동 12항목, GUI-D9(미승인), E-5·E-6 보류.
+
 ## 진행 요약 (CP-71, 2026-11-27) — 개선 검토 D 수정 대부분, 개선 검토 E의 E1~E6, 상태 폴더 링크 거부
 
 - **개선 검토 D(GUI) 수정:**

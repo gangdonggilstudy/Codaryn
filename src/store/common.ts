@@ -51,6 +51,20 @@ async function isPlainChildDirectory(dir: string): Promise<boolean> {
   }
 }
 
+/**
+ * E1R-1: whether `.codaryn`, its `runs` and `runs/<runId>` are all there and plain (each as
+ * isPlainChildDirectory sees it), without making anything: the check before a write into a run
+ * directory that its writer does not create (the state guard's mark of the run itself).
+ */
+export async function isPlainRunDir(workspaceRoot: string, runId: string): Promise<boolean> {
+  const stateDir = join(workspaceRoot, STATE_DIR_NAME);
+  return (
+    (await isPlainChildDirectory(stateDir)) &&
+    (await isPlainChildDirectory(join(stateDir, RUNS_DIR_NAME))) &&
+    (await isPlainChildDirectory(runDir(workspaceRoot, runId)))
+  );
+}
+
 /** IR-E1: makes `dir` when it is missing (not recursively), then requires it to be plain. */
 async function ensurePlainChild(dir: string): Promise<void> {
   try {

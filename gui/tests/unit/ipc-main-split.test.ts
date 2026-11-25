@@ -491,6 +491,11 @@ function mainIpcBoundaryViolations(root: string, sources: readonly SourceFile[])
       if (t.value === "ipcMain" && (t.kind === "word" || t.kind === "string" && ts[i - 1]?.value === "[" && ts[i + 1]?.value === "]")) fail(t.at, "ipcMain belongs to root");
     }
     if (from === "ipc.ts") {
+      const importStatement = ["import", "{", "ipcMain", "}", "from", "electron", ";"];
+      const imports = ts.flatMap((t, i) => t.kind === "word" && t.value === "import" && ts[i + 5]?.kind === "string"
+        && JSON.stringify(ts.slice(i, i + importStatement.length).map(token => token.value)) === JSON.stringify(importStatement) ? [ts[i + 2]!] : []);
+      if (imports.length !== 1) fail(0, "root needs one unaliased ipcMain import from electron");
+      const imported = new Set(imports.map(t => t.at));
       const wrappers = ts.flatMap((t, i) => t.kind === "word" && t.value === "const" && ts[i + 1]?.value === "handle" && ts[i + 2]?.value === "=" ? [i] : []);
       const body = wrappers.length === 1 ? ts.findIndex((t, i) => i > wrappers[0]! && t.kind === "punct" && t.value === "{") : -1;
       let bodyEnd = -1, depth = 0;
@@ -502,8 +507,15 @@ function mainIpcBoundaryViolations(root: string, sources: readonly SourceFile[])
       let registrations = 0;
       for (let i = 0; i < ts.length; i++) {
         const t = ts[i]!;
-        if (t.kind !== "word" || t.value !== "ipcMain" || ![".", "[", "?"].includes(ts[i + 1]?.value ?? "")) continue;
-        const allowed = i > body && i < bodyEnd && ts[i + 1]?.value === "." && ts[i + 2]?.value === "handle" && ts[i + 3]?.value === "(";
+        if (t.value !== "ipcMain") continue;
+        if (t.kind === "string" && ts[i - 1]?.value === "[" && ts[i + 1]?.value === "]") fail(t.at, "ipcMain string member in root");
+        if (t.kind !== "word" || imported.has(t.at)) continue;
+        if (![".", "[", "?"].includes(ts[i + 1]?.value ?? "")) {
+          fail(t.at, "unreviewed ipcMain reference in root");
+          continue;
+        }
+        const allowed = i > body && i < bodyEnd && ts[i - 1]?.value !== "."
+          && ts[i + 1]?.value === "." && ts[i + 2]?.value === "handle" && ts[i + 3]?.value === "(";
         if (allowed) registrations++;
         else fail(t.at, "unreviewed ipcMain member");
       }
@@ -562,5 +574,24 @@ test("main IPC split: source guard rejects broken copies and ignores quoted or c
   assert.ok(mainIpcBoundaryViolations(root, [...sibling, { ...extra, text: "export {};" }]).some(failure => failure.includes("domain imports sibling")));
   assert.deepEqual(mainIpcBoundaryViolations(root, [...sources, { ...extra, text: 'import type { IpcDeps } from "./ipc-context.js";' }]), []);
   const harmless = '// import type { X } from "./ipc.js"; ipcMain.handle("bad", f);\nconst example = "ipcMain"; const pattern = /ipcMain/;';
+  assert.deepEqual(mainIpcBoundaryViolations(root, injected(harmless)), []);
+});
+
+test("main IPC split: root rejects ipcMain aliases, forwarding and string members outside its wrapper", () => {
+  const root = fileURLToPath(new URL("../../../src/main/", import.meta.url)), sources = readMainIpcSources(root);
+  const injected = (suffix: string) => sources.map(source => path.basename(source.file) === "ipc.ts" ? { ...source, text: source.text + "\n" + suffix } : source);
+  for (const [suffix, why] of [
+    ['import { ipcMain as bus } from "electron"; bus.on("bad", f);', "unreviewed ipcMain reference in root"],
+    ['const bus = ipcMain; bus.on("bad", f);', "unreviewed ipcMain reference in root"],
+    ['const bus = register(ipcMain); bus.on("bad", f);', "unreviewed ipcMain reference in root"],
+    ['electron["ipcMain"].on("bad", f);', "ipcMain string member in root"],
+  ] as const) assert.ok(mainIpcBoundaryViolations(root, injected(suffix)).some(failure => failure.includes(why)), suffix);
+  const rootSource = sources.find(source => path.basename(source.file) === "ipc.ts")!;
+  const replaced = (text: string) => sources.map(source => source === rootSource ? { ...source, text } : source);
+  assert.ok(mainIpcBoundaryViolations(root, replaced(rootSource.text.replace('import { ipcMain } from "electron";',
+    'import { ipcMain as bus } from "electron";'))).some(failure => failure.includes("root needs one unaliased ipcMain import")));
+  assert.ok(mainIpcBoundaryViolations(root, replaced(rootSource.text.replace("ipcMain.handle(", "electron.ipcMain.handle(")))
+    .some(failure => failure.includes("root needs one ipcMain.handle wrapper")));
+  const harmless = '// ipcMain; electron["ipcMain"];\nconst example = "ipcMain"; const pattern = /ipcMain/;';
   assert.deepEqual(mainIpcBoundaryViolations(root, injected(harmless)), []);
 });

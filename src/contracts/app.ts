@@ -12,6 +12,9 @@
  * Not in the contracts' index (src/contracts/index.ts): two names mean other shapes there. The app
  * layer's ListRunsRequest and RevertRequest take a workspace as typed and a run reference; the CLI's
  * (commands.ts, changes.ts) take a resolved workspace root. Import this module by its path.
+ *
+ * IR-26 step 3 (A0-A3): the common types are in app-core.ts and the settings, file view and plan
+ * lifecycle types in app-settings.ts, app-files.ts and app-plans.ts; this module passes them on.
  */
 
 import type { CleanupConfirmation, CleanupOutput, CleanupPlan, CleanupSelection, CleanupStatus, StateSummary } from "./cleanup.js";

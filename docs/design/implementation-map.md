@@ -11,7 +11,7 @@
 | 보고서 읽기와 표시 | [app/report-read.ts](../../src/app/report-read.ts), [presentation/json.ts](../../src/presentation/json.ts), [presentation/report.ts](../../src/presentation/report.ts) | [공개 renderer 회귀](../../tests/unit/presentation/report.test.ts), CP50·CP51. 기존 CLI binding·형 유지 |
 | 점검·초기 설정 | [app/doctor.ts](../../src/app/doctor.ts), [app/init-command.ts](../../src/app/init-command.ts) | [어댑터 계약 7.2절](adapter-contract.md): CLI/앱 공유 core. 질문·사람용 표시는 CLI에 남음 |
 
-IR-26 분할 뒤의 위치(현재 상태 2026-11-26, main `f8d1e156`). 아래 원본 위치표의 `engine/index`는 2026-11-12 당시 위치이고, 지금은 다음 모듈에 있다. 3단계에서 나눈 파일은 옛 경로가 facade로 남아 같은 이름을 다시 내보낸다. 구조는 [architecture.md](../architecture.md) 2절 끝(분할한 파일)과 4.3·4.4절에 있다.
+IR-26 분할 뒤의 위치(현재 상태 2026-11-26, main `c1b95a5d`). 아래 원본 위치표의 `engine/index`는 2026-11-12 당시 위치이고, 지금은 다음 모듈에 있다. 3단계에서 나눈 파일은 옛 경로가 facade로 남아 같은 이름을 다시 내보낸다. 구조는 [architecture.md](../architecture.md) 2절 끝(분할한 파일)과 4.3·4.4절에 있다.
 
 | 대상 | 현재 구현 위치 |
 | --- | --- |
@@ -24,7 +24,7 @@ IR-26 분할 뒤의 위치(현재 상태 2026-11-26, main `f8d1e156`). 아래 �
 | 사람용 고정 문구 표 | [contracts/human-messages.ts](../../src/contracts/human-messages.ts)(`contracts/human.ts`가 같은 이름으로 다시 내보냄) |
 | 앱 계층 계약(형) | facade [contracts/app.ts](../../src/contracts/app.ts), [app-core.ts](../../src/contracts/app-core.ts), [app-settings.ts](../../src/contracts/app-settings.ts), [app-files.ts](../../src/contracts/app-files.ts), [app-plans.ts](../../src/contracts/app-plans.ts) |
 | CLI 오류 계약 | [contracts/engine-errors.ts](../../src/contracts/engine-errors.ts)(`contracts/engine.ts`가 다시 내보냄) |
-| 계획 계약 | facade [contracts/plan.ts](../../src/contracts/plan.ts)(적용·journal·출력), [plan-core.ts](../../src/contracts/plan-core.ts)(공통), [plan-changes.ts](../../src/contracts/plan-changes.ts)(파일 쓰기 계획) |
+| 계획 계약 | facade [contracts/plan.ts](../../src/contracts/plan.ts)(recorder·loader, 적용 전 점검, 출력), [plan-core.ts](../../src/contracts/plan-core.ts)(공통), [plan-changes.ts](../../src/contracts/plan-changes.ts)(파일 쓰기 계획), [plan-apply.ts](../../src/contracts/plan-apply.ts)(적용 항목·journal·결과) |
 | task.json 해석 | facade [app/input/task.ts](../../src/app/input/task.ts), [task-core.ts](../../src/app/input/task-core.ts)(`InputError`, 공통 검사), [task-limits.ts](../../src/app/input/task-limits.ts), [task-verifiers.ts](../../src/app/input/task-verifiers.ts) |
 | Markdown 규칙(`markdown_headings`·`markdown_links`) | 대상 판정·파일 읽기 [verify/markdown.ts](../../src/verify/markdown.ts), 파일 I/O 없는 읽기 [verify/markdown-reader.ts](../../src/verify/markdown-reader.ts) |
 | CLI 사람 출력 | facade [cli/human/output.ts](../../src/cli/human/output.ts)(진행 상태), [output-layout.ts](../../src/cli/human/output-layout.ts), [output-errors.ts](../../src/cli/human/output-errors.ts), [output-history.ts](../../src/cli/human/output-history.ts), [output-summary.ts](../../src/cli/human/output-summary.ts) |

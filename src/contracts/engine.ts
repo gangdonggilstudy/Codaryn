@@ -1,5 +1,7 @@
 /**
- * Run states, exit codes, the engine entry point and the CLI output objects.
+ * Run states, exit codes, the engine entry point and the CLI output objects. The CLI error contract
+ * (codes, exit codes, categories, hints, input diagnostics) is in engine-errors.ts; this module
+ * passes it on (IR-26 step 3 E1).
  */
 
 import type { RevertOutcome } from "./changes.js";

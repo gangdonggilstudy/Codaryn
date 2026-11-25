@@ -16,10 +16,11 @@
  *   MAX_STATE_HASH_BYTES and read errors make the fingerprint `limited`; the part not fingerprinted
  *   is not compared. In tier "run" a file over the hash budget keeps a metadata fingerprint (a
  *   known limit: an edit of the same size that also restores the change times goes unseen).
+ * - Each hash read uses one statted handle and at most its reserved size plus one detection byte.
  */
 
 import type { BigIntStats } from "node:fs";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 
 import {
@@ -56,6 +57,7 @@ import { appendOnlyJournal } from "./journal.js";
 import { markPlanAppliedWith, planRecorderWith } from "./plan.js";
 import type { RunWriteNotes } from "./run-writes.js";
 import { isStoredRunId } from "./runs.js";
+import { readBounded } from "./read-bounded.js";
 
 /** A record file of another run larger than this keeps a metadata fingerprint (tier "state"). */
 const MAX_STATE_FILE_HASH_BYTES = 1024 * 1024;
@@ -356,8 +358,9 @@ function guardFor(options: RunRecordersOptions): { readonly notes: RunWriteNotes
         reads.push(
           limited(async () => {
             try {
-              const data = await readFile(absolute);
-              print.entries.set(path, entryOf(info, sha256Hex(data), BigInt(data.byteLength)));
+              const data = await readBounded(absolute, size);
+              if (data === "too_large") limit(); // Keep the reserved metadata entry, as for the lstat budget limit.
+              else print.entries.set(path, entryOf(info, sha256Hex(data), BigInt(data.byteLength)));
             } catch {
               print.entries.set(path, { kind: "unreadable" });
               limit();
@@ -402,8 +405,11 @@ function guardFor(options: RunRecordersOptions): { readonly notes: RunWriteNotes
     try {
       const info = await lstat(file);
       if (info.isFile() && info.size <= MAX_MARK_BYTES) {
-        const value: unknown = JSON.parse(await readFile(file, "utf8"));
-        if (isMark(value, id)) earlier = value.detections;
+        const bytes = await readBounded(file, MAX_MARK_BYTES);
+        if (bytes !== "too_large") {
+          const value: unknown = JSON.parse(bytes.toString("utf8"));
+          if (isMark(value, id)) earlier = value.detections;
+        }
       }
     } catch (error) {
       const code = errorCode(error);

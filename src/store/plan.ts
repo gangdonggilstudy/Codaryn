@@ -18,7 +18,7 @@
  * read or written through.
  */
 
-import { lstat, readFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -62,6 +62,7 @@ import {
   sha256Hex,
 } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
+import { readBounded } from "./read-bounded.js";
 import type { RunWriteNotes } from "./run-writes.js";
 import { isStateDirName, isValidPathInput } from "../workspace/lexical.js";
 
@@ -260,23 +261,26 @@ function invalid(): never {
   throw new Invalid();
 }
 
-/** A regular file's bytes, or "missing". A link, a directory or a file over the limit is invalid. */
-async function readRecordBytes(file: string): Promise<Buffer | "missing"> {
-  let size: number;
+/** Metadata check shared with the journal's existence-only check; never reads file content. */
+async function checkRecordFile(file: string): Promise<"file" | "missing"> {
   try {
     const info = await lstat(file);
-    if (!info.isFile()) return invalid();
-    size = info.size;
+    if (!info.isFile() || info.size > MAX_REPORT_FILE_BYTES) return invalid();
+    return "file";
   } catch (error) {
     if (error instanceof Invalid) throw error;
     const code = errorCode(error);
     if (code === "ENOENT" || code === "ENOTDIR") return "missing";
     return invalid();
   }
-  if (size > MAX_REPORT_FILE_BYTES) invalid();
+}
+
+/** A regular file's bytes, or "missing". A link, a directory or a file over the limit is invalid. */
+async function readRecordBytes(file: string): Promise<Buffer | "missing"> {
+  if ((await checkRecordFile(file)) === "missing") return "missing";
   try {
-    const bytes = await readFile(file);
-    return bytes.length > MAX_REPORT_FILE_BYTES ? invalid() : bytes;
+    const bytes = await readBounded(file, MAX_REPORT_FILE_BYTES);
+    return bytes === "too_large" ? invalid() : bytes;
   } catch {
     return invalid();
   }
@@ -336,7 +340,7 @@ export const loadAnyPlan: LoadAnyPlan = async (request): Promise<LoadPlanOutcome
   if (!(await isPlainDirectory(runsDir)) || !(await isPlainDirectory(dir))) return { ok: false, code: "invalid_run_record" };
 
   try {
-    if ((await readRecordBytes(join(dir, JOURNAL_FILE_NAME))) === "missing") return { ok: false, code: "run_not_found" };
+    if ((await checkRecordFile(join(dir, JOURNAL_FILE_NAME))) === "missing") return { ok: false, code: "run_not_found" };
 
     const resultBytes = await readRecordBytes(join(dir, RESULT_FILE_NAME));
     if (resultBytes === "missing") return { ok: false, code: "run_not_plan" };

@@ -5,10 +5,9 @@
  * exceptions.
  */
 
-import { isAbsolute, join, relative } from "node:path";
 import { pathOnDisk } from "./on-disk.js";
 import { unnamedWidening } from "./dialog-texts.js";
-import { dialog, ipcMain } from "electron";
+import { ipcMain } from "electron";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import {
   IPC_CHANNELS,
@@ -17,9 +16,7 @@ import {
   isNoArgs,
   parseDoctorArgs,
   parseEntryArgs,
-  parseIdArg,
   parseProviderArgs,
-  parseRevealArgs,
   parseStartRunArgs,
   parsePreviewArgs,
   parseRetryArgs,
@@ -38,8 +35,6 @@ import {
   parseWorkspaceArgs,
   toRevertView,
   toRunsReply,
-  parseTreeArgs,
-  parseTextDirtyArgs,
   isRunId,
   toDoctorView,
   toHostModelList,
@@ -47,121 +42,32 @@ import {
   toSettingsView,
   hostCodeOf,
 } from "../shared/ipc.js";
-import type { DoctorReply, InfoView, ModelsReply, OpenFolderReply, OpenReply, RecentView, SelectModelReply, SettingsReply, SettingsView, SaveTextReply, TextReply, TreeReply } from "../shared/ipc.js";
+import type { DoctorReply, InfoView, ModelsReply, SelectModelReply, SettingsReply, SaveTextReply, TextReply } from "../shared/ipc.js";
 import { isAppUrl } from "./app-url.js";
 import type { EngineHost } from "./engine-client.js";
-import type { ModelEntries, ModelListLimit } from "./model-entries.js";
-import type { RunManager } from "./runs.js";
-import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
 import { reviewTarget } from "./history.js";
 import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply, SettingsProposalReply, SettingsWrittenReply } from "../shared/ipc.js";
 import { parseSettingsEdit } from "../shared/settings-edit.js";
 import { cleanupQuestions } from "../shared/cleanup.js";
 import { parseCleanupPreviewArgs, toCleanupResultReply, toHostCleanupPreview, toStateSummaryReply } from "../shared/ipc.js";
 import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from "../shared/ipc.js";
-import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, reportPathInStateDir, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyablePath, parseCheckPlanArgs, toPlanCheckReply, toStartFailure, parseCopyArgs, parseRunEventsArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
+import { parseCheckPlanArgs, toPlanCheckReply, toStartFailure, parseRunEventsArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
 import type { PlanCheckReply, RunEventsReply } from "../shared/ipc.js";
 import { parseRunItems } from "../shared/protocol.js";
-import type { UiMemoryView } from "../shared/ipc.js";
-import type { CopyReply, RestartReply } from "../shared/ipc.js";
+import type { RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
 import type { CreateSettingsReply, SuggestionsReply } from "../shared/ipc.js";
 import { basename } from "node:path";
-import type { SettingsProposal, SettingsProposals } from "./settings-proposals.js";
-import type { PlanApproval, PlanApprovals } from "./plans.js";
-import type { TextEdits } from "./text-edits.js";
 import { createTextFiles } from "./text-files.js";
-import type { Workspaces } from "./workspaces.js";
+import { CANCEL_TIMEOUT_MS, DOCTOR_TIMEOUT_MS, MODELS_TIMEOUT_MS, PLAN_CHECK_TIMEOUT_MS, REVERT_TIMEOUT_MS, RUNS_TIMEOUT_MS, SETTINGS_TIMEOUT_MS, START_TIMEOUT_MS, TEXT_TIMEOUT_MS, texts } from "./ipc-context.js";
+import type { IpcDeps, IpcHandlerContext, StartRunReply } from "./ipc-context.js";
+import { createWorkspaceHandlers } from "./ipc-workspace.js";
 
-const DOCTOR_TIMEOUT_MS = 60_000;
-const MESSAGES_TIMEOUT_MS = 10_000;
-const TREE_TIMEOUT_MS = 30_000;
-/** U-174: one text file (at most 256 KiB) read and masked. */
-const TEXT_TIMEOUT_MS = 30_000;
-const SETTINGS_TIMEOUT_MS = 30_000;
-/** Listing and choosing a model ask the provider's API (Y-2): the request time limit and retries fit in this. */
-const MODELS_TIMEOUT_MS = 120_000;
-/** startRun answers after its checks (the CLI's order), before the engine works; the run itself has no time limit here. */
-const START_TIMEOUT_MS = 120_000;
-const CANCEL_TIMEOUT_MS = 10_000;
-const RUNS_TIMEOUT_MS = 30_000;
-/** U-119: the check hashes the plan's source files; a large plan takes longer than a listing. */
-const PLAN_CHECK_TIMEOUT_MS = 120_000;
-/** A revert waits for the workspace lock and moves files back; its preview only reads. */
-const REVERT_TIMEOUT_MS = 120_000;
-
-/** What `startRun` answers the window. */
-export type StartRunReply = { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string; readonly hint?: string };
-
-export interface IpcDeps {
-  readonly window: () => BrowserWindow | null;
-  /** The engine host, or why there is none. */
-  readonly host: () => Promise<{ readonly host: EngineHost } | { readonly failure: string }>;
-  readonly workspaces: Workspaces;
-  readonly osLocale: () => string;
-  /** A workspace named on the command line of this start, already opened. */
-  readonly initialWorkspace: () => { readonly handle: string; readonly name: string } | null;
-  /** GU-6: the models of the last list, by entry id. */
-  readonly modelEntries: ModelEntries;
-  /** R21-I-3: one model list at a time, a few a minute. */
-  readonly modelListLimit: ModelListLimit;
-  /** Whether CODARYN_MODEL and CODARYN_LANG are set in the app's environment (never their values). */
-  readonly envFacts: () => SettingsView["env"];
-  /** GU-3: the one run at a time. */
-  readonly runs: RunManager;
-  /** The window's language once the engine host chose it (for the main process's own dialogs). */
-  readonly onLanguage: (language: "ko" | "en") => void;
-  /** GU-4: the run lists and revert previews. */
-  readonly history: RunHistory;
-  /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
-  readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
-  /** GU-3 (3.7): the OS save dialog: where a report goes (null: cancelled). */
-  readonly chooseSavePath: (name: string) => Promise<string | null>;
-  /** GU-4 (3.8), DR-39, DR-44: the cleanup previews shown, and the main process's questions before cleaning. */
-  readonly cleanupPreviews: CleanupPreviews;
-  /** The plan as shown (counts, sizes, the digest's start); "do not clean" is the default. */
-  readonly confirmCleanup: (record: CleanupPreviewRecord) => Promise<boolean>;
-  /** DR-44 (a): apart, the records of runs not (or only partly) reverted; "keep them" is the default. */
-  readonly confirmCleanupNotReverted: (record: CleanupPreviewRecord) => Promise<boolean>;
-  /** DR-9: apart, the discarded-files folders (people's files, deleted for good); "keep them" is the default. */
-  readonly confirmCleanupDiscarded: (record: CleanupPreviewRecord) => Promise<boolean>;
-  /** GU-6: the settings change proposals shown. */
-  readonly settingsProposals: SettingsProposals;
-  /** GU-6 (6.6): asks the person (an OS dialog) whether to write a change that widens what runs may do. */
-  readonly confirmWidening: (proposal: SettingsProposal) => Promise<boolean>;
-  /** DR-25: asks the person (a separate OS dialog) for the consent to move this run's files back unsafely. */
-  readonly confirmRevertConsent: (retry: ConsentRetry) => Promise<boolean>;
-  /** GU-5: the plans shown and their approval tokens. */
-  readonly approvals: PlanApprovals;
-  /** GU-5 (3.9, 6.6): asks the person (an OS dialog) whether to apply this plan; true only on "apply". */
-  readonly confirmApply: (approval: PlanApproval) => Promise<boolean>;
-  /** GU-5 (DR-21): asks the person (a separate OS dialog) for the consent to unsafe moves; true only on "agree". */
-  readonly confirmConsent: (approval: PlanApproval) => Promise<boolean>;
-  /**
-   * U-64 (3.12, 4.4): starts a new engine host when the one before has ended (never while one runs).
-   * Only the window's "Restart engine" asks for it; the main process never restarts it on its own.
-   */
-  readonly restartEngine: () => Promise<RestartReply>;
-  /** U-63 (3.5, GUI-D8): the OS open dialog for the task file or the variables file (null: cancelled). Never kept. */
-  readonly chooseOpenFile: (kind: "task" | "vars") => Promise<string | null>;
-  /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
-  readonly writeClipboard: (text: string) => void;
-  /** U-66: shows an entry selected in the file manager (the OS one; smoke tests record it instead). Nothing is opened or run. */
-  readonly showItemInFolder: (path: string) => void;
-  /** U-184 (DR-72, 3.14): the text view's edit tokens (main/text-edits.ts). */
-  readonly textEdits: TextEdits;
-  /** U-184 (principle 6, GUI-D22): asks the person, once per opened file, to save to the file the view opened. */
-  readonly confirmTextSave: () => Promise<boolean>;
-  /** U-184: whether the text view holds an unsaved edit (closing the window asks then). */
-  readonly setTextDirty: (dirty: boolean) => void;
-  /** U-70 (4.5): what the window remembers of itself, and keeping a change to it. */
-  readonly uiMemory: () => Promise<UiMemoryView>;
-  readonly saveUi: (change: { readonly screen?: string; readonly treeWidth?: number }) => Promise<void>;
-}
+export type { IpcDeps, StartRunReply } from "./ipc-context.js";
+export { texts } from "./ipc-context.js";
 
 /** Only the app window's main frame on the app's own origin may call. */
 function fromAppWindow(event: IpcMainInvokeEvent, window: BrowserWindow | null): boolean {
@@ -176,24 +82,6 @@ function fromAppWindow(event: IpcMainInvokeEvent, window: BrowserWindow | null):
   );
 }
 
-function safeLocale(locale: string): string | null {
-  return /^[A-Za-z0-9_-]{1,64}$/.test(locale) ? locale : null;
-}
-
-/** The language the engine host chooses and the shared catalog's texts for `ids` in it. */
-export async function texts(host: EngineHost, osLocale: string, ids: readonly string[]): Promise<{ language: "ko" | "en"; texts: Record<string, string> } | null> {
-  const response = await host.call("messages", { osLocale: safeLocale(osLocale), ids }, MESSAGES_TIMEOUT_MS);
-  if (!response.ok || typeof response.value !== "object" || response.value === null) return null;
-  const { language: lang, texts: table } = response.value as Record<string, unknown>;
-  if ((lang !== "ko" && lang !== "en") || typeof table !== "object" || table === null) return null;
-  const out: Record<string, string> = {};
-  for (const id of ids) {
-    const text = (table as Record<string, unknown>)[id];
-    if (typeof text === "string") out[id] = text;
-  }
-  return { language: lang, texts: out };
-}
-
 export function registerIpc(deps: IpcDeps): void {
   const { workspaces } = deps;
   let language: "ko" | "en" = "en";
@@ -205,6 +93,8 @@ export function registerIpc(deps: IpcDeps): void {
       return handler(args);
     });
   };
+  const context: IpcHandlerContext = { deps, workspaces };
+  const workspaceHandlers = createWorkspaceHandlers(context);
 
   handle(IPC_CHANNELS.info, async (args): Promise<InfoView | null> => {
     if (!isNoArgs(args)) return null;
@@ -218,54 +108,22 @@ export function registerIpc(deps: IpcDeps): void {
     return { language: chosen.language, engine: "ready", initialWorkspace, ui: await deps.uiMemory() };
   });
 
-  handle(IPC_CHANNELS.openFolder, async (args): Promise<OpenFolderReply> => {
-    if (!isNoArgs(args)) return null;
-    const window = deps.window();
-    if (window === null) return null;
-    const chosen = await dialog.showOpenDialog(window, { properties: ["openDirectory", "dontAddToRecent"] });
-    const folder = chosen.canceled ? undefined : chosen.filePaths[0];
-    if (folder === undefined) return null;
-    return workspaces.open(folder);
-  });
+  handle(IPC_CHANNELS.openFolder, workspaceHandlers.openFolder);
 
-  handle(IPC_CHANNELS.recent, async (args): Promise<RecentView[] | null> => (isNoArgs(args) ? workspaces.recent() : null));
+  handle(IPC_CHANNELS.recent, workspaceHandlers.recent);
 
-  handle(IPC_CHANNELS.openRecent, async (args): Promise<OpenReply> => {
-    const id = parseIdArg(args);
-    return id === null ? { ok: false, code: "invalid_args" } : workspaces.openRecent(id);
-  });
+  handle(IPC_CHANNELS.openRecent, workspaceHandlers.openRecent);
 
-  handle(IPC_CHANNELS.forgetRecent, async (args): Promise<boolean> => {
-    const id = parseIdArg(args);
-    return id === null ? false : workspaces.forgetRecent(id);
-  });
+  handle(IPC_CHANNELS.forgetRecent, workspaceHandlers.forgetRecent);
 
-  handle(IPC_CHANNELS.tree, async (args): Promise<TreeReply> => {
-    const parsed = args.length === 1 ? parseTreeArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const root = workspaces.path(parsed.workspace);
-    if (root === null) return { ok: false, code: "unknown_workspace" };
-    const dir = workspaces.treeDir(parsed.workspace, parsed.node);
-    if (dir === null) return { ok: false, code: "unknown_entry" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("tree", { workspace: root, dir, offset: parsed.offset }, TREE_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    return workspaces.treeReply(parsed.workspace, dir, response.value);
-  });
+  handle(IPC_CHANNELS.tree, workspaceHandlers.tree);
 
   // U-174, U-184 (3.14): the text view's open and save (main/text-files.ts; V-5 M-1: a reset holds for requests under way too).
   const textFiles = createTextFiles({ workspaces, edits: deps.textEdits, host: deps.host, confirm: deps.confirmTextSave, timeoutMs: TEXT_TIMEOUT_MS });
   handle(IPC_CHANNELS.openText, (args): Promise<TextReply> => textFiles.open(args));
   handle(IPC_CHANNELS.saveText, (args): Promise<SaveTextReply> => textFiles.save(args));
 
-  // U-184: the text view tells whether it holds an unsaved edit; closing the window asks then.
-  handle(IPC_CHANNELS.textDirty, async (args): Promise<boolean> => {
-    const dirty = args.length === 1 ? parseTextDirtyArgs(args[0]) : null;
-    if (dirty === null) return false;
-    deps.setTextDirty(dirty);
-    return true;
-  });
+  handle(IPC_CHANNELS.textDirty, workspaceHandlers.textDirty);
 
   /**
    * U-123 (R-82 U-103 L1): a settings write may register a value a tree name held; every tree and
@@ -280,74 +138,15 @@ export function registerIpc(deps: IpcDeps): void {
     if (window !== null && !window.isDestroyed()) window.webContents.send(IPC_EVENTS.treeReset, {});
   };
 
-  handle(IPC_CHANNELS.reveal, async (args): Promise<boolean> => {
-    const parsed = args.length === 1 ? parseRevealArgs(args[0]) : null;
-    if (parsed === null) return false;
-    const root = workspaces.path(parsed.workspace);
-    const rel = root === null ? null : workspaces.treeIds.resolve(parsed.workspace, parsed.node);
-    if (root === null || rel === null) return false;
-    const target = join(root, ...rel.split("/"));
-    const inside = relative(root, target);
-    if (inside.length === 0 || inside.startsWith("..") || isAbsolute(inside)) return false;
-    // Shows the entry selected in the file manager. Nothing is opened or run.
-    deps.showItemInFolder(target);
-    return true;
-  });
+  handle(IPC_CHANNELS.reveal, workspaceHandlers.reveal);
 
-  /**
-   * U-62 (6.4; R-73 M1, L1): copies a run id or a digest's first 12 characters only (parseCopyArgs);
-   * anything else is invalid_args. Nothing else reaches the clipboard; the page cannot read it.
-   */
-  handle(IPC_CHANNELS.copyText, async (args): Promise<CopyReply> => {
-    const text = args.length === 1 ? parseCopyArgs(args[0]) : null;
-    if (text === null) return { ok: false, code: "invalid_args" };
-    deps.writeClipboard(text);
-    return { ok: true };
-  });
+  handle(IPC_CHANNELS.copyText, workspaceHandlers.copyText);
 
-  /**
-   * U-103 (G-list, 3.3): a tree entry's path relative to the workspace, by its id (the page never names
-   * a path). Only entries the app layer did not mask have an id; the path is checked again (copyablePath).
-   */
-  handle(IPC_CHANNELS.copyPath, async (args): Promise<CopyReply> => {
-    const parsed = args.length === 1 ? parseRevealArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    if (workspaces.path(parsed.workspace) === null) return { ok: false, code: "unknown_workspace" };
-    const rel = workspaces.treeIds.resolve(parsed.workspace, parsed.node);
-    if (rel === null) return { ok: false, code: "unknown_entry" };
-    const text = copyablePath(rel);
-    if (text === null) return { ok: false, code: "not_copyable" };
-    deps.writeClipboard(text);
-    return { ok: true };
-  });
+  handle(IPC_CHANNELS.copyPath, workspaceHandlers.copyPath);
 
-  /**
-   * U-69 (3.10): shows the config file selected in the file manager. Its path comes from the engine
-   * host (the settings a run reads) and stays in this process; the page names nothing.
-   */
-  handle(IPC_CHANNELS.revealConfig, async (args): Promise<CopyReply> => {
-    if (!isNoArgs(args)) return { ok: false, code: "invalid_args" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("configFile", {}, SETTINGS_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    const value = response.value as Record<string, unknown> | null;
-    if (typeof value !== "object" || value === null) return { ok: false, code: "host_error" };
-    if (value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
-    const path = value["path"];
-    if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || typeof value["exists"] !== "boolean") return { ok: false, code: "host_error" };
-    if (value["exists"] !== true) return { ok: false, code: "config_missing" };
-    deps.showItemInFolder(path);
-    return { ok: true };
-  });
+  handle(IPC_CHANNELS.revealConfig, workspaceHandlers.revealConfig);
 
-  // U-70 (4.5): the last screen and the file panel's width, checked here, kept in gui-state.json.
-  handle(IPC_CHANNELS.saveUi, async (args): Promise<boolean> => {
-    const parsed = args.length === 1 ? parseSaveUiArgs(args[0]) : null;
-    if (parsed === null) return false;
-    await deps.saveUi(parsed);
-    return true;
-  });
+  handle(IPC_CHANNELS.saveUi, workspaceHandlers.saveUi);
 
   handle(IPC_CHANNELS.doctor, async (args): Promise<DoctorReply> => {
     const parsed = args.length === 1 ? parseDoctorArgs(args[0]) : null;

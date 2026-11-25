@@ -96,7 +96,20 @@ test("U-194: the lock file held briefly when the run releases it: the run ends d
   assert.equal(existsSync(lockFile(sb)), false);
 });
 
-test("U-194, U-220: the lock file held long: the run's result stands and the summary says the lock was left; the lock is stale and the next run reclaims it", { timeout: 120_000, skip: WINDOWS ? false : "only Windows refuses to remove a file another process holds" }, async (t) => {
+/**
+ * Z-1 (src/store/lock.ts, processStartTime): the lock's holder is judged by `process.kill(pid, 0)`
+ * and, when that pid lives, by its start time. Under load another process may meanwhile get the
+ * ended CLI's pid, and Windows PowerShell may answer its start time after START_QUERY_TIMEOUT_MS;
+ * the judgment then says "held" (unknown, so held: the product's safe side). The test, which knows
+ * from its own child handle that the CLI ended, asks again a bounded number of times: only that
+ * answer (doctor's held, a run's workspace_locked) is asked again, and the last answer must still
+ * be stale and done.
+ */
+const JUDGE_TRIES = 4;
+const JUDGE_PAUSE_MS = 1_500;
+const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("U-194, U-220: the lock file held long: the run's result stands and the summary says the lock was left; the lock is stale and the next run reclaims it", { timeout: 180_000, skip: WINDOWS ? false : "only Windows refuses to remove a file another process holds" }, async (t) => {
   const sb = createSandbox(t);
   const holder = startHolder(t, sb, 4_000);
   await waitFor(() => existsSync(holder.ready), 30_000, "the holder waiting");
@@ -117,13 +130,34 @@ test("U-194, U-220: the lock file held long: the run's result stands and the sum
   assert.equal(output.runId, recorded.runId, "the printed result is the stored one");
   // The lock stays with the CLI's pid; that process has ended, so the lock is stale.
   assert.ok(existsSync(lockFile(sb)), "the lock file is left");
-  const doctor = await runGuarded(sb, ["doctor", "--task", task(sb, "two.txt"), "--json"], cliEnv(), 60_000);
-  const lock = (JSON.parse(doctor.stdout.trim()) as { checks: { id: string; status: string; text?: { id: string } }[] }).checks.find((check) => check.id === "lock");
-  assert.equal(lock?.text?.id, "doctor.lock.stale", JSON.stringify(lock));
-  // The next run reclaims the stale lock and goes through.
-  const second = await runGuarded(sb, ["run", "--task", task(sb, "two.txt")], cliEnv(), 60_000);
-  const next = lastJson(second);
-  assert.deepEqual([next.kind, next.status, second.exitCode], ["run", "done", 0], second.stdout + second.stderr);
+  // The CLI that left it is this test's own child: its handle closed with an exit code, so it ended.
+  assert.equal(typeof first.exitCode, "number", "the CLI that left the lock has ended");
+  assert.equal((JSON.parse(readFileSync(lockFile(sb), "utf8")) as { pid?: unknown }).pid, first.pid, "the lock was left by that CLI");
+  type LockCheck = { id: string; status: string; text?: { id: string } };
+  let lock: LockCheck | undefined;
+  const answers: string[] = [];
+  for (let attempt = 1; attempt <= JUDGE_TRIES; attempt++) {
+    const doctor = await runGuarded(sb, ["doctor", "--task", task(sb, "two.txt"), "--json"], cliEnv(), 60_000);
+    lock = (JSON.parse(doctor.stdout.trim()) as { checks: LockCheck[] }).checks.find((check) => check.id === "lock");
+    answers.push(lock?.text?.id ?? "none");
+    if (lock?.text?.id !== "doctor.lock.held" || attempt === JUDGE_TRIES) break;
+    await pause(JUDGE_PAUSE_MS);
+  }
+  t.diagnostic(`doctor lock answers: ${answers.join(", ")}`);
+  assert.equal(lock?.text?.id, "doctor.lock.stale", JSON.stringify({ lock, answers }));
+  // The next run reclaims the stale lock and goes through. It judges the holder by the same rule.
+  let second: Awaited<ReturnType<typeof runGuarded>> | undefined;
+  let next: ReturnType<typeof lastJson> = { kind: "none" };
+  const outcomes: string[] = [];
+  for (let attempt = 1; attempt <= JUDGE_TRIES; attempt++) {
+    second = await runGuarded(sb, ["run", "--task", task(sb, "two.txt")], cliEnv(), 60_000);
+    next = lastJson(second);
+    outcomes.push(`${next.kind}/${next.status ?? next.code ?? "?"}`);
+    if (next.code !== "workspace_locked" || attempt === JUDGE_TRIES) break;
+    await pause(JUDGE_PAUSE_MS);
+  }
+  t.diagnostic(`next run outcomes: ${outcomes.join(", ")}`);
+  assert.deepEqual([next.kind, next.status, second?.exitCode], ["run", "done", 0], JSON.stringify(outcomes) + (second?.stdout ?? "") + (second?.stderr ?? ""));
   assert.equal(existsSync(lockFile(sb)), false, "released by the next run");
 });
 

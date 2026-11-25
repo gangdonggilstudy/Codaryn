@@ -1,14 +1,12 @@
 /** Reading commands for the app; the injected context and hooks are used only when called. */
 import { createPrivacyGateway } from "../privacy/index.js";
 import { readChanges } from "./changes.js";
-import type { ReadChangesDeps } from "./changes.js";
 import { appError } from "./errors.js";
 import type { createReadingContext } from "./reading-context.js";
 import { runIdOf, workspaceRootOf } from "./runs.js";
 import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 import { listRunEventsIn, runEventsArguments } from "./run-events.js";
 import { readWorkspaceTextArguments, readWorkspaceTextIn, writeWorkspaceTextArguments, writeWorkspaceTextIn } from "./workspace-text.js";
-import type { WorkspaceTextOperations } from "./workspace-text.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
@@ -24,15 +22,13 @@ import type {
   WorkspaceTextWritten,
   WriteWorkspaceTextRequest,
 } from "./types.js";
+import type { AppHooks } from "./app-hooks.js";
 
 export function createReadingCommands(
   readingSecrets: ReturnType<typeof createReadingContext>["readingSecrets"],
   workspaceTextSource: ReturnType<typeof createReadingContext>["workspaceTextSource"],
   environment: AppEnvironment,
-  hooks: {
-    readonly changesRead?: Pick<ReadChangesDeps, "createWorkspace">;
-    readonly workspaceText?: WorkspaceTextOperations;
-  },
+  hooks: Pick<AppHooks, "changesRead" | "workspaceText">,
 ) {
   /** DR-7, DR-29: a run's changes. U-234 (R-107 O-1): `options.signal` is given to the reads of the current files. */
   async function changes(request: ChangesRequest, options: ChangesOptions = {}): Promise<AppCallOutcome<ChangesOutput>> {

@@ -134,14 +134,16 @@ describe("revert with dry run and the revert record (N-7)", () => {
     const running = await app.startRun({ ...taskRequest(busy) });
     assert.equal(running.ok, true, JSON.stringify(running));
     const handle = (running as { handle: RunHandle }).handle;
-
-    const workspace = path.join(base, "work");
-    assert.equal(code(await app.revert({ workspace, runId })), "workspace_locked");
-    assert.equal(ok<RevertOutput>(await app.revert({ workspace, runId, dryRun: true })).dryRun, true);
-    assert.equal(await exists(path.join(workspace, "NOTES.md")), true);
-
-    handle.cancel();
-    await handle.done;
+    try {
+      const workspace = path.join(base, "work");
+      assert.equal(code(await app.revert({ workspace, runId })), "workspace_locked");
+      assert.equal(ok<RevertOutput>(await app.revert({ workspace, runId, dryRun: true })).dryRun, true);
+      assert.equal(await exists(path.join(workspace, "NOTES.md")), true);
+    } finally {
+      // The run owns the fixture until cancellation has settled, including assertion failures.
+      handle.cancel();
+      await handle.done;
+    }
   });
 });
 

@@ -40,6 +40,22 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-69, 2026-11-26~27) — IR-26 3단계 끝, G-4 되돌리기 예약, 보고서 저장 보호, 지킴 시험
+
+- **IR-26 3단계(codex-worker-2 설계 초안, PM 결정 D3-1~D3-4; 이동만, 단위마다 구현하지 않은 세션의 독립 검토, 합친 판마다 PM 시험):** 600줄 이상 27개를 판단해 8개를 나눴다.
+  - 계약 `app.ts` 1,274 → 469(A0·A1 `876d9c1b`, A2·A3 `be7b8b7e`; `app-core`·`app-settings`·`app-files`·`app-plans`, 형만), `engine.ts` 841 → 469(E1 `31330794`; `engine-errors`), `plan.ts` 1,296 → 276(P0·P1 `a02a2d96`, P2 `c1b95a5d`; `plan-core`·`plan-changes`·`plan-apply`). **P3는 하지 않기로 결정**(P2 뒤 276줄이라 나눌 기준 아래, 형 전용 조합 층 예외의 비용이 더 큼; 검토자 동의).
+  - 작업 파일 해석 `task.ts` 881 → 384(T0·T1 `3d4c2a27`, T2 `60cb7868`; `InputError` 한 클래스), Markdown `markdown.ts` 847 → 296(M1 `f174c9e8`; 파일 I/O 없는 `markdown-reader`), CLI 사람 출력 `output.ts` 1,010 → 389(O1·O2 `81b095ab`, O3·O4 `b4e3a439`; 만들 때 무동작 factory, 진행 상태는 root — D3-3).
+  - GUI 렌더러 `api.ts` 663 → 82(R0·R1 `54def902`, R2·R3 `0838dc0b`), GUI main `ipc.ts` 883 → 484(G-4 뒤 G-4 구현자가 41채널 지도를 다시 그리고 다른 검토자가 대조 — D3-4; 묶음 A `83202dab`, B `cce3bd18`, C `05cbedf0`; live 상태·예약을 쓰는 17채널은 등록 root에 남김).
+  - 나누지 않은 19개(정리 트랜잭션·잠금·스냅샷·실행 기록 읽기·입력 준비·doctor·데이터 검사·카탈로그 등)는 한 흐름의 순서나 한 등록 계약이라 이번 단계에서 둔다.
+  - 평가 위치 변화(E1, P0·P1, P2: 옮긴 맨 수준 값이 facade의 남은 값보다 먼저 만들어짐)는 단위마다 초기화 목록·교차 읽기 0·두 진입점의 정적 순서·하위의 facade import 0을 보고하게 했고, 검토자가 독립으로 확인해 소비자에게 보이지 않음을 확인했다.
+- **지킴:** 계약 `app*.ts` 경계(`0e93670c`), 가족 경계(`f8d1e156`; app·engine·plan·task·output을 표로, 하위를 목록으로 찾음), CLI 출력 가족 실행 성질(`17d0747f`), GUI main 분할(묶음 C에 포함; 분야 모듈의 `ipcMain`·root import 금지), IPC 계산 로더 허용 목록과 BMP 전체 문자 정책(IG-1·IG-2 `41bfa81a`). 마무리 정리(`fb550236`): facade 머리 주석, 낡은 문서 위치, P3 관련 예외 삭제. 구조 문서(`0d75e4a5`).
+- **GUI 수정:** G-4(`a3fcbe89`, codex-worker 구현, claude-worker 검토) — 시작 예약 중 되돌리기 거부, 되돌리기 중 시작·다른 되돌리기는 새 code `revert_active`(PM 결정 B, 기존 `run_active` 문구는 그대로). 보고서 저장이 `.codaryn` 기록 폴더 안(대소문자·junction 포함)을 고르면 `save_state_dir`로 거부(`b8980cb0`; 남은 경계 SR-2 검사와 쓰기 사이 틈, SR-3 `.codaryn` 안을 뿌리로 하는 SMB 공유는 위험 기록).
+- **시험 견고화:** n13 잠금 긴 잡음 시험이 부하에서 두 번 실패(제품의 안전한 "잡힘" 판정) → 시험이 자기 자식의 종료를 확인한 뒤 "잡힘"일 때만 최대 4번 다시 묻게(`1b2f6082`, 제품 그대로). U-213 실제 시간 시험이 부하로 한 번 실패(재실행 통과, 기록만).
+- **발견·진행 중:** OFG-2 — GUI 엔진 호스트가 progressLine이 null인 기록을 applyProgressLine에 넘기고 그것이 공유 기록을 progressLine으로 되넘겨 같은 사건이 렌더러 안에서 두 번 처리된다(분할 전부터, GUI에 보이지 않음) → 선택 A(호스트가 apply 전용 기록만 넘김)로 수정 중. GUI 검토 의견 정리 묶음(GB-1·GC-1~3·SR-1) 검토 중. 개선 검토 C(도구·검증·정책·개인정보·작업 공간·표·모델) 진행 중.
+- **PM 측정(합친 판마다 프로젝트 스크립트, 실패 0):** 마지막 전체 판 `c1b95a5d`에서 unit 4,372건(4,365 통과·6 건너뜀·1 TODO), integration 684건(682 통과·1 건너뜀·1 TODO), GUI 702건(700 통과·2 건너뜀), 연기 시험 227/227. `fb550236`에서 unit 4,387건(4,378 통과·6 건너뜀·3 TODO — OFG-2 둘).
+- **운영:** 작업자 창의 질문·권한 창에는 답하지 않았다(claude-worker의 읽기 명령이 안전 검사에 걸려 자동 거절, codex-worker의 소유 확대 질문은 파일 지시로 답함). 작업자들이 지시 범위를 벗어나야 할 때 멈추고 보고했다(IPC 4a·4b 공유, OFG-1·OFG-2, SR-1 소유). Codex 세션 ID 변동의 ACK 거절은 수동 수신 기록으로 처리했다.
+- 남은 것: 사용자의 꾸러미 화면 확인(M-3.19), 실제 API 3.1, 키 없는 수동 12항목, 서명·설치 파일·외부 게시(GUI-D9, 미승인), E-5·E-6 보류.
+
 ## 진행 요약 (CP-68, 2026-11-26) — IR-26 첫 범위 끝(엔진·GUI 공유 IPC), 구조 문서와 지킴 시험
 
 - **IR-26 엔진 2단계 끝(이동만, 단위마다 구현하지 않은 세션의 정적 검토, 합친 판마다 PM 전체 시험):** U4 공유 상태 `RunTally`(`af754be7`), U5 도구 호출 → `run-tools.ts`(`25de0050`), U6 대화 → `run-converse.ts`(`4f5bc0d5`), U7 검증·재수정·승인 계획 점검 → `run-verify.ts`(`1d42acc6`). 정리(`6cf0cc46`, codex-worker-2 구현, claude-worker 검토): 쓰이지 않는 import 바인딩 59개 제거(모듈 요청 순서는 부수효과 import로 유지), 떠돌던 doc 주석 둘을 제 함수로, 상태 디렉터리 guard에 한 줄 주석. **`engine/index.ts` 1,792 → 274줄**(공개 facade와 조립 뿌리 `runWith`).

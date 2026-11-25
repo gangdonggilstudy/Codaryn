@@ -40,6 +40,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-76, 2026-11-27) — G5·G6·G9 채택과 전체 GUI 보드, 남은 시험 수명 보완
+
+- **G5·G6·G9 채택:** PM 자신의 구현은 codex-worker-2의 독립 검토·보완 재검토를 거쳤다(`48dfcf33…4ea523d`, 새 발견 0). 작업 branch `70660220`, main `b1b58ee4`이며 제품 변경 없이 시험 네 파일만 합쳤다. staged patch와 검토 patch 및 검증한 트리의 일치를 확인했고 check-secrets는 별도 실행 뒤 커밋했다.
+- **합친 보드:** 타입 검사와 root build exit 0. unit 4,673건(4,662 통과·10 건너뜀·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), GUI 780건(778 통과·2 건너뜀), Electron 연기 227/227, 모두 실패 0. 실제 API 검증으로 간주하지 않으며 smoke의 바깥 소켓 수는 0이다.
+- **F1·F2·F4와 CP-75**는 원격 `f3a52c18`에서 확인했다. 새 PM 인수 뒤 진행한 latest·F·G5/G6/G9는 독립 검토·main 합친 보드·지정 작성자·trailer 없음으로 구분해 채택했다.
+- **G7·G8 진행:** codex-worker-2가 main의 F 채택 판 `9a6e8596` 위 `test/flake-g7g8`에서 포트 반환 공백과 실패 때 실행 정리 누락을 재현 먼저로 시험만 다룬다. 통제된 실제 connection error가 다른 코드이면 의미를 보존하는 범위만 허용하며, 다른 계약이 필요하면 보고하고 제품을 바꾸지 않는다.
+- **G11 착수:** PM이 GUI 계획 시험의 150ms 추정을 실제 done 사건 대기로 바꾸는 작은 단위를 직접 맡았다. 메모리 fake 완료 지연을 사본에 넣어 재현하고, Codex 작업자가 나중에 독립 검토한다.
+- **G10 판단:** 현재 대표 settings-change 대역은 I/O 없이 즉시 해결하는 Promise이고 `settle`은 이벤트 루프 차례를 넘긴다. 현재 실패를 재현하지 않은 상태에서 미래 I/O 변경을 가정해 모든 tick을 바꾸지 않는다. 대역이 외부 비동기 I/O로 바뀔 때 완료 조건을 갱신하는 정보 의견으로 남긴다. G12 환경 가정·G13 출발 barrier는 후속 후보로 유지한다.
+- **미승인 범위 유지:** 실제 API·키 조회·설치/서명/외부 게시·작업자 질문/피드백/크레딧 화면 응답·새 worktree·이력 재작성은 하지 않았다. 현재 위임과 회수 권한은 바꾸지 않았다.
+
 ## 진행 요약 (CP-75, 2026-11-27) — F1·F2·F4 Codex 인수와 채택, GGR 보완 재검토 통과
 
 - **F1·F2·F4 채택:** 원 작업자 보고 `4ef7cd40…df7261`과 add -N 미준수 이력은 그대로 보존하고, Codex 인수 보고 `e7787647…8038f9d`를 읽고 ACK했다. Codex 작업자는 같은 미커밋 7파일을 바꾸지 않고 build·새 회귀 9/9를 확인했다. PM은 제품 코드를 수정하지 않은 독립 검토자로서 HTTP 취소·wx 임시 파일 소유·apply 잠금 finally를 검토했다.

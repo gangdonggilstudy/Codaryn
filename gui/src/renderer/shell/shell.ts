@@ -17,6 +17,8 @@ export interface Screen {
   readonly title: TextId;
   /** Builds the screen's content into `root` each time it is shown. */
   show(root: HTMLElement): void;
+  /** Releases subscriptions and timers when this frame is discarded. */
+  dispose?(): void;
 }
 
 /** U-70: the file panel's width range in CSS pixels (the main process checks the same, TREE_WIDTH_MIN/MAX). */
@@ -58,6 +60,7 @@ export class Shell {
   private readonly screens: Screen[] = [];
   private readonly buttons = new Map<string, HTMLButtonElement>();
   private current: string | null = null;
+  private destroyed = false;
   /** U-70: the file panel and the work area, with the separator between them. */
   private readonly body = el("div", undefined, { id: "body" });
   private readonly splitter = el("div", undefined, {
@@ -96,9 +99,12 @@ export class Shell {
     document.addEventListener("keydown", this.keyListener);
   }
 
-  /** U-69: stops listening to the document's keys (the frame is being built again). */
+  /** U-69, IR-D4: releases the frame's screens and document keys before a language rebuild. */
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     document.removeEventListener?.("keydown", this.keyListener);
+    for (const screen of this.screens) screen.dispose?.();
   }
 
   add(screen: Screen): void {

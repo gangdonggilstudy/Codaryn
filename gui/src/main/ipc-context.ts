@@ -9,7 +9,7 @@ import type { SettingsProposal, SettingsProposals } from "./settings-proposals.j
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { TextEdits } from "./text-edits.js";
 import type { Workspaces } from "./workspaces.js";
-import type { RestartReply, SettingsView, UiMemoryView } from "../shared/ipc.js";
+import type { RestartReply, SettingsView, UiMemoryView, RunFormView } from "../shared/ipc.js";
 
 export const DOCTOR_TIMEOUT_MS = 60_000;
 export const MESSAGES_TIMEOUT_MS = 10_000;
@@ -38,7 +38,7 @@ export interface IpcDeps {
   readonly workspaces: Workspaces;
   readonly osLocale: () => string;
   /** A workspace named on the command line of this start, already opened. */
-  readonly initialWorkspace: () => { readonly handle: string; readonly name: string } | null;
+  readonly initialWorkspace: () => { readonly handle: string; readonly name: string; readonly lastForm?: RunFormView | null } | null;
   /** GU-6: the models of the last list, by entry id. */
   readonly modelEntries: ModelEntries;
   /** R21-I-3: one model list at a time, a few a minute. */

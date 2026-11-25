@@ -64,3 +64,7 @@ const nameOrNull = (value: unknown): value is string | null => value === null ||
 
 // Internal shared checks; only original public names are re-exported by the facade.
 export { ERROR_CODE, DIGEST, WORD, NAME, UNSAFE_IN_MESSAGE, numOrNull, nameOrNull };
+
+const TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
+// Internal shared timestamp check; it is not a facade export.
+export { TIME };

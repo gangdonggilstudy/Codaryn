@@ -1,7 +1,7 @@
 /** Run start, result, confirmation and plan-check IPC checks. Public callers use ../ipc.js. */
 import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, isRunId, shortText, textList, ERROR_CODE, DIGEST, hostCodeOf, NAME, numOrNull } from "./primitives.js";
 import { toFinalMessage, toPlanActions } from "./core.js";
-import type { FinalMessageView, PlanActionView } from "./core.js";
+import type { FinalMessageView, PlanActionView, RunItemView } from "./core.js";
 
 /** GU-3: the longest goal the window sends (the CLI's own checks still run in startRun). */
 export const MAX_GOAL_CHARS = 20_000;
@@ -31,14 +31,6 @@ export function parseStartRunArgs(value: unknown): { readonly workspace: string;
 
 export const RUN_STATUSES = ["done", "failed", "needs-input", "cancelled", "budget-exhausted"] as const;
 const REASON = /^[a-z][a-z_]{0,39}$/;
-export interface RunItemView {
-  /** ISO time of the record, or null. */
-  readonly at: string | null;
-  /** The record type, "notice", or "gap" (items went missing: the report has them all). */
-  readonly kind: string;
-  readonly text: string;
-}
-
 export interface RunEventsPayload {
   readonly runId: string;
   readonly items: readonly RunItemView[];
@@ -111,7 +103,6 @@ export interface RunResultView {
 export type RunDonePayload =
   | { readonly runId: string; readonly ok: true; readonly result: RunResultView; readonly labels: { readonly status: string; readonly reason: string } }
   | { readonly runId: string; readonly ok: false; readonly code: string };
-
 
 /** The engine host's `done` outcome, checked field by field. */
 export function toRunResultView(value: unknown): { readonly ok: true; readonly result: RunResultView } | { readonly ok: false; readonly code: string } {
@@ -212,7 +203,6 @@ export function confirmationsOf(value: unknown): ConfirmationsView | null {
   const byDefault = value["default"];
   return count(allowed) && count(user) && count(byDefault) && count(cancelled) ? { allowed, user, default: byDefault, cancelled } : null;
 }
-
 
 /**
  * GU-5: `plan` and `changes` arguments: the workspace, the run chosen, and the profile and task kind

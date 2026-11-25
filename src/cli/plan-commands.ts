@@ -25,6 +25,7 @@ import type { CommandOutcome } from "./guard.js";
 import { jsonLine } from "./guard.js";
 import { PROGRESS_PREFIX } from "./progress.js";
 import { createRunDisplay } from "./run.js";
+import { createMessageCatalog } from "../i18n/index.js";
 import type { CliEnvironment } from "./run.js";
 import { argumentsError, cliError, withHint } from "../app/prepare.js";
 import { knownKeyValues } from "../app/input/settings.js";
@@ -37,7 +38,7 @@ import type { PlanViewEnvironment, Prepared } from "../app/plan-view.js";
 // (src/app/plan-view.ts); these names stay for the tests (plan A).
 export { NO_GOAL } from "../app/plan-view.js";
 export type { PlanViewEnvironment, Prepared } from "../app/plan-view.js";
-import { FINAL_MESSAGE_MAX_LINES, builtinReviewItemText, changesApplyQuestion, changesApprovalText, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
+import { FINAL_MESSAGE_MAX_LINES, builtinReviewItemText, changesApplyQuestion, changesApprovalText, displayWidth, formatLocalTime, lockReleaseFailedLine, quoteModelText, renderChangesPlan } from "./human/index.js";
 
 /** U-21: rows of the plan's summary in the plan view, as many as the run summary gives the last message. */
 const PLAN_SUMMARY_MAX_ROWS = FINAL_MESSAGE_MAX_LINES;
@@ -426,6 +427,8 @@ export function renderReview(
           ),
         ]),
   ];
+  const lockLine = lockReleaseFailedLine(output.lockLeft, messages ?? createMessageCatalog("en"));
+  if (lockLine !== null) lines.push(lockLine);
   return `${lines.join("\n")}\n`;
 }
 

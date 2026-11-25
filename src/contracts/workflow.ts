@@ -456,4 +456,6 @@ export interface ReviewOutput {
   readonly checklist: readonly MaskedText[];
   /** An earlier review of this run was replaced. */
   readonly replaced: boolean;
+  /** IR-F3, U-220: the verdict was stored, but the workspace lock could not be released. Absent on normal release. */
+  readonly lockLeft?: true;
 }

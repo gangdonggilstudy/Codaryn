@@ -113,10 +113,10 @@ test("E2-more snapshot index: an oversized list keeps the unreadable result and 
   const seen = observe(t, file), rows = await readRunOriginals({ workspaceRoot: f.root, runId: RUN });
   assert.deepEqual(rows[0]?.original, { unavailable: "unreadable" }); bounded(t, "snapshot-index", seen, MAX_REPORT_FILE_BYTES);
 });
-test("E2-more revert original: an oversized snapshot keeps the existing I/O failure outcome", async t => {
+test("E2-more revert original: an oversized snapshot is not the run's original (missing_snapshot, as before)", async t => {
   const f = await fixture(t), file = join(f.snapshots, "1.orig"); await enlarge(file, MAX_READ_BYTES + 4096);
   const seen = observe(t, file), result = await revertRun({ workspaceRoot: f.root, runId: RUN, dryRun: true });
-  bounded(t, "revert-original", seen, MAX_READ_BYTES); assert.equal(result.skipped[0]?.reason, "io_error");
+  bounded(t, "revert-original", seen, MAX_READ_BYTES); assert.equal(result.skipped[0]?.reason, "missing_snapshot");
 });
 for (const site of ["original-text", "shown", "review"] as const) test(`E2-more ${site}: growth after lstat cannot bypass its existing bound`, async t => {
   const f = await fixture(t);

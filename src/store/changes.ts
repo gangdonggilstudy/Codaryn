@@ -443,7 +443,7 @@ async function originalOf(
   let bytes: Buffer;
   try {
     const read = await readBounded(join(snapshots.dir, entry.file), MAX_READ_BYTES);
-    if (read === "too_large") return { reason: "io_error" };
+    if (read === "too_large") return { reason: "missing_snapshot" }; // MRR-1: larger than any original a run keeps, as the hash check said
     bytes = read;
   } catch (error) {
     return { reason: errorCode(error) === "ENOENT" ? "missing_snapshot" : "io_error" };

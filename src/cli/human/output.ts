@@ -15,39 +15,26 @@
  */
 
 import {
-  API_KEY_ENVS,
-  API_MODEL_ENVS,
   APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
   CONFIRMATION_BY,
-  CLI_ERROR_EXIT_CODES,
-  CLI_ERROR_HINT_DETAIL,
   MAX_FINAL_MESSAGE_CHARS,
-  CLI_ERROR_HINTS,
-  DETAILED_CLI_ERROR_HINTS,
-  DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
   PLAN_ITEM_PROBLEMS,
   PLAN_RECORDS_UNCHECKED_CAUSES,
   PERMISSION_KINDS,
-  PRIVATE_REVIEW_ITEM,
   POLICY_NARROWING_KINDS,
-  PROVIDER_SETTINGS,
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
   REVIEW_VERDICTS,
   STATE_CHECK_PHASES,
-  TERMINAL_RUN_STATUSES,
   ALL_TOOL_NAMES,
   TOOL_ERROR_CODES,
-  isReasonOfStatus,
   isShownWorkspace,
   planApplyStateOf,
   toRunId,
-  toSchemaFieldPath,
-  MODEL_PROVIDER_NAMES,
 } from "../../contracts/index.js";
 import type {
   PolicyNarrowing,
@@ -56,14 +43,11 @@ import type {
   ApplySummaryContext,
   CatalogText,
   CliErrorCode,
-  CliErrorOutput,
   CreateHumanOutput,
   EngineResult,
   HumanOutput,
-  InputDiagnostic,
   JournalEvent,
   MessageCatalog,
-  ModelProviderName,
   PlanApplyState,
   RevertOutput,
   RevertSummaryContext,
@@ -72,97 +56,19 @@ import type {
   RunReason,
   RunSummaryContext,
   RunsOutput,
-  SchemaFieldPath,
   ShownWorkspace,
   TerminalRunStatus,
   AnyToolName,
 } from "../../contracts/index.js";
-import { isRunTimestamp } from "../../store/index.js";
-import { displayWidth, finalLine, formatLocalTime, padEnd, quoteModelText, shownPath, token } from "../../app/input/format.js";
+import "../../store/index.js"; // Preserve module evaluation order.
+import { displayWidth, finalLine, padEnd, quoteModelText, shownPath, token } from "../../app/input/format.js";
 import { FINAL_MESSAGE_MAX_LINES } from "../../app/model-text.js";
 import { queryTableFacts } from "./query-table.js";
 import type { QueryTableFacts } from "./query-table.js";
+import { APPLIED_ALL_REASONS, DIGEST, HIDDEN_PATH, HUMAN_PREFIX, OUTCOMES, PLAN_PROBLEMS_SHOWN, PROVIDERS, REVERT_MAX_LISTED, SUMMARY_MAX_PATHS, WORKSPACE_FORMS, builtinReviewItemText, isCount, isOneOf, lines, localTime, lockReleaseFailedLine, moreLine, validStatusReason, withCode } from "./output-layout.js";
+import { createErrorOutput } from "./output-errors.js";
 
-/** As PROGRESS_PREFIX in ../progress.ts. Error and revert titles start with it. */
-export const HUMAN_PREFIX = "codaryn: ";
-/** Changed files listed in a run summary. The rest are counted. */
-export const SUMMARY_MAX_PATHS = 5;
-/** Files listed per group in a revert summary. The rest are counted. */
-export const REVERT_MAX_LISTED = 20;
-/** Shown in place of a path that may not be printed (a `missing_record` path is unmasked). */
-export const HIDDEN_PATH = "?";
-
-/** N-22: the errors after which the error text adds `error.doctor_hint` (the contract's list). */
-const DOCTOR_CODES: ReadonlySet<string> = new Set<string>(DOCTOR_HINT_ERROR_CODES);
-
-// SP-1: the contract's provider names, not a list of its own.
-const PROVIDERS: readonly ModelProviderName[] = MODEL_PROVIDER_NAMES;
-const WORKSPACE_FORMS = ["current", "given", "task"] as const;
-/** EngineResult.plan.digest in its only valid form. */
-const DIGEST = /^[0-9a-f]{64}$/;
-/** Plan problems shown in one preflight line. The rest are counted. */
-const PLAN_PROBLEMS_SHOWN = 5;
-/** Apply reasons after which every action was applied (verification only runs then). */
-const APPLIED_ALL_REASONS: ReadonlySet<string> = new Set(["verified", "verifier_failed", "verifier_inconclusive", "protected_changed"]);
-const OUTCOMES = ["pass", "fail", "inconclusive"] as const;
-
-function isOneOf<T extends string>(value: unknown, list: readonly T[]): value is T {
-  return typeof value === "string" && (list as readonly string[]).includes(value);
-}
-
-function isCount(value: unknown, min = 0): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= min;
-}
-
-function validStatusReason(status: unknown, reason: unknown): { status: TerminalRunStatus; reason: RunReason } | null {
-  if (!isOneOf(status, TERMINAL_RUN_STATUSES) || typeof reason !== "string") return null;
-  // DR-16: the contract's one table of reasons per status (G-A reasons included).
-  return isReasonOfStatus(status, reason) ? { status, reason } : null;
-}
-
-/** A recorded time in local wall time, or null when it is not a real timestamp (N-24(c)). */
-function localTime(at: unknown): string | null {
-  return isRunTimestamp(at) ? formatLocalTime(Date.parse(at)) : null;
-}
-
-// DR-47: rows of the agent's last message shown in a run summary. U-280 (CLI migration C-3a): the
-// app layer's now (src/app/model-text.ts); re-exported for the renderer's users and the tests.
-export { FINAL_MESSAGE_MAX_LINES };
-
-/** "(+3)" after a cut list. */
-function moreLine(count: number): string {
-  return `  … (+${count})`;
-}
-
-/**
- * The code in parentheses after a title. A title that introduces a list ends with a colon in some
- * languages; the code then goes before the colon, so the colon still leads into the list.
- */
-function withCode(title: string, code: string): string {
-  return title.endsWith(":") ? `${title.slice(0, -1)} (${code}):` : `${title} (${code})`;
-}
-
-/**
- * U-201 (U-176, U-193): the line after a run, an apply, a revert or a cleanup that finished but could
- * not release the workspace lock (`lockLeft` true in its summary context or CleanupOutcome):
- * `lock.release_failed`, which names no path (doctor's lock line names the file). Null otherwise.
- */
-export function lockReleaseFailedLine(lockLeft: unknown, messages: MessageCatalog): string | null {
-  return lockLeft === true ? messages.format("lock.release_failed") : null;
-}
-
-/**
- * U-207 (P-3): a review checklist entry that a built-in task type records in English, in the chosen
- * language: analyze-private's item (PRIVATE_REVIEW_ITEM, `review.item.no_identifying_values`). Null
- * for any other entry, which is shown as recorded. For `codaryn review` and the GUI as well.
- */
-export function builtinReviewItemText(entry: unknown, messages: MessageCatalog): string | null {
-  return entry === PRIVATE_REVIEW_ITEM ? messages.format("review.item.no_identifying_values") : null;
-}
-
-function lines(out: readonly string[]): string {
-  return `${out.map(finalLine).join("\n")}\n`;
-}
+export { FINAL_MESSAGE_MAX_LINES, HIDDEN_PATH, HUMAN_PREFIX, REVERT_MAX_LISTED, SUMMARY_MAX_PATHS, builtinReviewItemText, lockReleaseFailedLine } from "./output-layout.js";
 
 export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): HumanOutput => {
   const verifierNumbers = new Map<string, number>();
@@ -293,43 +199,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     record_missing: () => catalog.format("runs.plan_apply_missing", { runId: carryRunId }),
   });
 
-  function diagnosticText(diagnostic: InputDiagnostic): string | null {
-    const file = isOneOf(diagnostic.file, ["config", "task", "script"] as const) ? diagnostic.file : null;
-    if (file === null) return null;
-    const fileText = catalog.format(`diagnostic.file.${file}`);
-    const ownField = typeof diagnostic.field === "string" ? toSchemaFieldPath(diagnostic.field) : null;
-    const field: SchemaFieldPath | null = ownField ?? toSchemaFieldPath(file);
-    let text: CatalogText | null = null;
-    switch (diagnostic.code) {
-      case "json_syntax":
-        if (isCount(diagnostic.line, 1) && isCount(diagnostic.column, 1)) {
-          text = catalog.format("diagnostic.json_syntax", { line: diagnostic.line, column: diagnostic.column });
-        }
-        break;
-      case "unknown_field": {
-        // N-23(f): a suggestion belongs to the position it was made for; at the file root it misleads.
-        const suggestion = ownField !== null && typeof diagnostic.suggestion === "string" ? toSchemaFieldPath(diagnostic.suggestion) : null;
-        if (field !== null) {
-          text =
-            suggestion === null
-              ? catalog.format("diagnostic.unknown_field", { field })
-              : catalog.format("diagnostic.unknown_field_suggest", { field, suggestion });
-        }
-        break;
-      }
-      case "invalid_value":
-        if (field !== null) text = catalog.format("diagnostic.invalid_value", { field });
-        break;
-      case "missing_field":
-        if (field !== null) text = catalog.format("diagnostic.missing_field", { field });
-        break;
-      case "too_deep":
-        text = catalog.format("diagnostic.too_deep");
-        break;
-    }
-    // A dash, not a colon: the diagnostic text often has a colon of its own.
-    return text === null ? null : `${fileText} — ${text}`;
-  }
+  const errors = createErrorOutput(catalog);
 
   // G-A, DR-21: what this renderer learned from an apply's progress records, for its summary
   // (one renderer per command). ApplyResult carries neither the plan total nor the unsafe moves.
@@ -363,61 +233,6 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     return catalog.format(`summary.form.${isOneOf(workspaceForm, WORKSPACE_FORMS) ? workspaceForm : "given"}`);
   }
 
-  /**
-   * U-37 (R-69 M1): the lines of a hint that takes a value (DETAILED_CLI_ERROR_HINTS), from the error's
-   * CLI_ERROR_HINT_DETAIL. A detail that is absent or does not fit gives no line (the contract:
-   * such a hint's line is left out), and never only part of them.
-   */
-  function detailedHintLines(output: CliErrorOutput): string[] {
-    const hint: unknown = output.hint;
-    const detail: unknown = (output as { readonly [CLI_ERROR_HINT_DETAIL]?: unknown })[CLI_ERROR_HINT_DETAIL];
-    if (!isOneOf(hint, DETAILED_CLI_ERROR_HINTS) || typeof detail !== "object" || detail === null) return [];
-    const { position, field, missing } = detail as { readonly position?: unknown; readonly field?: unknown; readonly missing?: unknown };
-    switch (hint) {
-      case "unknown_option":
-        return isCount(position, 1) ? [`  ${catalog.format("error.hint.unknown_option", { position })}`] : [];
-      case "key_field_in_task":
-      case "key_field_in_config": {
-        const place = typeof field === "string" ? toSchemaFieldPath(field) : null;
-        return place === null ? [] : [`  ${catalog.format(`error.hint.${hint}`, { field: place })}`];
-      }
-      case "provider_settings_missing": {
-        const items = missingItems(missing);
-        return items === null ? [] : [`  ${catalog.format("error.hint.provider_settings_missing")}`, ...items.map((item) => `    - ${item}`)];
-      }
-    }
-  }
-
-  /**
-   * U-37: provider_settings_missing's items, one per setting not set, or null when the list does not
-   * fit: not a list, empty, an item that is not one of ProviderSettingMissing's forms, or the
-   * settings not in PROVIDER_SETTINGS order, each once.
-   */
-  function missingItems(missing: unknown): CatalogText[] | null {
-    if (!Array.isArray(missing) || missing.length === 0) return null;
-    const items: CatalogText[] = [];
-    let last = -1;
-    for (const entry of missing as readonly unknown[]) {
-      if (typeof entry !== "object" || entry === null) return null;
-      const { setting, keyEnv, modelEnv, field, placeholder } = entry as Record<string, unknown>;
-      const order = isOneOf(setting, PROVIDER_SETTINGS) ? PROVIDER_SETTINGS.indexOf(setting) : -1;
-      if (order <= last) return null;
-      last = order;
-      const place = typeof field === "string" ? toSchemaFieldPath(field) : null;
-      if (setting === "key") {
-        if (!isOneOf(keyEnv, API_KEY_ENVS)) return null;
-        items.push(catalog.format("error.missing.key", { keyEnv }));
-      } else if (setting === "model") {
-        if (!isOneOf(modelEnv, API_MODEL_ENVS) || place === null || typeof placeholder !== "boolean") return null;
-        items.push(catalog.format(placeholder ? "error.missing.model_placeholder" : "error.missing.model", { variable: modelEnv, field: place }));
-      } else {
-        if (place === null) return null;
-        items.push(catalog.format("error.missing.output_limit", { field: place }));
-      }
-    }
-    return items;
-  }
-
   /** The run id, and the report and revert commands for it. DR-51: with the typed workspace when there is one. */
   function nextCommands(id: unknown, here: boolean, revertable: boolean, workspace: ShownWorkspace | null): string[] {
     const runId = toRunId(String(id));
@@ -441,32 +256,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
   }
 
   const output: HumanOutput = {
-    error(output: CliErrorOutput): string {
-      const label = catalog.format("error.label");
-      const code = output.code;
-      if (!Object.prototype.hasOwnProperty.call(CLI_ERROR_EXIT_CODES, code)) {
-        return lines([`${HUMAN_PREFIX}${label} (${token(code)})`]);
-      }
-      // U-228: run_not_plan for a run whose plan is of another kind (hint plan_kind_differs): the run
-      // has a plan, so the line says so and the hint is the fix, in place of run_not_plan's own lines.
-      const otherKind = code === "run_not_plan" && output.hint === "plan_kind_differs";
-      const what = otherKind ? catalog.format("error.run_not_plan.other_kind") : catalog.format(`error.${code}.what`);
-      const out = [`${HUMAN_PREFIX}${label} — ${what} (${code})`];
-      const diagnostic = output.diagnostic === undefined ? null : diagnosticText(output.diagnostic);
-      if (diagnostic !== null) out.push(`  ${diagnostic}`);
-      const fix = otherKind ? catalog.format("error.hint.plan_kind_differs") : catalog.format(`error.${code}.fix`);
-      out.push(`  ${catalog.format("error.fix_label")}: ${fix}`);
-      // N-D 4: the hints are the renderer's own indented lines, so the CLI finds them and adds none.
-      if (DOCTOR_CODES.has(code)) out.push(`  ${catalog.format("error.doctor_hint")}`);
-      if (code === "workspace_locked") out.push(`  ${catalog.format("lock.remove_hint")}`);
-      // R-12 L-2: the error's own advice (CliErrorOutput.hint), as one more indented line.
-      if (isOneOf(output.hint, CLI_ERROR_HINTS)) {
-        if (!otherKind) out.push(`  ${catalog.format(`error.hint.${output.hint}`)}`);
-      }
-      // U-37 (R-69 M1): or a hint that takes a value, from the error's detail.
-      else out.push(...detailedHintLines(output));
-      return lines(out);
-    },
+    error: errors.error,
 
     runSummary(result: EngineResult, context: RunSummaryContext): string {
       const pair = validStatusReason(result.status, result.reason);

@@ -283,3 +283,11 @@ function toPlanActions(value: unknown, limit: number): PlanActionView[] | null {
 
 // Internal view conversions shared by run, plan and report checks.
 export { toFinalMessage, toPlanActions };
+
+export interface RunItemView {
+  /** ISO time of the record, or null. */
+  readonly at: string | null;
+  /** The record type, "notice", or "gap" (items went missing: the report has them all). */
+  readonly kind: string;
+  readonly text: string;
+}

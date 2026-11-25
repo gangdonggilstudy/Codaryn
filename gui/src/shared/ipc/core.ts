@@ -1,6 +1,6 @@
 /** Core IPC arguments and views. Public callers use ../ipc.js. */
 
-import { hasOnlyKeys, isHandle, isObj, isRunId } from "./primitives.js";
+import { hasOnlyKeys, isHandle, isObj, isRunId, shortText, UNSAFE_IN_MESSAGE } from "./primitives.js";
 
 /** `doctor` arguments: `{workspace: handle | null}` and nothing else. Null when they do not fit. */
 export function parseDoctorArgs(value: unknown): { readonly workspace: string | null } | null {
@@ -234,3 +234,52 @@ export interface TreeEntryView {
 export type TreeReply =
   | { readonly ok: true; readonly entries: readonly TreeEntryView[]; readonly total: number; readonly offset: number; readonly nextOffset: number | null }
   | { readonly ok: false; readonly code: string };
+
+/**
+ * U-21 (DR-47): the longest agent's last message, in characters (code points): the contract's
+ * MAX_FINAL_MESSAGE_CHARS (src/contracts/engine.ts), repeated here as the window does not load the
+ * engine; a unit test compares the two.
+ */
+export const MAX_FINAL_MESSAGE_CHARS = 2000;
+
+/**
+ * U-21 (DR-47, AXM-1): the agent's last message (EngineResult.finalMessage), the model's own words
+ * and not a verified fact: every screen shows it after a label that says so. Masked; line breaks
+ * (LF) and tabs kept; `truncated` when it was cut at MAX_FINAL_MESSAGE_CHARS.
+ */
+export interface FinalMessageView {
+  readonly text: string;
+  readonly truncated: boolean;
+}
+
+/** A final message as the engine host gives it: null when there is none, "bad" when it does not fit. */
+function toFinalMessage(value: unknown): FinalMessageView | null | "bad" {
+  if (value === undefined || value === null) return null;
+  if (!isObj(value) || typeof value["text"] !== "string" || typeof value["truncated"] !== "boolean") return "bad";
+  const text = value["text"];
+  if (text.length > MAX_FINAL_MESSAGE_CHARS * 2 || [...text].length > MAX_FINAL_MESSAGE_CHARS || UNSAFE_IN_MESSAGE.test(text)) return "bad";
+  return { text, truncated: value["truncated"] };
+}
+
+/** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
+export interface PlanActionView {
+  readonly kind: "move" | "discard";
+  readonly from: string;
+  readonly to: string | null;
+  readonly unsafe?: boolean;
+}
+
+function toPlanActions(value: unknown, limit: number): PlanActionView[] | null {
+  if (!Array.isArray(value) || value.length > limit) return null;
+  const actions: PlanActionView[] = [];
+  for (const action of value) {
+    if (!isObj(action) || !shortText(action["from"])) return null;
+    if (action["kind"] === "move" && shortText(action["to"])) actions.push({ kind: "move", from: action["from"], to: action["to"], ...(action["unsafe"] === true ? { unsafe: true } : {}) });
+    else if (action["kind"] === "discard" && action["to"] === null) actions.push({ kind: "discard", from: action["from"], to: null, ...(action["unsafe"] === true ? { unsafe: true } : {}) });
+    else return null;
+  }
+  return actions;
+}
+
+// Internal view conversions shared by run, plan and report checks.
+export { toFinalMessage, toPlanActions };

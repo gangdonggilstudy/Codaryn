@@ -1,10 +1,10 @@
 /** Run start, result, confirmation and plan-check IPC checks. Public callers use ../ipc.js. */
-import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, isRunId, shortText, textList } from "./primitives.js";
-import { ERROR_CODE, DIGEST, hostCodeOf } from "./settings.js";
+import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, isRunId, shortText, textList, ERROR_CODE, DIGEST, hostCodeOf, NAME, numOrNull } from "./primitives.js";
+import { toFinalMessage, toPlanActions } from "./core.js";
+import type { FinalMessageView, PlanActionView } from "./core.js";
 
 /** GU-3: the longest goal the window sends (the CLI's own checks still run in startRun). */
 export const MAX_GOAL_CHARS = 20_000;
-const NAME = /^[^\u0000-\u001f\u007f]{1,200}$/;
 
 /** `startRun` arguments: the workspace handle, the goal, and the profile and task kind chosen, or null. */
 /**
@@ -44,35 +44,6 @@ export interface RunEventsPayload {
   readonly items: readonly RunItemView[];
   /** U-271 (3.6): `limits`, the run's limits once known (protocol.ts RunLimitsView). */
   readonly counts: { readonly turns: number; readonly tools: number; readonly limits?: { readonly turns: number; readonly tools: number; readonly durationMs: number } };
-}
-
-/**
- * U-21 (DR-47): the longest agent's last message, in characters (code points): the contract's
- * MAX_FINAL_MESSAGE_CHARS (src/contracts/engine.ts), repeated here as the window does not load the
- * engine; a unit test compares the two.
- */
-export const MAX_FINAL_MESSAGE_CHARS = 2000;
-
-/**
- * U-21 (DR-47, AXM-1): the agent's last message (EngineResult.finalMessage), the model's own words
- * and not a verified fact: every screen shows it after a label that says so. Masked; line breaks
- * (LF) and tabs kept; `truncated` when it was cut at MAX_FINAL_MESSAGE_CHARS.
- */
-export interface FinalMessageView {
-  readonly text: string;
-  readonly truncated: boolean;
-}
-
-/** Control and direction characters other than LF and TAB (the engine host replaced them). */
-const UNSAFE_IN_MESSAGE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
-
-/** A final message as the engine host gives it: null when there is none, "bad" when it does not fit. */
-function toFinalMessage(value: unknown): FinalMessageView | null | "bad" {
-  if (value === undefined || value === null) return null;
-  if (!isObj(value) || typeof value["text"] !== "string" || typeof value["truncated"] !== "boolean") return "bad";
-  const text = value["text"];
-  if (text.length > MAX_FINAL_MESSAGE_CHARS * 2 || [...text].length > MAX_FINAL_MESSAGE_CHARS || UNSAFE_IN_MESSAGE.test(text)) return "bad";
-  return { text, truncated: value["truncated"] };
 }
 
 /**
@@ -137,31 +108,10 @@ export interface RunResultView {
   readonly lockLeft?: true;
 }
 
-/** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
-export interface PlanActionView {
-  readonly kind: "move" | "discard";
-  readonly from: string;
-  readonly to: string | null;
-  readonly unsafe?: boolean;
-}
-
-function toPlanActions(value: unknown, limit: number): PlanActionView[] | null {
-  if (!Array.isArray(value) || value.length > limit) return null;
-  const actions: PlanActionView[] = [];
-  for (const action of value) {
-    if (!isObj(action) || !shortText(action["from"])) return null;
-    if (action["kind"] === "move" && shortText(action["to"])) actions.push({ kind: "move", from: action["from"], to: action["to"], ...(action["unsafe"] === true ? { unsafe: true } : {}) });
-    else if (action["kind"] === "discard" && action["to"] === null) actions.push({ kind: "discard", from: action["from"], to: null, ...(action["unsafe"] === true ? { unsafe: true } : {}) });
-    else return null;
-  }
-  return actions;
-}
-
 export type RunDonePayload =
   | { readonly runId: string; readonly ok: true; readonly result: RunResultView; readonly labels: { readonly status: string; readonly reason: string } }
   | { readonly runId: string; readonly ok: false; readonly code: string };
 
-const numOrNull = (value: unknown): value is number | null => value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
 
 /** The engine host's `done` outcome, checked field by field. */
 export function toRunResultView(value: unknown): { readonly ok: true; readonly result: RunResultView } | { readonly ok: false; readonly code: string } {
@@ -263,7 +213,6 @@ export function confirmationsOf(value: unknown): ConfirmationsView | null {
   return count(allowed) && count(user) && count(byDefault) && count(cancelled) ? { allowed, user, default: byDefault, cancelled } : null;
 }
 
-const nameOrNull = (value: unknown): value is string | null => value === null || (typeof value === "string" && NAME.test(value));
 
 /**
  * GU-5: `plan` and `changes` arguments: the workspace, the run chosen, and the profile and task kind
@@ -311,6 +260,3 @@ export function toPlanCheckReply(value: unknown, planRunId: string, digest: stri
   if (!unsafeMoves.every(index) || (planKind === "changes" && unsafeMoves.length > 0)) return fail;
   return { ok: true, ...(planKind === "changes" ? { planKind } : {}), problems: found, unsafeMoves: [...unsafeMoves] as number[], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
 }
-
-// Shared with the remaining plan/report checks; these are not facade exports.
-export { UNSAFE_IN_MESSAGE, toFinalMessage, toPlanActions, numOrNull, nameOrNull };

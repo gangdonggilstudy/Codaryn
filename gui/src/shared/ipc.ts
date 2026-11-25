@@ -7,25 +7,24 @@
  * a unit test keeps the two lists equal.
  */
 
-import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, isRunId, shortText, textList } from "./ipc/primitives.js";
-import { copyablePath } from "./ipc/core.js";
-import type { RunFormView } from "./ipc/core.js";
+import { MAX_ITEMS, count, hasOnlyKeys, isHandle, isObj, isRunId, shortText, textList, ERROR_CODE, DIGEST, WORD, hostCodeOf, UNSAFE_IN_MESSAGE, numOrNull, nameOrNull } from "./ipc/primitives.js";
+import { copyablePath, toFinalMessage, toPlanActions } from "./ipc/core.js";
+import type { RunFormView, FinalMessageView, PlanActionView } from "./ipc/core.js";
 
-export { HANDLE_PATTERN, isHandle, isRunId } from "./ipc/primitives.js";
-export { parseDoctorArgs, parseIdArg, MAX_TREE_OFFSET, parseTreeArgs, parseRevealArgs, copyableValue, parseCopyArgs, MAX_COPY_PATH_CHARS, copyablePath, isNoArgs, DOCTOR_CHECK_STATUSES, DOCTOR_STATUSES, toDoctorView, doctorMessageIds, TREE_WIDTH_MIN, TREE_WIDTH_MAX, SCREEN_ID, parseSaveUiArgs, TREE_KINDS } from "./ipc/core.js";
-export type { CopyReply, RestartReply, DoctorCheckStatusView, DoctorStatusView, DoctorCheckView, DoctorView, UiMemoryView, InfoView, DoctorReply, OpenFolderReply, RecentView, RunFormView, OpenReply, TreeKind, TreeEntryView, TreeReply } from "./ipc/core.js";
+export { HANDLE_PATTERN, isHandle, isRunId, hostCodeOf, toStartFailure } from "./ipc/primitives.js";
+export { parseDoctorArgs, parseIdArg, MAX_TREE_OFFSET, parseTreeArgs, parseRevealArgs, copyableValue, parseCopyArgs, MAX_COPY_PATH_CHARS, copyablePath, isNoArgs, DOCTOR_CHECK_STATUSES, DOCTOR_STATUSES, toDoctorView, doctorMessageIds, TREE_WIDTH_MIN, TREE_WIDTH_MAX, SCREEN_ID, parseSaveUiArgs, TREE_KINDS, MAX_FINAL_MESSAGE_CHARS } from "./ipc/core.js";
+export type { CopyReply, RestartReply, DoctorCheckStatusView, DoctorStatusView, DoctorCheckView, DoctorView, UiMemoryView, InfoView, DoctorReply, OpenFolderReply, RecentView, RunFormView, OpenReply, TreeKind, TreeEntryView, TreeReply, FinalMessageView, PlanActionView } from "./ipc/core.js";
 
-import { ERROR_CODE, DIGEST, WORD, hostCodeOf } from "./ipc/settings.js";
 import type { SelectModelReply } from "./ipc/settings.js";
 
-export { PROVIDER_PATTERN, hostCodeOf, toStartFailure, parseProviderArgs, parseEntryArgs, SETTINGS_FILE_SOURCES, toNarrowings, toSettingsView, toHostProposal, toWrittenReply, parseTokenArgs, toHostModelList } from "./ipc/settings.js";
+export { PROVIDER_PATTERN, parseProviderArgs, parseEntryArgs, SETTINGS_FILE_SOURCES, toNarrowings, toSettingsView, toHostProposal, toWrittenReply, parseTokenArgs, toHostModelList } from "./ipc/settings.js";
 export type { ProfileView, SettingsView, SettingsPrivateDataView, ApiProviderView, SettingsRules, PolicyNarrowingView, SettingsReply, SettingsProposalReply, SettingsWrittenReply, HostModelEntry, ModelCurrentView, HostModelList, ModelEntryView, ModelsReply, SelectModelReply } from "./ipc/settings.js";
 
-import { UNSAFE_IN_MESSAGE, toFinalMessage, maskingOf, toPlanActions, numOrNull, nameOrNull } from "./ipc/run.js";
-import type { RunItemView, FinalMessageView, MaskingView, RunResultView, PlanActionView } from "./ipc/run.js";
+import { maskingOf } from "./ipc/run.js";
+import type { RunItemView, MaskingView, RunResultView } from "./ipc/run.js";
 
-export { MAX_GOAL_CHARS, parseStartTaskArgs, parseStartRunArgs, RUN_STATUSES, MAX_FINAL_MESSAGE_CHARS, maskingOf, toRunResultView, confirmationsOf, parseCheckPlanArgs, toPlanCheckReply } from "./ipc/run.js";
-export type { RunItemView, RunEventsPayload, FinalMessageView, MaskingView, RunResultView, PlanActionView, RunDonePayload, ConfirmationsView, PlanCheckReply } from "./ipc/run.js";
+export { MAX_GOAL_CHARS, parseStartTaskArgs, parseStartRunArgs, RUN_STATUSES, maskingOf, toRunResultView, confirmationsOf, parseCheckPlanArgs, toPlanCheckReply } from "./ipc/run.js";
+export type { RunItemView, RunEventsPayload, MaskingView, RunResultView, RunDonePayload, ConfirmationsView, PlanCheckReply } from "./ipc/run.js";
 
 export const IPC_CHANNELS = {
   info: "codaryn:app:info",

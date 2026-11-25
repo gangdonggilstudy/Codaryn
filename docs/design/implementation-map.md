@@ -11,7 +11,7 @@
 | 보고서 읽기와 표시 | [app/report-read.ts](../../src/app/report-read.ts), [presentation/json.ts](../../src/presentation/json.ts), [presentation/report.ts](../../src/presentation/report.ts) | [공개 renderer 회귀](../../tests/unit/presentation/report.test.ts), CP50·CP51. 기존 CLI binding·형 유지 |
 | 점검·초기 설정 | [app/doctor.ts](../../src/app/doctor.ts), [app/init-command.ts](../../src/app/init-command.ts) | [어댑터 계약 7.2절](adapter-contract.md): CLI/앱 공유 core. 질문·사람용 표시는 CLI에 남음 |
 
-IR-26 분할 뒤의 위치(현재 상태 2026-11-26, main `1d42acc6`). 아래 원본 위치표의 `engine/index`는 2026-11-12 당시 위치이고, 지금은 다음 모듈에 있다. 구조는 [architecture.md](../architecture.md) 4.3·4.4절에 있다.
+IR-26 분할 뒤의 위치(현재 상태 2026-11-26, main `f8d1e156`). 아래 원본 위치표의 `engine/index`는 2026-11-12 당시 위치이고, 지금은 다음 모듈에 있다. 3단계에서 나눈 파일은 옛 경로가 facade로 남아 같은 이름을 다시 내보낸다. 구조는 [architecture.md](../architecture.md) 2절 끝(분할한 파일)과 4.3·4.4절에 있다.
 
 | 대상 | 현재 구현 위치 |
 | --- | --- |
@@ -22,6 +22,14 @@ IR-26 분할 뒤의 위치(현재 상태 2026-11-26, main `1d42acc6`). 아래 �
 | 엔진의 가림 적용(JSON 가림, 고정 문구) | [engine/run-helpers.ts](../../src/engine/run-helpers.ts)(`mask`·`maskJson`), [engine/model-texts.ts](../../src/engine/model-texts.ts) |
 | 앱 명령 | [app/app.ts](../../src/app/app.ts)(조립·facade), `app/*-commands.ts`, `app/reading-context.ts`, `app/run-hooks.ts` |
 | 사람용 고정 문구 표 | [contracts/human-messages.ts](../../src/contracts/human-messages.ts)(`contracts/human.ts`가 같은 이름으로 다시 내보냄) |
+| 앱 계층 계약(형) | facade [contracts/app.ts](../../src/contracts/app.ts), [app-core.ts](../../src/contracts/app-core.ts), [app-settings.ts](../../src/contracts/app-settings.ts), [app-files.ts](../../src/contracts/app-files.ts), [app-plans.ts](../../src/contracts/app-plans.ts) |
+| CLI 오류 계약 | [contracts/engine-errors.ts](../../src/contracts/engine-errors.ts)(`contracts/engine.ts`가 다시 내보냄) |
+| 계획 계약 | facade [contracts/plan.ts](../../src/contracts/plan.ts)(적용·journal·출력), [plan-core.ts](../../src/contracts/plan-core.ts)(공통), [plan-changes.ts](../../src/contracts/plan-changes.ts)(파일 쓰기 계획) |
+| task.json 해석 | facade [app/input/task.ts](../../src/app/input/task.ts), [task-core.ts](../../src/app/input/task-core.ts)(`InputError`, 공통 검사), [task-limits.ts](../../src/app/input/task-limits.ts), [task-verifiers.ts](../../src/app/input/task-verifiers.ts) |
+| Markdown 규칙(`markdown_headings`·`markdown_links`) | 대상 판정·파일 읽기 [verify/markdown.ts](../../src/verify/markdown.ts), 파일 I/O 없는 읽기 [verify/markdown-reader.ts](../../src/verify/markdown-reader.ts) |
+| CLI 사람 출력 | facade [cli/human/output.ts](../../src/cli/human/output.ts)(진행 상태), [output-layout.ts](../../src/cli/human/output-layout.ts), [output-errors.ts](../../src/cli/human/output-errors.ts), [output-history.ts](../../src/cli/human/output-history.ts), [output-summary.ts](../../src/cli/human/output-summary.ts) |
+| GUI 화면의 응답 읽기·주 프로세스 IPC | facade [renderer/api.ts](../../gui/src/renderer/api.ts)와 `api-*.ts` 넷, 등록 root [main/ipc.ts](../../gui/src/main/ipc.ts)와 `ipc-*.ts` 넷([독립 GUI](standalone-gui.md) 8.1절) |
+| 분할 경계 지킴(정적) | [family-boundaries.test.ts](../../tests/unit/contracts/family-boundaries.test.ts), [app-boundaries.test.ts](../../tests/unit/contracts/app-boundaries.test.ts), [ipc-guards.test.ts](../../gui/tests/unit/ipc-guards.test.ts), [ipc-main-split.test.ts](../../gui/tests/unit/ipc-main-split.test.ts) |
 
 C11은 지정 source union/fresh runtime 모델의 app→CLI0 검증 완료이며 모든 CLI parser·질문·출력을 옮기거나 단계5 전체를 완료했다는 뜻은 아니다. 기존 인프로세스 앱/GUI bridge·잠금/취소 시험과 별도로 [cli-host-parity.test.ts](../../gui/tests/unit/cli-host-parity.test.ts)·[support](../../gui/tests/unit/cli-host-parity-support.ts)는 실제 CLI와 별도 host의 한 문서 대본 전체 저장물·독립 IPC·비교기 controls를 검증한다([CP53 검토](../reviews/2026-11-15-cli-host-parity-probe.md)). 모든 모델/시나리오/OS의 동등성으로 확대하지 않는다.
 문서 보완 자체는 시험·빌드를 실행하지 않았다. CP53 추가 시험의 실제 실행과 기존 CP51 전체 검사 기록은 구분하며 아래 684/343 등은 원래 판의 측정으로 유지한다.

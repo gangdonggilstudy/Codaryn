@@ -91,6 +91,31 @@
   - CLI가 정의를 펼쳐 명시적 task 필드로 엔진에 넣는다. 엔진은 정의 이름을 모른다.
   - `workflowRef`가 없는 task는 단계 4 전과 똑같이 실행된다. task의 `workflow`는 자유 문자열 이름표로 남는다(GT-U14).
 
+분할한 파일(현재 상태 2026-11-26, main `f8d1e156`; IR-26 3단계). 큰 파일 하나를 옛 경로의 facade와 하위 모듈로 나눴다. facade가 옮긴 공개 이름을 이름으로 다시 내보내므로 공개 경로와 이름은 그대로다. 본문은 바이트 그대로 옮겼고, 단위마다 공개 값과 참조, 빌드 JS 본문, 모듈 평가 순서를 대조하고 다른 세션이 검토했다. 계약 `plan.ts`의 적용(P2)·출력(P3) 계약은 아직 `plan.ts`에 있다.
+
+| 가족 | facade(줄 수 전 → 후) | core | 분야 |
+| --- | --- | --- | --- |
+| 계약 app | `contracts/app.ts`(1,274 → 469): `CodarynApp`과 실행·기록 형 | `app-core.ts`: 환경, 오류, `TaskForm`, `RunEvent` 등 | `app-settings.ts`, `app-files.ts`(변경 보기·작업 공간·텍스트), `app-plans.ts`(계획 확인·적용·검토). 모두 형만 |
+| 계약 engine | `contracts/engine.ts`(841 → 469) | 없음 | `engine-errors.ts`: CLI 오류 code, 종료 코드, 범주, hint, 입력 진단 |
+| 계약 plan | `contracts/plan.ts`(1,296 → 805): 적용·journal·출력 계약, `PlanRecorder`·`Load*` | `plan-core.ts`: 행동, 가린 경로의 보이는 부분, 승인 통로, 동의 | `plan-changes.ts`: 파일 쓰기 계획(DR-69) |
+| 작업 파일 해석 | `app/input/task.ts`(881 → 384): 모델·정책·workflow 필드, task 조립, 간편 형식 | `task-core.ts`: `InputError`(한 클래스), 스칼라·로컬 경로 검사, 필드 진단 | `task-limits.ts`(한도), `task-verifiers.ts`(검증기 종류별 해석) |
+| CLI 사람 출력 | `cli/human/output.ts`(1,010 → 389): `createHumanOutput`과 진행 상태 | `output-layout.ts`: 접두, 목록 한도, 값 검사, 시간·줄 도우미 | `output-errors.ts`, `output-history.ts`(계획 상태·되돌리기·목록), `output-summary.ts`(실행 요약) |
+
+- 그 밖의 분할: `verify/markdown.ts`(847 → 296)는 대상 판정과 작업 공간 파일 읽기를 맡고, 파일 I/O 없는 Markdown 읽기는 `verify/markdown-reader.ts`에 있다. GUI의 `renderer/api.ts`(663 → 82)와 `main/ipc.ts`(883 → 484)는 [독립 GUI](design/standalone-gui.md) 6.4절과 8.1절에 있다.
+- 가족 규칙
+  - 하위는 자기 facade를 import하지 않는다(형 포함). 분야는 가족 안에서 core만 import한다(계약 plan 출력의 형 전용 조합 간선만 예외, D3-2). core는 다른 하위를 import하지 않는다. 가족 밖은 facade로만 들어온다.
+  - 가족 안에 `export *`가 없고, 공개 이름은 한 파일에만 선언된다. 이름을 쓰지 않게 된 실행 import는, 같은 모듈을 먼저 요청하는 곳이 없으면 같은 자리의 부수효과 import(`// Preserve module evaluation order.`)로 남긴다.
+  - 지킴은 원문을 읽는 정적 시험이 한다: `tests/unit/contracts/family-boundaries.test.ts`(가족 표, 하위를 목록으로 찾아 새 하위도 저절로 검사), `tests/unit/contracts/app-boundaries.test.ts`(app 가족은 형만). GUI는 `gui/tests/unit/ipc-guards.test.ts`와 `ipc-main-split.test.ts`가 한다.
+- 결정(IR-26 3단계 설계, PM 채택)
+  - D3-1: 계약 app, Markdown 읽기, 렌더러 API부터 나누고, 나머지는 단위마다 검토를 거쳐 차례로 들였다. 작업 파일 해석은 앞당겨 함께 진행했다.
+  - D3-2: 계약 모듈에는 factory를 두지 않는다. 분야끼리 실행 import는 두지 않고, facade 역수입은 금지한다. 계약 plan 출력(P3)의 형 전용 조합 간선만 예외로 둔다.
+  - D3-3: CLI 사람 출력의 진행 상태는 `createHumanOutput` 안에 그대로 둔다. 하위 factory는 만들 때 아무것도 읽지 않고, 늦게 읽어야 하는 값(`integritySummary`)은 함수로 받는다. 상태 객체화, 새 callback, async 변환은 하지 않았다.
+  - D3-4: GUI `main/ipc.ts`는 G-4(되돌리기 예약) 뒤의 코드에서 처리기 지도를 다시 그리고, 다른 검토자가 41채널 표를 코드와 대조한 뒤 나눴다.
+- 나누지 않은 큰 파일(설계의 판단. 이번 단계의 판단이며 결함이나 영구 금지가 아니다)
+  - `store/cleanup.ts`: 부모 확인 → 잠금 → digest 재검증 → 이동·삭제·기록이 한 제거 트랜잭션이다. `store/lock.ts`: 획득·점검·해제가 같은 식별·재시도 상태를 공유한다. `store/changes.ts`: 스냅샷 하나의 불변식을 지킨다.
+  - `store/runs.ts`와 `app/report-read.ts`: 실행 기록을 같은 규칙으로 읽는 경계다. `app/prepare.ts`와 `app/doctor.ts`: 한 흐름의 순서와 그때 읽는 환경을 지킨다. `verify/data-checks.ts`: 집계와 익명화 판정이 묶여 있다.
+  - 계약 `tool.ts`·`human.ts`·`human-messages.ts`·`commands.ts`: 한곳에 모은 등록·문구·출력 계약이다. i18n 카탈로그: 키 대응을 통째로 검토한다.
+
 ## 3. 공통 계약
 
 단계 0의 다섯 계약은 아래 타입으로 구현됐다(`src/contracts/`).
@@ -106,13 +131,13 @@
 그 밖의 계약:
 - `model.ts`: 메시지·응답·사용량, 대본 형식.
 - `privacy.ts`, `text.ts`, `keys.ts`: 가림 게이트, 토큰 형식, `RawText`·`MaskedText` 브랜드, 키 모양.
-- `journal.ts`, `changes.ts`, `engine.ts`: 기록 사건, 스냅샷, 결과, 종료 코드.
-- `plan.ts`, `workflow.ts`: 계획과 적용(행동, 다이제스트, 적용 기록 사건), 작업 종류 정의와 사람 확인.
+- `journal.ts`, `changes.ts`, `engine.ts`: 기록 사건, 스냅샷, 결과, 종료 코드. CLI 오류 계약(code, 종료 코드, 범주, hint, 입력 진단)은 `engine-errors.ts`에 있고 `engine.ts`가 같은 이름으로 다시 내보낸다(IR-26 3단계, 2절 끝).
+- `plan.ts`, `workflow.ts`: 계획과 적용(행동, 다이제스트, 적용 기록 사건), 작업 종류 정의와 사람 확인. 계획의 공통 부분(행동, 가린 경로의 보이는 부분, 승인 통로, 동의)은 `plan-core.ts`, 파일 쓰기 계획(DR-69)은 `plan-changes.ts`에 있고 `plan.ts`가 다시 내보낸다.
 - `state.ts`: 상태 디렉터리 점검(DR-38). `cleanup.ts`: 정리.
 - `config.ts`: 설정 파일과 제공자 표 `API_PROVIDERS`. `integrity.ts`: 무결성. `commands.ts`: report, doctor, models. `human.ts`: 사람용 문구 계약(고정 문구 표 `FIXED_MESSAGES`와 그 id 형은 IR-26으로 `human-messages.ts`에 있고, `human.ts`가 같은 이름으로 다시 내보내 공개 경로는 그대로다). `workspace.ts`: 작업 공간.
 
 어댑터 계약([어댑터 계약](design/adapter-contract.md) 4·5절)
-- 타입은 계약 폴더가 아니라 `src/app/types.ts`에 있다(`StartRunRequest`, `RunHandle`, `RunEvent`, `RunObserver`, `AppError` 등, 코드 기준). **일부**
+- 타입은 계약 `src/contracts/app.ts`에 있다(U-254). 공통 형은 `app-core.ts`, 설정은 `app-settings.ts`, 파일 보기는 `app-files.ts`, 계획 수명은 `app-plans.ts`에 있고(IR-26 3단계, 모두 형만), `app.ts`가 다시 내보낸다. `src/app/types.ts`는 같은 이름을 그대로 넘긴다(`StartRunRequest`, `RunHandle`, `RunEvent`, `RunObserver`, `AppError` 등, 코드 기준). **일부**
 - 실행 요청의 `workflowRef`(DR-2), 계획 보기·`applyPlan(runId, digest)`·`review`(DR-1), 다시 가린 변경 비교 `changes`(DR-7)는 앱 계층에 있다. **구현**
 - `Journal.append`는 저장한 레코드를 돌려주지 않는다(`append(event): Promise<void>`, 코드 기준). AC-D3은 **없음**이다.
 - 확인 질문 기록(`confirmation_requested`, `confirmation_answered`)과 `ConfirmRequest`는 **구현**(U-74, DR-1, DR-3)이다. 앱 계층은 엔진의 질문을 `RunObserver.confirm`으로 어댑터에 넘긴다(U-108, `app/permission.ts`). 통로가 없거나, 답하다 실패하거나, 답이 정한 결정이 아니면 `dismissed`이고, 엔진은 그것을 `deny`/`default`로 기록한다(DR-10, 코드 기준).

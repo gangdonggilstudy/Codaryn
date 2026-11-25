@@ -130,6 +130,55 @@ async function fakeHost(dir: string, name: string, body: string): Promise<string
   return file;
 }
 
+// Real process/pipe events have a broad setup watchdog, separate from the controlled RPC clock.
+const realSetTimeout = setTimeout, realClearTimeout = clearTimeout;
+async function within<T>(pending: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([pending, new Promise<never>((_, reject) => {
+      timer = realSetTimeout(() => reject(new Error("test setup: owned host did not respond")), 15_000);
+    })]);
+  } finally { realClearTimeout(timer); }
+}
+
+async function waitForFile(file: string): Promise<void> {
+  const end = Date.now() + 15_000;
+  while (!existsSync(file)) {
+    if (Date.now() >= end) throw new Error("test setup: host did not reach the gate");
+    await new Promise(resolve => realSetTimeout(resolve, 10));
+  }
+}
+
+/** Requests are held until the parent observes receipt, expires its calls, then opens the gate. */
+async function gatedHost(dir: string, name: string, count: number) {
+  const received = path.join(dir, "received"), release = path.join(dir, "release"), sent = path.join(dir, "sent");
+  const script = await fakeHost(dir, name, `
+import fs from "node:fs";
+const waiting = []; let buffer = "", released = false;
+const send = request => process.stdout.write(JSON.stringify({v:1,id:request.id,ok:true,value:request.id})+"\\n");
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => {
+  buffer += chunk; let end;
+  while ((end = buffer.indexOf("\\n")) >= 0) {
+    const request = JSON.parse(buffer.slice(0,end)); buffer = buffer.slice(end+1);
+    if (released) send(request);
+    else {
+      waiting.push(request);
+      if (waiting.length === ${count}) fs.writeFileSync(${JSON.stringify(received)}, "");
+    }
+  }
+});
+const gate = setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(release)})) return;
+  clearInterval(gate); released = true;
+  const batch = waiting.splice(0).map(request => JSON.stringify({v:1,id:request.id,ok:true,value:request.id})+"\\n").join("");
+  process.stdout.write(batch, () => fs.writeFileSync(${JSON.stringify(sent)}, ""));
+}, 10);
+process.stdout.write(JSON.stringify({v:1,type:"ready",node:"26.0.0"})+"\\n");
+`);
+  return { script, received, release, sent };
+}
+
 test("host process: the real host on this Node answers doctor with and without a workspace", { skip: !ENGINE_BUILT && "the engine is not built (npm run build in the root)" }, async () => {
   const { dir, cleanup } = await tempDir();
   const host = await started(options(dir));
@@ -361,7 +410,7 @@ test("host process: the real host refuses to start without a valid engine direct
   }
 });
 
-test("host process: a host that does not end after stdin closes is killed by close", async () => {
+test("host process: a host that does not end after stdin closes is killed by close", { timeout: 30_000 }, async () => {
   const { dir, cleanup } = await tempDir();
   try {
     const stubborn = await fakeHost(
@@ -370,109 +419,109 @@ test("host process: a host that does not end after stdin closes is killed by clo
       'process.stdout.write(JSON.stringify({ v: 1, type: "ready", node: "26.0.0" }) + "\\n"); process.stdin.resume(); setInterval(() => {}, 1000);',
     );
     const host = await started(options(dir, { hostScript: stubborn, closeTimeoutMs: 200 }));
-    const begin = Date.now();
-    await host.close();
-    assert.equal(host.exited, true);
-    assert.ok(Date.now() - begin < 5_000);
+    let exits = 0;
+    const exited = new Promise<void>(resolve => host.onExit(() => { exits++; resolve(); }));
+    try {
+      await within(host.close());
+      assert.equal(host.exited, true);
+      assert.equal(exits, 1, "close waits for the real host exit, exactly once");
+      await within(exited);
+    } finally { await within(host.close()); }
   } finally {
     await cleanup();
   }
 });
 
-test("host process (R-10 M-1): an answer that comes after its time limit is dropped and the host stays", async () => {
+test("host process (R-10 M-1): an answer that comes after its time limit is dropped and the host stays", async (t) => {
   const { dir, cleanup } = await tempDir();
   try {
-    // Answers request 1 after 300 ms and request 2 after 400 ms, every later one at once.
-    const slow = await fakeHost(
-      dir,
-      "slow",
-      [
-        'process.stdout.write(JSON.stringify({ v: 1, type: "ready", node: "26.0.0" }) + "\\n");',
-        'let buffer = "";',
-        'process.stdin.setEncoding("utf8");',
-        'process.stdin.on("data", (chunk) => {',
-        '  buffer += chunk;',
-        '  let end;',
-        '  while ((end = buffer.indexOf("\\n")) >= 0) {',
-        '    const request = JSON.parse(buffer.slice(0, end));',
-        '    buffer = buffer.slice(end + 1);',
-        '    const delay = request.id === 1 ? 300 : request.id === 2 ? 400 : 0;',
-        '    setTimeout(() => process.stdout.write(JSON.stringify({ v: 1, id: request.id, ok: true, value: request.id }) + "\\n"), delay);',
-        '  }',
-        '});',
-      ].join("\n"),
-    );
-    const host = await started(options(dir, { hostScript: slow }));
+    const gate = await gatedHost(dir, "slow", 2);
+    const host = await started(options(dir, { hostScript: gate.script }));
     try {
+      t.mock.timers.enable({ apis: ["setTimeout"] });
       const first = host.call("doctor", { workspace: null }, 100);
       const second = host.call("doctor", { workspace: null }, 5_000);
-      const timedOut = await first;
+      await waitForFile(gate.received);
+      t.mock.timers.tick(100);
+      const timedOut = await within(first);
       assert.equal(!timedOut.ok && timedOut.error.code, "adapter_timeout");
-      assert.deepEqual(await second, { v: 1, id: 2, ok: true, value: 2 }, "the other call still gets its answer");
-      assert.deepEqual(await host.call("doctor", { workspace: null }, 5_000), { v: 1, id: 3, ok: true, value: 3 });
+      await fs.writeFile(gate.release, "");
+      await waitForFile(gate.sent);
+      // FIFO stdout puts the late id=1 before id=2. Receiving id=2 acknowledges both were decoded.
+      assert.deepEqual(await within(second), { v: 1, id: 2, ok: true, value: 2 }, "the other call still gets its answer");
+      assert.deepEqual(await within(host.call("doctor", { workspace: null }, 5_000)), { v: 1, id: 3, ok: true, value: 3 });
       assert.equal(host.exited, false, "the late answer did not end the host");
     } finally {
-      await host.close();
+      t.mock.timers.reset();
+      await within(host.close());
     }
   } finally {
     await cleanup();
   }
 });
 
-test("host process (R10b-L-1): late answers to more than 1000 timed-out calls do not end the host", async () => {
+test("host process (R10b-L-1): late answers to more than 1000 timed-out calls do not end the host", async (t) => {
   const { dir, cleanup } = await tempDir();
   try {
-    // Answers requests 1 to 1001 after 400 ms, every later one at once.
-    const slow = await fakeHost(
-      dir,
-      "slower",
-      [
-        'process.stdout.write(JSON.stringify({ v: 1, type: "ready", node: "26.0.0" }) + "\\n");',
-        'let buffer = "";',
-        'process.stdin.setEncoding("utf8");',
-        'process.stdin.on("data", (chunk) => {',
-        '  buffer += chunk;',
-        '  let end;',
-        '  while ((end = buffer.indexOf("\\n")) >= 0) {',
-        '    const request = JSON.parse(buffer.slice(0, end));',
-        '    buffer = buffer.slice(end + 1);',
-        '    const delay = request.id <= 1001 ? 400 : 0;',
-        '    setTimeout(() => process.stdout.write(JSON.stringify({ v: 1, id: request.id, ok: true, value: request.id }) + "\\n"), delay);',
-        '  }',
-        '});',
-      ].join("\n"),
-    );
-    const host = await started(options(dir, { hostScript: slow }));
+    const gate = await gatedHost(dir, "slower", 1001);
+    const host = await started(options(dir, { hostScript: gate.script }));
     try {
+      t.mock.timers.enable({ apis: ["setTimeout"] });
       const calls = Array.from({ length: 1001 }, () => host.call("doctor", { workspace: null }, 50));
-      const replies = await Promise.all(calls);
+      await waitForFile(gate.received);
+      t.mock.timers.tick(50);
+      const replies = await within(Promise.all(calls));
       assert.ok(replies.every((reply) => !reply.ok && reply.error.code === "adapter_timeout"), "every call timed out");
-      // Every late answer arrives (the last one 400 ms after its request), then one more call.
-      await new Promise((resolve) => setTimeout(resolve, 900));
+      await fs.writeFile(gate.release, "");
+      await waitForFile(gate.sent);
+      // The same stdout pipe orders this barrier response after all 1001 late responses.
+      assert.deepEqual(await within(host.call("doctor", { workspace: null }, 5_000)), { v: 1, id: 1002, ok: true, value: 1002 });
       assert.equal(host.exited, false, "the late answers did not end the host");
-      assert.deepEqual(await host.call("doctor", { workspace: null }, 5_000), { v: 1, id: 1002, ok: true, value: 1002 });
     } finally {
-      await host.close();
+      t.mock.timers.reset();
+      await within(host.close());
     }
   } finally {
     await cleanup();
   }
 });
 
-test("host process (R-10 L-2): a host whose stdin closes during a slow call ends without waiting for it", async () => {
+test("host process (R-10 L-2): a host whose stdin closes during a slow call ends without waiting for it", async (t) => {
   const { dir, cleanup } = await tempDir();
-  const engine = await fakeEngine(dir, "await new Promise((resolve) => setTimeout(resolve, 6000)); return { ok: true, output: 'slow' };");
-  const host = await started(options(dir, { engineDir: engine, closeTimeoutMs: 15_000 }));
+  const entered = path.join(dir, "entered"), release = path.join(dir, "release"), completed = path.join(dir, "completed");
+  let host: EngineHost | null = null, closing: Promise<void> | undefined, controlled = false;
   try {
-    void host.call("doctor", { workspace: null }, 20_000);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const begin = Date.now();
-    await host.close();
-    const took = Date.now() - begin;
+    const engine = await fakeEngine(dir, `const fs = await import("node:fs"); fs.writeFileSync(${JSON.stringify(entered)}, "");
+await new Promise(resolve => { const gate = setInterval(() => { if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(gate); resolve(); } }, 10); });
+fs.writeFileSync(${JSON.stringify(completed)}, ""); return { ok: true, output: "slow" };`);
+    host = await started(options(dir, { engineDir: engine, closeTimeoutMs: 15_000 }));
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    controlled = true;
+    const calling = host.call("doctor", { workspace: null }, 20_000);
+    await waitForFile(entered);
+    // Keep both the RPC timeout and forced-kill timer frozen. EOF must end the actual host while
+    // the entered doctor remains blocked at a gate that the parent has not released.
+    closing = host.close();
+    await within(closing);
     assert.equal(host.exited, true);
-    assert.ok(took < 3_000, `the host ended ${took} ms after its stdin closed, not after the 6 s call`);
+    assert.equal(existsSync(completed), false, "the slow call did not complete before the host exited");
+    const response = await within(calling);
+    assert.equal(!response.ok && response.error.code, "adapter_host_exited");
   } finally {
-    await cleanup();
+    try {
+      if (host !== null) {
+        try { await fs.writeFile(release, ""); }
+        finally {
+          // Keep the pending close and its kill timer alive until cleanup has consumed it.
+          closing ??= host.close();
+          if (controlled) t.mock.timers.tick(15_000);
+          await within(closing);
+        }
+      }
+    } finally {
+      if (controlled) t.mock.timers.reset();
+      await cleanup();
+    }
   }
 });
 

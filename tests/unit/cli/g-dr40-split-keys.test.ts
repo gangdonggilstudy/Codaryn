@@ -19,7 +19,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import type { TestContext } from "node:test";
-import { ANTHROPIC_API_KEY_ENV, CODARYN_API_BASE_URL_ENV, CODARYN_OPENAI_API_BASE_URL_ENV, OPENAI_API_KEY_ENV } from "../../../src/contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, CODARYN_API_BASE_URL_ENV, CODARYN_OPENAI_API_BASE_URL_ENV, OPENAI_API_KEY_ENV } from "../../../src/contracts/index.js";
+import { rawTextHoldsKey } from "../../../src/cli/security/index.js";
 import { cliEnv, startCli } from "../../support/cli.js";
 import { replyText, startFakeAnthropic } from "../../support/fake-anthropic.js";
 import { replyFinal, startFakeOpenAI } from "../../support/fake-openai.js";
@@ -52,7 +53,7 @@ interface Run {
   readonly code: string | null;
   readonly message: string;
   readonly guard: string;
-  readonly durationMs: number;
+  readonly timedOut: boolean;
 }
 
 async function base(): Promise<{ dir: string; ws: string; guard: string }> {
@@ -77,7 +78,7 @@ async function cli(dir: string, guard: string, args: readonly string[], env: Rec
     message = run.stdout + run.stderr;
   }
   const logged = await readFile(guard, "utf8").catch(() => "");
-  return { code, message, guard: logged, durationMs: run.durationMs };
+  return { code, message, guard: logged, timedOut: run.timedOut };
 }
 
 /** An anthropic quick-form setup whose requests go to a fake server on 127.0.0.1. */
@@ -156,6 +157,41 @@ describe("DR-40 (a): a split key is refused like the whole key (R-25 M-1)", () =
 });
 
 describe("DR-40 (b), (c): task and config file size (R-25 L-2)", () => {
+  test("R-25 L-2: the refusal scan has bounded regex work and rejects the old quadratic path", (t) => {
+    const prefix = `${["sk", "ant"].join("-")}-`;
+    for (const bytes of [16 * 1024, 64 * 1024, 256 * 1024]) {
+      const input = prefix.repeat(Math.floor(bytes / prefix.length));
+      const observe = (scan: () => boolean) => {
+        const exec = RegExp.prototype.exec;
+        let calls = 0, scanned = 0;
+        const watcher = t.mock.method(RegExp.prototype, "exec", function (this: RegExp, value: string) {
+          // The contract keeps this source as a shape definition, explicitly not as a matcher:
+          // its look-ahead rescans a long run at every prefix. Reject before running it.
+          if (value.length >= input.length && this.source.includes(ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE)) {
+            throw new Error("quadratic refusal regex used on a large input");
+          }
+          const start = this.global || this.sticky ? this.lastIndex : 0;
+          const match = exec.call(this, value);
+          calls++;
+          // Global matches advance: count the scanned span, not the whole subject on each exec.
+          scanned += Math.max(0, (match === null ? value.length : match.index + match[0].length) - start);
+          return match;
+        });
+        try { return { result: scan(), calls, scanned }; }
+        finally { watcher.mock.restore(); }
+      };
+      assert.throws(() => observe(() => new RegExp(ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE).test(input)), /quadratic refusal regex/);
+      for (const digit of ["", "1"]) {
+        const text = input + digit;
+        const measured = observe(() => rawTextHoldsKey(text, KEY));
+        assert.equal(measured.result, digit.length > 0, "same shape answers, with and without a digit");
+        assert.ok(measured.calls <= 4 * text.length, "regex call count stays linear in input size");
+        assert.ok(measured.scanned <= 32 * text.length, "aggregate scanned spans stay within a linear budget");
+        t.diagnostic(JSON.stringify({ bytes: text.length, digit: digit.length > 0, ...measured }));
+      }
+    }
+  });
+
   test("a task file over the cap is refused with a fixed message, nothing read from it shown", async (t) => {
     const setup = await anthropicSetup(t);
     const filler = `{"schemaVersion":1,"goal":"${"q".repeat(2 * 1024 * 1024)}"}`;
@@ -176,15 +212,18 @@ describe("DR-40 (b), (c): task and config file size (R-25 L-2)", () => {
   });
 
   test(
-    "R-25 L-2: the 256 KiB task file of repeated prefixes ends quickly and is refused, no request",
+    "R-25 L-2: the 256 KiB task file of repeated prefixes is refused within the safety watchdog, no request",
     async (t) => {
       const setup = await anthropicSetup(t);
       const prefix = `${["sk", "ant"].join("-")}-`;
       await writeFile(path.join(setup.dir, "slow.json"), prefix.repeat(Math.floor((256 * 1024) / prefix.length)), "utf8");
       const run = await cli(setup.dir, setup.guard, ["run", "--task", "slow.json", "--config", "config.json", "--quiet"], { ...setup.env, [ANTHROPIC_API_KEY_ENV]: KEY });
       assert.ok(run.code === "key_in_file" || run.code === "invalid_task", run.message);
-      assert.ok(run.durationMs < 3000, `took ${run.durationMs} ms`);
+      // The CLI harness already has a 60 s safety watchdog; cold process startup is not a
+      // throughput measurement. Refusal, no request and no outside attempt are the contract.
+      assert.equal(run.timedOut, false, "the safety watchdog did not end the CLI");
       assert.equal(setup.requests(), 0);
+      assert.equal(run.guard, "", "no request tried to leave the machine");
     },
   );
 });

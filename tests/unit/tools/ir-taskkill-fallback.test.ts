@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import cp from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -13,22 +14,34 @@ import { createCommandRunner } from "../../../src/tools/index.js";
 
 type Mode = "real" | "exit" | "close" | "error" | "throw" | "late-exit" | "late-error" | "success";
 const alive = (child: ChildProcess) => child.exitCode === null && child.signalCode === null;
+const realSetTimeout = setTimeout, realClearTimeout = clearTimeout;
+async function within<T>(pending: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([pending, new Promise<never>((_, reject) => {
+      timer = realSetTimeout(() => reject(new Error("test setup: owned child did not respond")), 15_000);
+    })]);
+  } finally { realClearTimeout(timer); }
+}
 
 async function exercise(t: TestContext, mode: Mode, cancel: boolean) {
   const base = await fs.realpath(tmpdir()), root = await fs.realpath(await fs.mkdtemp(path.join(base, "codaryn-taskkill-")));
   const inside = path.relative(base, root); assert.ok(inside && !inside.startsWith("..") && !path.isAbsolute(inside));
   const work = path.join(root, "work"); await fs.mkdir(work);
   const script = path.join(root, "child.cjs");
-  // Every child has its own bounded lifetime as well as handle-based test cleanup. No arbitrary PID is used.
-  await fs.writeFile(script, `process.stdout.write("ready");setInterval(()=>{},1000);setTimeout(()=>process.exit(0),${mode.startsWith("late") ? 800 : 20000});\n`);
+  const exitSignal = path.join(root, "exit-now");
+  // Normal exit is gated by the observed taskkill call, not an 800/400 ms race. Every child also
+  // has a 20 s safety lifetime and handle-based cleanup; no arbitrary PID is signalled.
+  await fs.writeFile(script, `const fs=require("node:fs");process.stdout.write("ready");setInterval(()=>{if(fs.existsSync(${JSON.stringify(exitSignal)}))process.exit(0);},10);setTimeout(()=>process.exit(0),20000);\n`);
   const spawn = cp.spawn; let child: ChildProcess | undefined, killCalls = 0, killerCode: number | null | undefined;
   let ended: Promise<void> | undefined, directKill: ChildProcess["kill"] | undefined;
   const taskkillDone = Promise.withResolvers<void>(); let stderr = Buffer.alloc(0);
   const ready = Promise.withResolvers<void>();
   t.after(async () => {
+    t.mock.timers.reset();
     t.mock.restoreAll(); syncBuiltinESMExports();
     if (child && alive(child)) directKill?.();
-    await ended;
+    if (ended) await within(ended);
     assert.equal(await fs.realpath(root), root); assert.equal(path.relative(base, root), inside);
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -42,6 +55,7 @@ async function exercise(t: TestContext, mode: Mode, cancel: boolean) {
       return owned;
     }
     assert.ok(child?.pid); assert.deepEqual(args[1], ["/PID", String(child.pid), "/T", "/F"]);
+    assert.ok(alive(child), "taskkill is requested before the owned child exits");
     if (mode === "real") {
       const killer = spawn(args[0], args[1] as string[], { ...args[2], stdio: ["ignore", "pipe", "pipe"] });
       killer.stderr?.on("data", (b: Buffer) => { stderr = Buffer.concat([stderr, b]); });
@@ -56,16 +70,21 @@ async function exercise(t: TestContext, mode: Mode, cancel: boolean) {
       killerCode = mode === "success" ? 0 : 1;
       killer.emit("close", killerCode); taskkillDone.resolve();
     };
-    if (mode.startsWith("late")) child.once("exit", emit);
-    else setImmediate(() => { if (mode === "success" && child && alive(child)) directKill!(); emit(); });
+    if (mode.startsWith("late") || mode === "success") {
+      child.once("exit", emit);
+      writeFileSync(exitSignal, "");
+    } else setImmediate(emit);
     return killer as ChildProcess;
   }) as typeof cp.spawn);
   syncBuiltinESMExports();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const controller = new AbortController();
   const runner = createCommandRunner({ platform: "win32", parentEnv: { SystemRoot: "C:/Windows", PATH: path.dirname(process.execPath) } });
   const pending = runner.run({ executable: process.execPath, args: [script], cwdAbsolute: work, timeoutMs: cancel ? 10000 : 400 }, controller.signal);
-  if (cancel) { await ready.promise; controller.abort(); }
-  const result = await pending; await taskkillDone.promise;
+  await within(ready.promise);
+  if (cancel) controller.abort();
+  else t.mock.timers.tick(400);
+  const result = await within(pending); await within(taskkillDone.promise);
   assert.ok(child); const childEnded = !alive(child);
   const removable = await fs.rmdir(work).then(() => true, () => false);
   t.diagnostic(JSON.stringify({ mode, cancel, killerCode, taskkillError: new TextDecoder("euc-kr").decode(stderr), childEnded, removable, killCalls, result }));

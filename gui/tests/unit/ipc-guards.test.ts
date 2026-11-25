@@ -128,9 +128,77 @@ export function assertIpcBoundaries(root: string, sources?: readonly SourceFile[
   assert.deepEqual(ipcBoundaryViolations(root, sources), [], "IPC imports must preserve facade and dependency directions");
 }
 
+type LoaderKind = "import" | "require" | "createRequire";
+export interface CalculatedLoad { readonly kind: LoaderKind; readonly at: number }
+
+/** Nonliteral calls and loader factory references need review, even without module string fragments. */
+export function calculatedLoads(source: string): CalculatedLoad[] {
+  const ts = tokens(source), loads: CalculatedLoad[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const t = ts[i]!;
+    const member = ts[i - 1]?.value === "[" && ts[i + 1]?.value === "]" && (ts[i - 2]?.kind === "word" || [")", "]"].includes(ts[i - 2]?.value ?? ""));
+    // Factory imports (including aliases), property access and calls are reviewed as a whole.
+    if (t.value === "createRequire" && (t.kind === "word" || t.kind === "string" && member)) { loads.push({ kind: "createRequire", at: t.at }); continue; }
+    if (t.kind !== "word" || (t.value !== "import" && t.value !== "require")) continue;
+    if (ts[i + 1]?.value !== "(") {
+      // Taking a require alias or an optional reference must not hide a later computed call.
+      if (t.value === "require") loads.push({ kind: "require", at: t.at });
+      continue;
+    }
+    let depth = 0, end = i + 2;
+    for (; end < ts.length; end++) {
+      const next = ts[end]!;
+      if (next.kind !== "punct") continue;
+      if ((next.value === ")" || next.value === ",") && depth === 0) break;
+      if (["(", "[", "{"].includes(next.value)) depth++;
+      if ([")", "]", "}"].includes(next.value)) depth--;
+    }
+    const argument = ts.slice(i + 2, end);
+    if (argument.length !== 1 || argument[0]!.kind !== "string") loads.push({ kind: t.value, at: t.at });
+  }
+  return loads;
+}
+
+/** The two engine dist loaders in main.ts are the only reviewed computed addresses. */
+const CALCULATED_LOAD_ALLOWLIST = { "engine-host/main.ts": { import: 2, require: 0, createRequire: 0 } };
+export function assertCalculatedLoadAllowlist(root: string, sources: readonly SourceFile[] = readSources(root)): void {
+  const actual: Record<string, Record<LoaderKind, number>> = {};
+  for (const source of sources) {
+    const loads = calculatedLoads(source.text);
+    if (loads.length === 0) continue;
+    const counts = { import: 0, require: 0, createRequire: 0 };
+    for (const load of loads) counts[load.kind]++;
+    actual[path.relative(root, source.file).replace(/\\/g, "/")] = counts;
+  }
+  assert.deepEqual(actual, CALCULATED_LOAD_ALLOWLIST, "calculated module loaders require review of the file and counts");
+}
+
+const REJECTED_CHARACTER_RANGES = [[0, 8], [0xb, 0x1f], [0x7f, 0x9f], [0x61c, 0x61c], [0x200e, 0x200f], [0x2028, 0x202e], [0x2066, 0x2069]] as const;
+type CharacterCheck = (value: unknown) => { readonly ok: boolean };
+
+/** Every allowed BMP unit goes through both public paths in bounded batches; rejects go individually. */
+export function assertBmpCharacterPolicy(textReply: CharacterCheck, runResult: CharacterCheck, maxBatchUnits: number) {
+  assert.ok(Number.isSafeInteger(maxBatchUnits) && maxBatchUnits > 0);
+  const allowed: number[] = [], rejected: number[] = [];
+  for (let cp = 0; cp <= 0xffff; cp++) (REJECTED_CHARACTER_RANGES.some(([first, last]) => cp >= first && cp <= last) ? rejected : allowed).push(cp);
+  const check = (text: string, expected: boolean, label: string): void => {
+    const opened = textReply({ ok: true, status: "opened", text, masked: false, protected: false, editable: true, readOnlyReasons: [], digest: "a".repeat(64), lineEnding: text.includes("\n") ? "lf" : "none", bom: false, bytes: Buffer.byteLength(text) });
+    const result = runResult({ ok: true, result: { runId: "20261112T010203Z-0000abcd", status: "done", reason: "verified", exitCode: 0, changes: [], verifiers: [], usage: { turns: 0, tools: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 }, notices: [], plan: null, review: null, protectedChanged: null, finalMessage: { text, truncated: false } } });
+    assert.deepEqual({ text: opened.ok, message: result.ok }, { text: expected, message: expected }, label);
+  };
+  for (const cp of rejected) check(String.fromCharCode(cp), false, `rejected BMP U+${cp.toString(16)}`);
+  let batches = 0;
+  for (let offset = 0; offset < allowed.length; offset += maxBatchUnits) {
+    const batch = allowed.slice(offset, offset + maxBatchUnits);
+    check(batch.map(cp => String.fromCharCode(cp)).join(""), true, `allowed BMP batch U+${batch[0]!.toString(16)}..U+${batch.at(-1)!.toString(16)}`);
+    batches++;
+  }
+  return { codePoints: allowed.length + rejected.length, surrogateCodePoints: 0x800, allowed: allowed.length, rejected: rejected.length, batches, predicateCalls: (rejected.length + batches) * 2 };
+}
+
 // Registered tests below; the offline mutation probe copies the exact compiled functions above.
 import { test } from "node:test";
-import { toTextReply, toRunResultView } from "../../src/shared/ipc.js";
+import { MAX_FINAL_MESSAGE_CHARS, MAX_TEXT_CHARS, toTextReply, toRunResultView } from "../../src/shared/ipc.js";
 const GUI = fileURLToPath(new URL("../../../", import.meta.url)), SRC = path.join(GUI, "src");
 
 test("IPC guards: all GUI source consumers use the facade, with no domain-to-domain imports", () => {
@@ -175,8 +243,38 @@ test("IPC guards: comments, ordinary strings and regex text do not become import
   assertIpcBoundaries(SRC, [{ file: path.join(SRC, "main", "example.ts"), text }]);
 });
 
+test("IPC guards: calculated loaders are confined to the reviewed file and counts", () => {
+  assertCalculatedLoadAllowlist(SRC);
+});
+
+test("IPC guards: nonliteral imports, require aliases and loader factories cannot silently widen the allowlist", () => {
+  const file = path.join(SRC, "engine-host", "main.ts"), known = { file, text: readFileSync(file, "utf8") };
+  const examples = [
+    'await import(join(dir, "ipc", "core.js"));', 'await import(target);', 'await import(`${dir}/core.js`);',
+    'require(join(dir, name));', 'module.require(target);', 'const load = require; load(target);',
+    'createRequire(import.meta.url)(target);', 'import { createRequire as load } from "node:module"; load(import.meta.url)(target);',
+    'module["createRequire"](import.meta.url)(target);',
+  ];
+  for (const text of examples) {
+    assert.ok(calculatedLoads(text).length > 0, text);
+    assert.throws(() => assertCalculatedLoadAllowlist(SRC, [known, { file: path.join(SRC, "main", "example.ts"), text }]), /calculated module loaders/);
+  }
+  assert.throws(() => assertCalculatedLoadAllowlist(SRC, [{ file, text: known.text + "\nimport(target);" }]), /calculated module loaders/, "the allowed file cannot add a third site");
+  assert.throws(() => assertCalculatedLoadAllowlist(SRC, []), /calculated module loaders/, "removing a known loader also requires review");
+  assert.deepEqual(calculatedLoads('import("./ipc.js"); import(`./ipc.js`); require("electron"); // import(target)\nconst label = "createRequire(target)";'), []);
+});
+
+test("IPC characters: both public paths accept exactly the BMP character set", t => {
+  const started = performance.now();
+  const stats = assertBmpCharacterPolicy(toTextReply, toRunResultView, Math.min(4096, MAX_FINAL_MESSAGE_CHARS, MAX_TEXT_CHARS));
+  assert.equal(stats.codePoints, 65_536);
+  assert.equal(stats.rejected, 77);
+  assert.equal(stats.allowed, 65_459);
+  t.diagnostic(JSON.stringify({ check: "IG-2 BMP", ...stats, elapsedMs: performance.now() - started }));
+});
+
 test("IPC characters: text view and final messages share the control/direction policy at boundaries", () => {
-  const ranges = [[0, 8], [0xb, 0x1f], [0x7f, 0x9f], [0x61c, 0x61c], [0x200e, 0x200f], [0x2028, 0x202e], [0x2066, 0x2069]] as const;
+  const ranges = REJECTED_CHARACTER_RANGES;
   const points = new Set([9, 10, 0x20, 0x61b, 0x61d, 0x200d, 0x2010, 0x2027, 0x202f, 0x2065, 0x206a, 0xd7ff, 0xd800, 0xdbff, 0xdc00, 0xdfff, 0xe000, 0xffff, 0x10000, 0x10ffff]);
   for (const [first, last] of ranges) for (let cp = Math.max(0, first - 1); cp <= last + 1; cp++) points.add(cp);
   for (const cp of points) {

@@ -138,13 +138,13 @@ async function busyOn(run: { base: string; workspace: string; app: CodarynApp })
   await writeFile(busyTask, JSON.stringify({ ...text, workspaceRoot: run.workspace }), "utf8");
   const running = await run.app.startRun(taskRequest(busy));
   assert.ok(running.ok, JSON.stringify(running));
-  // The waiting run holds the lock, and then its records appear in the run list (the lock comes
-  // first, so wait for both).
+  // The lock can precede the complete first journal record; damaged entries are listed too.
+  // Wait for checked/running: ready records and a matching lock with a live holder.
   const runId = running.handle.runId;
   for (let i = 0; i < 250; i += 1) {
     const listed = await run.app.listRuns({ workspace: run.workspace });
     const held = await exists(path.join(run.workspace, STATE_DIR_NAME, LOCK_FILE_NAME));
-    if (held && listed.ok && listed.output.runs.some((entry) => entry.runId === runId)) return running.handle;
+    if (held && listed.ok && listed.output.runs.some((entry) => entry.runId === runId && entry.state === "checked" && entry.phase === "running")) return running.handle;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   assert.fail("the waiting run did not show in the run list");

@@ -24,11 +24,25 @@ const git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 6
 const problems = [];
 
 // Every commit of the branch, merge commits included (IR-B6): a merge the candidate made carries an
-// author, a committer and a message like any other commit. Fields: hash, author, committer, parents,
-// the message's trailers as Git parses them, the message.
-const log = git(["log", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%P%x1f%(trailers:only,unfold)%x1f%B%x1e", `${BASE}..${branch}`]);
-const commits = log.split("\x1e").map((s) => s.trim()).filter(Boolean).map((s) => s.split("\x1f"));
-if (commits.length === 0) problems.push("no commits ahead of main");
+// author, a committer and a message like any other commit. Read each validated hash separately:
+// body field/record separators cannot invent or truncate another commit. Git commit messages have
+// no NUL; validate the six NUL-delimited fields before using the complete body.
+const commitId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const hashes = git(["rev-list", `${BASE}..${branch}`]).trim().split("\n").filter(Boolean);
+const commits = [];
+if (hashes.length === 0) problems.push("no commits ahead of main");
+for (const hash of hashes) {
+  if (!commitId.test(hash)) {
+    problems.push("invalid commit id");
+    continue;
+  }
+  const fields = git(["show", "-s", "--format=%H%x00%an <%ae>%x00%cn <%ce>%x00%P%x00%(trailers:only,unfold)%x00%B", hash]).split("\0");
+  if (fields.length !== 6 || fields[0] !== hash || (fields[3] !== "" && !fields[3].split(" ").every((parent) => commitId.test(parent)))) {
+    problems.push(`${hash.slice(0, 7)}: invalid commit fields`);
+    continue;
+  }
+  commits.push(fields);
+}
 for (const [hash, author, committer, parents, trailers, body] of commits) {
   const short = `${hash.slice(0, 7)}${parents.trim().split(/\s+/).length > 1 ? " (merge)" : ""}`;
   if (author !== AUTHOR) problems.push(`${short}: author is ${author}`);
@@ -67,7 +81,7 @@ const scanner = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-s
 const scan = spawnSync(process.execPath, [scanner, "--range", `${BASE}...${branch}`], { encoding: "utf8" });
 if (scan.status !== 0) problems.push(`secret scan failed:\n${(scan.stderr || scan.stdout).trim()}`);
 
-console.log(`branch ${branch}: ${commits.length} commit(s), ${files.length} file(s) changed`);
+console.log(`branch ${branch}: ${hashes.length} commit(s), ${files.length} file(s) changed`);
 for (const [hash, , , , , body] of commits) console.log(`  ${hash.slice(0, 7)} ${body.split("\n")[0]}`);
 if (problems.length === 0) {
   console.log("review-branch: PASS (author, trailers, ownership, whitespace, secrets)");

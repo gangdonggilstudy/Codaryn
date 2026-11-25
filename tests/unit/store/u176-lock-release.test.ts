@@ -18,6 +18,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
+import type { TestContext } from "node:test";
 
 import { acquireLock, inspectLock, processStartTime, releaseLock } from "../../../src/store/index.js";
 
@@ -34,29 +35,47 @@ const clock = { now: () => Date.now() };
 const lockFile = (root: string): string => join(root, ".codaryn", "lock.json");
 const OWN_START = new Date(performance.timeOrigin).toISOString();
 const windowsOnly = process.platform === "win32" ? false : "a handle that does not share deletion is made with PowerShell on Windows";
-/**
- * Another process opens `file` for `ms` milliseconds, sharing reading only ("Read": no deletion) or
- * nothing ("None": no reading either). Resolves once it holds the file; `closed` resolves when it has let go.
- */
-async function holdOpen(file: string, ms: number, share: "Read" | "None" = "Read"): Promise<{ readonly closed: Promise<void> }> {
-  const script = `$h = [System.IO.File]::Open($env:U176_FILE, "Open", "Read", "${share}"); [Console]::Out.WriteLine("held"); Start-Sleep -Milliseconds ${ms}; $h.Close()`;
-  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, U176_FILE: file }, stdio: ["ignore", "pipe", "ignore"] });
-  const closed = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  await new Promise<void>((resolve, reject) => {
-    child.stdout?.on("data", (chunk: Buffer) => { if (chunk.toString().includes("held")) resolve(); });
-    child.once("exit", () => reject(new Error("the holder ended before it held the file")));
+/** A real owned handle; null means the parent explicitly releases it. */
+interface HeldFile { readonly closed: Promise<void>; release(): Promise<void> }
+async function holdOpen(t: TestContext, file: string, autoCloseMs: number | null = null, share: "Read" | "None" = "Read"): Promise<HeldFile> {
+  const wait = autoCloseMs === null ? 'if ([Console]::In.ReadLine() -ne "release") { exit 2 }' : 'Start-Sleep -Milliseconds ' + autoCloseMs;
+  const script = '$h = [System.IO.File]::Open($env:U176_FILE, "Open", "Read", "' + share + '"); try { [Console]::Out.WriteLine("held"); ' + wait + ' } finally { $h.Dispose() }';
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, U176_FILE: file }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  let ended = false, released = false, expired = false, output = "", errors = "";
+  child.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-2048); });
+  child.stdin.on("error", () => undefined);
+  // A safety bound, independent of the release/retry timing the case verifies.
+  const watchdog = setTimeout(() => { expired = true; if (child.exitCode === null && child.signalCode === null) child.kill(); }, 60_000);
+  watchdog.unref();
+  const closed = new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => {
+      ended = true; clearTimeout(watchdog);
+      if (code === 0 && !expired) resolve(); else reject(new Error('holder failed (watchdog=' + expired + ', code=' + code + '): ' + errors));
+    });
   });
-  return { closed };
+  void closed.catch(() => undefined);
+  const release = async (): Promise<void> => {
+    if (!ended && !released) { released = true; child.stdin.end("release\n"); }
+    await closed;
+  };
+  t.after(release);
+  await new Promise<void>((resolve, reject) => {
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); if (output.includes("held")) resolve(); });
+    child.once("error", reject);
+    child.once("close", () => reject(new Error('holder ended before readiness: ' + errors)));
+  });
+  return { closed, release };
 }
 const transient = (error: unknown): boolean => ["EBUSY", "EPERM"].includes(String((error as { code?: unknown }).code));
 
 describe("U-176 (1): releaseLock tries again when the lock file is held open", () => {
   for (const share of ["Read", "None"] as const) {
     const what = share === "Read" ? "removing" : "reading";
-    test(`a handle that stops ${what} closes after a short while: the release succeeds and the lock is gone`, { skip: windowsOnly }, async () => {
+    test(`a handle that stops ${what} closes after a short while: the release succeeds and the lock is gone`, { skip: windowsOnly }, async (t) => {
       const root = await workspace();
       assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
-      const holder = await holdOpen(lockFile(root), 300, share);
+      const holder = await holdOpen(t, lockFile(root), 300, share);
       assert.equal(await releaseLock({ workspaceRoot: root, runId: "run-a" }), true);
       await holder.closed;
       assert.equal(existsSync(lockFile(root)), false);
@@ -64,28 +83,28 @@ describe("U-176 (1): releaseLock tries again when the lock file is held open", (
       assert.equal(await releaseLock({ workspaceRoot: root, runId: "run-b" }), true);
     });
 
-    test(`a handle that stops ${what} past the retries: the release throws, the lock stays`, { skip: windowsOnly }, async () => {
+    test(`a handle that stops ${what} past the retries: the release throws, the lock stays`, { skip: windowsOnly }, async (t) => {
       const root = await workspace();
       assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
-      const holder = await holdOpen(lockFile(root), 3000, share);
+      const holder = await holdOpen(t, lockFile(root), null, share);
       try {
         if (share === "Read") await assert.rejects(releaseLock({ workspaceRoot: root, runId: "run-a" }), transient);
         else await assert.rejects(releaseLock({ workspaceRoot: root, runId: "run-a" }));
         assert.equal(existsSync(lockFile(root)), true);
       } finally {
-        await holder.closed;
+        await holder.release();
       }
     });
   }
 });
 
 describe("U-176 (2): a lock left by a failed release is judged as before; this process never takes it back", () => {
-  test("after the handle closed: held, the next acquire here is refused and moves nothing; releasing the run again removes it", { skip: windowsOnly }, async () => {
+  test("after the handle closed: held, the next acquire here is refused and moves nothing; releasing the run again removes it", { skip: windowsOnly }, async (t) => {
     const root = await workspace();
     assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
-    const holder = await holdOpen(lockFile(root), 3000);
+    const holder = await holdOpen(t, lockFile(root));
     await assert.rejects(releaseLock({ workspaceRoot: root, runId: "run-a" }), transient);
-    await holder.closed;
+    await holder.release();
     const text = readFileSync(lockFile(root), "utf8");
     assert.equal((await inspectLock(root)).state, "held");
     const next = await acquireLock({ workspaceRoot: root, runId: "run-b", clock, retryForMs: 200 });

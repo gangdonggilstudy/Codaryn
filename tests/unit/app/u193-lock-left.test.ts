@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
+import type { TestContext } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CleanupApplied, CleanupPreview, PlanCheck, RunOutcome } from "../../../src/app/index.js";
 import { runTask as engineRunTask } from "../../../src/engine/index.js";
@@ -25,18 +26,37 @@ import { WRITE_NOTES, appEnvironment, exists, plannedRun, setupRun, taskForm, ta
 
 const windowsOnly = process.platform === "win32" ? false : "a handle that does not share deletion is made with PowerShell on Windows";
 
-/** Another process opens `file` for `ms` milliseconds sharing reading only (no deletion); resolves once it holds it. */
-async function holdOpen(file: string, ms: number): Promise<{ readonly closed: Promise<void> }> {
-  const script = `$h = [System.IO.File]::Open($env:U193_FILE, "Open", "Read", "Read"); [Console]::Out.WriteLine("held"); Start-Sleep -Milliseconds ${ms}; $h.Close()`;
-  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, U193_FILE: file }, stdio: ["ignore", "pipe", "ignore"] });
-  const closed = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  await new Promise<void>((resolve, reject) => {
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes("held")) resolve();
+/** A real owned handle; null means the parent explicitly releases it. */
+interface HeldFile { readonly closed: Promise<void>; release(): Promise<void> }
+async function holdOpen(t: TestContext, file: string, autoCloseMs: number | null = null, share: "Read" | "None" = "Read"): Promise<HeldFile> {
+  const wait = autoCloseMs === null ? 'if ([Console]::In.ReadLine() -ne "release") { exit 2 }' : 'Start-Sleep -Milliseconds ' + autoCloseMs;
+  const script = '$h = [System.IO.File]::Open($env:U193_FILE, "Open", "Read", "' + share + '"); try { [Console]::Out.WriteLine("held"); ' + wait + ' } finally { $h.Dispose() }';
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, U193_FILE: file }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  let ended = false, released = false, expired = false, output = "", errors = "";
+  child.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-2048); });
+  child.stdin.on("error", () => undefined);
+  // A safety bound, independent of the release/retry timing the case verifies.
+  const watchdog = setTimeout(() => { expired = true; if (child.exitCode === null && child.signalCode === null) child.kill(); }, 60_000);
+  watchdog.unref();
+  const closed = new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => {
+      ended = true; clearTimeout(watchdog);
+      if (code === 0 && !expired) resolve(); else reject(new Error('holder failed (watchdog=' + expired + ', code=' + code + '): ' + errors));
     });
-    child.once("exit", () => reject(new Error("the holder ended before it held the file")));
   });
-  return { closed };
+  void closed.catch(() => undefined);
+  const release = async (): Promise<void> => {
+    if (!ended && !released) { released = true; child.stdin.end("release\n"); }
+    await closed;
+  };
+  t.after(release);
+  await new Promise<void>((resolve, reject) => {
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); if (output.includes("held")) resolve(); });
+    child.once("error", reject);
+    child.once("close", () => reject(new Error('holder ended before readiness: ' + errors)));
+  });
+  return { closed, release };
 }
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
@@ -46,15 +66,15 @@ function ok<T>(outcome: AppCallOutcome<T>): T {
 const lockFile = (work: string): string => path.join(work, ".codaryn", "lock.json");
 
 describe("U-193: a run through the app whose lock cannot be released", () => {
-  test("the run's result stays and lockLeft is told; result.json is the result", { skip: windowsOnly }, async () => {
+  test("the run's result stays and lockLeft is told; result.json is the result", { skip: windowsOnly }, async (t) => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const work = path.join(base, "work");
-    let holder: { readonly closed: Promise<void> } | null = null;
+    let holder: HeldFile | null = null;
     // After the engine's run, before the CLI's finish releases the lock: hold the lock file past the retries.
     const app = createCodarynApp(await appEnvironment(base), {
       runTask: async (deps) => {
         const ended = await engineRunTask(deps);
-        holder = await holdOpen(lockFile(work), 2500);
+        holder = await holdOpen(t, lockFile(work));
         return ended;
       },
     });
@@ -69,7 +89,7 @@ describe("U-193: a run through the app whose lock cannot be released", () => {
       assert.deepEqual([stored.runId, stored.status], [done.result.runId, "done"]);
       assert.equal(Object.hasOwn(done.result, "lockLeft"), false, "the result itself is as before");
     } finally {
-      await (holder as { closed: Promise<void> } | null)?.closed;
+      await (holder as HeldFile | null)?.release();
       // U-176: the same run's later release still removes it.
       if (await exists(lockFile(work))) await releaseLock({ workspaceRoot: work, runId: started.handle.runId });
     }
@@ -121,19 +141,19 @@ describe("U-193: checkApply's release", () => {
 });
 
 describe("U-193: applyCleanup passes the store's lockLeft", () => {
-  test("the lock held open at the cleanup's release: lockLeft in the outcome", { skip: windowsOnly }, async () => {
+  test("the lock held open at the cleanup's release: lockLeft in the outcome", { skip: windowsOnly }, async (t) => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const work = path.join(base, "work");
     const first = createCodarynApp(await appEnvironment(base));
     const started = await first.startRun(taskRequest(base));
     assert.ok(started.ok);
     await started.handle.done;
-    let holder: { readonly closed: Promise<void> } | null = null;
+    let holder: HeldFile | null = null;
     const app = createCodarynApp(await appEnvironment(base), {
       cleanupOperations: {
         remove: async (dir) => {
           await rm(dir, { recursive: true, force: true });
-          if (holder === null) holder = await holdOpen(lockFile(work), 2500);
+          if (holder === null) holder = await holdOpen(t, lockFile(work));
         },
       },
     });
@@ -144,7 +164,7 @@ describe("U-193: applyCleanup passes the store's lockLeft", () => {
       assert.equal(applied.status, "removed", JSON.stringify(applied));
       assert.equal((applied.outcome as { lockLeft?: boolean }).lockLeft, true);
     } finally {
-      await (holder as { closed: Promise<void> } | null)?.closed;
+      await (holder as HeldFile | null)?.release();
       if (await exists(lockFile(work))) {
         const runId = (JSON.parse(await readFile(lockFile(work), "utf8")) as { runId: string }).runId;
         await releaseLock({ workspaceRoot: work, runId });

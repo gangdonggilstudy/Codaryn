@@ -113,7 +113,7 @@ test("U330 failed temporary creation propagates its error without entering clean
   const { root, file } = await fixture(t);
   await fs.writeFile(file, "before");
   const fault = Object.assign(new Error("synthetic temporary write failure"), { code: "ENOSPC" });
-  const write = t.mock.method(fs, "writeFile", async () => { throw fault; });
+  const write = t.mock.method(fs, "open", async () => { throw fault; });
   const remove = t.mock.method(fs, "rm", async () => { throw new Error("cleanup must not run"); });
   try {
     await assert.rejects(legacy.writeConfigAtomic(file, "after", { exclusive: false, expected: "before" }), (error: unknown) => error === fault);

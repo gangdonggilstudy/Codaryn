@@ -354,12 +354,14 @@ export async function applyLife(io: ApplyLifeEnvironment, args: ApplyLifeArgs, v
     const lock = await acquireLock({ workspaceRoot, runId, clock: io.clock });
     if (!lock.ok && lock.code === "state_dir_not_plain") return { ok: false, outcome: cliError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE) };
     if (!lock.ok) return { ok: false, outcome: cliError("workspace_locked", "another run or revert holds the workspace; nothing was moved") };
-    const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
+    let cancel: { signal: AbortSignal; dispose(): void } | undefined;
     let result: ApplyResult;
     let unsafeMoves = 0;
     /** U-220: the apply's lock could not be released at its end (told in its summary). */
     let lockLeft = false;
     try {
+      // IR-F4: made under the finally that releases the lock, so a signal registration that throws leaves no lock.
+      cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
       const workspace = await createWorkspace({ root: workspaceRoot });
       // T-1 as in a run; DR-4: the commands' parent environment is the apply's copy, never process.env
       // behind the caller's back.
@@ -421,7 +423,9 @@ export async function applyLife(io: ApplyLifeEnvironment, args: ApplyLifeArgs, v
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
       result = withoutEmptyStateChanged(result);
       await writeResult(workspaceRoot, result as unknown as EngineResult);
-    } catch {
+    } catch (error) {
+      // IR-F4: a cancel source that could not be made is thrown on, as before (nothing ran).
+      if (cancel === undefined) throw error;
       return {
         ok: false,
         outcome: cliError("internal_error", "the apply stopped because of an internal error; `codaryn report` and `codaryn revert` work on what was done"),
@@ -430,7 +434,7 @@ export async function applyLife(io: ApplyLifeEnvironment, args: ApplyLifeArgs, v
       // U-220 (U-176, U-201): a release that throws after its retries, or answers false, leaves the
       // lock; the apply's result and exit code stay and its summary says so, never internal_error.
       lockLeft = !(await releaseLock({ workspaceRoot, runId }).then((released) => released === true, () => false));
-      cancel.dispose();
+      cancel?.dispose();
     }
     // The CLI writes this apply's end summary here, so DR-21's question comes after it (ApplyRunEnd).
     const ended = { result, lockLeft };

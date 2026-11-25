@@ -75,8 +75,14 @@ export async function writeConfigAtomic(file: string, text: string, options: Con
   }
   const target = await fs.realpath(file);
   const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomBytes(6).toString("hex")}.tmp`);
-  await fs.writeFile(temporary, text, { encoding: "utf8", flag: "wx" });
+  // IR-F2: made here (wx), so it is ours from this handle on; one that exists already (EEXIST) is not removed.
+  const handle = await fs.open(temporary, "wx");
   try {
+    try {
+      await handle.writeFile(text, { encoding: "utf8" });
+    } finally {
+      await handle.close();
+    }
     const { mode } = await fs.stat(target);
     await fs.chmod(temporary, mode & 0o777);
     const current = await fs.readFile(target, "utf8");

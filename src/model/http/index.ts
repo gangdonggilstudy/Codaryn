@@ -378,6 +378,8 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
   let timedOut = false;
   const forward = (): void => controller.abort();
   signal.addEventListener("abort", forward, { once: true });
+  // IR-F1: a listener added to a signal that is already aborted never fires; the request's own signal starts aborted then.
+  if (signal.aborted) controller.abort();
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
@@ -481,6 +483,8 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
 export async function sendWithRetries(transport: Transport, request: HttpRequest, signal: AbortSignal): Promise<Sent> {
   const attempts = transport.maxRetries + 1;
   for (let attempt = 1; ; attempt += 1) {
+    // IR-F1: a cancel that came before this attempt (between a model list's pages, say) sends nothing.
+    if (signal.aborted) return { ok: false, kind: "aborted", message: "cancelled before the request was sent" };
     const result = await attemptOnce(transport, request, signal);
     if (result.type === "aborted") return { ok: false, kind: "aborted", message: "cancelled while the request was in flight" };
     if (result.type === "body") return { ok: true, text: result.text };

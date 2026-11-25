@@ -8,6 +8,7 @@
 - 2026-11-14 사용자 지시로 Claude 임시 PM 위임을 회수했다. 현재 PM·통합자는 codex-review이며, 구현·문서·분석·검증은 기존 Codex 세션에만 배정하고 독립 검토 후 채택한다. Claude 배정 문구와 과거 세션 표는 당시 이력이다.
 - 2026-11-15 최신 사용자 지시로 Claude `w3:pG`에 오케스트레이터를 다시 인계한다. 위 줄의 codex-review PM·Claude 배정 금지는 회수 당시 이력이다. main `docs/pm-control.json`의 `pm-20261115-claude-01`이 active이면 해당 Claude가 유일한 PM·통합·커밋·푸시 담당이며 codex-review는 일반 작업자다. 구현·문서·분석·검증은 기존 Codex 작업자에게 배정한다. 전체 인계와 통신 전환은 `docs/operations/pm-handoff-2026-11-15.md`를 따른다. 사용자 추가 지시대로 어떤 Git trailer도 넣지 않는다.
 - 2026-11-22 사용자 결정으로 새 세션 두 개를 작업자로 쓴다: codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude Code). 둘은 사전 교육을 통과했다. 구현·문서·분석·검증은 이 두 작업자에게 배정하고, 구현자와 검토자는 서로 다른 세션으로 한다. 통합·커밋·푸시는 계속 현재 PM만 한다. 위 줄들의 옛 Codex 세션(codex-review 포함)은 지금 없다.
+- 2026-11-27 사용자 직접 지시로 오케스트레이터를 codex-worker(`w3:pJ`)에게 임시 이관했다. main `docs/pm-control.json`의 `pm-20261127-codex-01`·`active`·`owner_pane=w3:pJ`가 현재 권한 기준이다. 작업자는 Codex인 codex-worker-2(`w3:pK`)만 쓰고 claude-worker(`w3:pH`)에게 새 일을 주지 않는다. 위 Claude 위임과 작업자 표는 당시 이력이며, 현재 인계와 운영은 `docs/operations/pm-handoff-2026-11-27.md`를 따른다. PM 자신의 구현은 다른 세션이 검토한다.
 - 기존 Codex pane에 작업 명령을 전달할 때 사용자에게 재확인하지 않는다. Herdr 사용법과 실제 pane을 확인하고 전달한다. 세션의 사용 한도·크레딧 선택에는 답하지 않는다.
 - 각 작업에는 전문 페르소나, 작업 목적, 소유 파일, 작업 worktree와 브랜치, 완료 기준을 명시한다.
 - 결정적 장애나 범위 변경은 관리자에게 보고한다. 이미 승인된 범위의 일상적인 구현 판단을 사용자에게 반복 확인하지 않는다.

@@ -1,6 +1,6 @@
 # PM 상태
 
-현재 운영자: 2026-11-15 사용자 재위임(CP55)의 Claude w3:pG. canonical main pm-control.json의 pm-20261115-claude-01 active를 기준으로 하며 codex-review는 인계 후 일반 작업자다. 2026-11-22부터 작업자는 codex-worker(w3:pJ)와 claude-worker(w3:pH)이고 옛 Codex 세션은 없다(CP-59). 2026-11-25에 codex-worker-2(w3:pK)가 더해졌고 구현은 Codex 우선이다(CP-66). 아래 이전 위임 표와 CP54까지의 Codex PM 표기는 당시 이력이다.
+현재 운영자: 2026-11-27 사용자 임시 위임(CP-73)의 codex-worker(w3:pJ). canonical main pm-control.json의 pm-20261127-codex-01·active·owner_pane=w3:pJ를 기준으로 한다. 작업자는 Codex인 codex-worker-2(w3:pK)만 쓰며 claude-worker(w3:pH)에게 새 일을 주지 않는다. 아래 Claude 위임과 이전 세션 표는 당시 이력이며, 현재 운영은 [2026-11-27 인계](operations/pm-handoff-2026-11-27.md)를 따른다.
 
 PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로 codex-review(w3:p3)가 PM과 통합을 회수했다. 아래 임시 위임 기록과 active 조건은 Claude 임시 PM에게 적용되며, 회수 후 Codex의 원래 관리 권한을 중단시키지 않는다. 작업별 상세는 [개발 진행 현황](progress.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 둔다.
 
@@ -39,6 +39,17 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
+
+## 진행 요약 (CP-74, 2026-11-27) — Codex PM 인수, latest 재작업 채택
+
+- **PM 인수:** 새 위임 ID·active·w3:pJ 및 main과 origin/main의 동일·clean 상태를 확인했다. 기존 네 작업 공간을 재사용하며 Claude 작업자에게 새 일을 주지 않는다. Herdr의 관리자 서버 접근에는 권한 있는 실행을 사용했고 질문·피드백·사용량 화면에는 응답하지 않았다.
+- **latest 시작 틈 재작업:** codex-worker-2의 LW-1~4 구현과 회귀를 PM이 정적으로 독립 검토했다. resolver가 직접 하는 `inspectLock` 1회만 세고 `listRuns`의 기존 phase 검사는 그대로 둔다. 살아 있는 holder의 목록상 무결과 run이 완료 run보다 먼저 생성됐어도 진행 중으로 처리하며 ID·startedAt 비교는 없다.
+  - 남은 U-22 CLI 시험의 제목·기대 질의 목록 두 줄을 별도 허용했고, 반환 code/runId와 기존 제품 후보 바이트를 유지했다. 관련 40/40·기존 42/42가 통과했다.
+  - 작업 branch `c8a24365`, main 채택 `180a7661`. main과 합친 PM 보드에서 타입 검사 exit 0, unit 4,663건(4,652 통과·10 건너뜀·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), 실패 0. 검증한 트리·패치와 main staged 결과 일치를 확인하고 비밀 검사는 별도 호출로 통과한 뒤 커밋했다. 작성자·커미터는 지정 사용자이며 trailer는 없다.
+- **G5·G6·G9:** PM 자신의 시험 후보를 codex-worker-2에게 독립 검토시켰다. 중간 둘(GGR-1 병적 검사 경로의 회귀 검출, GGR-2 EOF 실패 때 시험 정리)을 받아 채택을 보류했다. PM이 보완했고, 최종 관련 66/66·원 통제 지연 45/45가 통과했다. EOF 전달을 막은 오류 주입 사본에서는 이전 정리가 남긴 폴더가 보완 뒤 제거되고 소유 호스트가 종료됨을 확인했다. 재검토 전이므로 main에는 아직 합치지 않는다.
+- **F1·F2·F4 인수:** 이관 문서와 달리 원 작업자의 완료 보고·READY가 남아 있어 원문과 해시를 확인했다. 미커밋 7파일·빈 인덱스를 보존했고 Codex 작업자에게 인수·검증 보고를 배정했다. 새 PM이 같은 7파일 raw 해시로 build·새 회귀 9/9·unit 4,595건(4,584 통과·10 건너뜀·1 TODO)·integration 686건(684·1·1)을 재검증했으며 실패 0이다. 아직 채택 전이다.
+- **검증 환경 기록:** taskkill 대비책 이전 F 기준판의 sandbox 전체 실행은 종료 제한으로 중단했다. 별도 합성 PATH에 PowerShell 경로가 없던 실행의 실패도 정상 성공으로 덮지 않았다. 고정 PowerShell 경로를 포함한 정상 환경의 최종 결과를 위 수치로 사용한다. 작업자 latest 전체 실행도 같은 PATH 누락 8건과 알려진 손자 종료 2건을 기록했고, 누락을 고친 해당 3파일 25/25와 최종 PM 병합 보드 전체 성공으로 구분했다.
+- **다음:** F 인수 보고와 독립 검토·main 보드, GGR 두 보완의 독립 재검토, 개선 검토 G의 G7·G8·G10~G13. 사용자의 꾸러미 화면·실제 API·키 없는 수동 항목·GUI-D9 미승인 범위는 그대로다.
 
 ## 진행 요약 (CP-73, 2026-11-27) — 오케스트레이터 임시 이관(Claude w3:pG → Codex w3:pJ), 개선 검토 G 높음 넷
 

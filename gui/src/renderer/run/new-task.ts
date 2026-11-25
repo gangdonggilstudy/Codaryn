@@ -30,8 +30,8 @@ export interface NewTaskDeps {
   readonly showRun: () => void;
   /** U-271 (3.12): another screen, for an error whose fix is done there (error-move.ts). */
   readonly showScreen?: (screen: string) => void;
-  /** R21b-L-1: the form of a run that started, as the workspace's last one. */
-  readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }) => void;
+  /** R21b-L-1: the form of a run that started, with its original workspace's handle. */
+  readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }, handle: string) => void;
   /** U-68 (3.2): another process holds the open workspace's lock (the run button is off while it does), and a watcher slot. */
   readonly lock?: {
     readonly locked: () => boolean;
@@ -173,7 +173,7 @@ export function newTaskScreen(deps: NewTaskDeps): NewTaskScreen {
             const started = asStartRun(await api.startRun(workspace.handle, request.goal, request.profile, request.workflow));
             if (started.ok) {
               run.started(started.runId, Date.now());
-              deps.rememberForm?.({ profile: request.profile, workflow: request.workflow });
+              deps.rememberForm?.({ profile: request.profile, workflow: request.workflow }, workspace.handle);
               deps.showRun();
             } else {
               run.failedToStart(started.code, started.hint);

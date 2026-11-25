@@ -376,6 +376,7 @@ export function settingsScreen(deps: SettingsDeps): Screen {
     show(root) {
       const body = el("div", undefined, { id: "settings" });
       root.replaceChildren(el("h2", t.format("settings.title")), body);
+      const active = (): boolean => root.contains(body) && body.isConnected !== false;
       // One proposal at a time: its changed fields, what widens, and "Write" / "Do not write".
       const proposal = el("div", undefined, { id: "settings-proposal", role: "status", "aria-live": "polite" });
       if (written !== null) {
@@ -422,7 +423,8 @@ export function settingsScreen(deps: SettingsDeps): Screen {
                 if (!done.ok) return warn(done.code);
                 written = t.format(done.written ? "settings.written" : "settings.noChange");
                 deps.announce(written);
-                screen.show(root);
+                // A save outlives its view; keep its outcome without replacing another screen.
+                if (active()) screen.show(root);
                 // U-69 (11): a written language redraws the window in it (the engine host chooses: CODARYN_LANG wins).
                 if (done.written) deps.languageChanged?.();
               })();

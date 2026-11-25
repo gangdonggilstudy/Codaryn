@@ -81,7 +81,7 @@ async function start(): Promise<void> {
       if (reply === null) return;
       const opened = asOpen(reply);
       if (opened.ok) {
-        setWorkspace({ handle: opened.handle, name: opened.name });
+        setWorkspace({ handle: opened.handle, name: opened.name, lastForm: opened.lastForm });
         return;
       }
       // R10b-L-2: say why the chosen folder was refused, on the workspace screen.
@@ -167,8 +167,9 @@ async function start(): Promise<void> {
         showRun: () => shell?.show("run"),
         showScreen: (id) => shell?.show(id),
         // R21b-L-1: the main process remembers it too; this keeps the open workspace's copy current.
-        rememberForm: (form) => {
-          if (current !== null) current = { ...current, lastForm: form };
+        rememberForm: (form, handle) => {
+          if (current?.handle === handle) current = { ...current, lastForm: form };
+          if (runWorkspace?.handle === handle) runWorkspace = { ...runWorkspace, lastForm: form };
         },
         lock: {
           locked: lockedByOther,
@@ -344,7 +345,7 @@ async function start(): Promise<void> {
   api.onTreeReset(() => tree?.refresh());
   api.onWorkspaceOpened((payload) => {
     const opened = asOpen({ ok: true, ...(typeof payload === "object" && payload !== null ? payload : {}) });
-    if (opened.ok) setWorkspace({ handle: opened.handle, name: opened.name });
+    if (opened.ok) setWorkspace({ handle: opened.handle, name: opened.name, lastForm: opened.lastForm });
   });
   if (info.initialWorkspace !== null) setWorkspace(info.initialWorkspace);
 }

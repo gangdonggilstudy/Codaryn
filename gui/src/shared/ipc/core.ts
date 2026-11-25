@@ -1,6 +1,6 @@
 /** Core IPC arguments and views. Public callers use ../ipc.js. */
 
-import { hasOnlyKeys, isHandle, isObj, isRunId, shortText, UNSAFE_IN_MESSAGE } from "./primitives.js";
+import { hasOnlyKeys, isHandle, isObj, isRunId, shortText, UNSAFE_IN_MESSAGE, count } from "./primitives.js";
 
 /** `doctor` arguments: `{workspace: handle | null}` and nothing else. Null when they do not fit. */
 export function parseDoctorArgs(value: unknown): { readonly workspace: string | null } | null {
@@ -281,9 +281,6 @@ function toPlanActions(value: unknown, limit: number): PlanActionView[] | null {
   return actions;
 }
 
-// Internal view conversions shared by run, plan and report checks.
-export { toFinalMessage, toPlanActions };
-
 export interface RunItemView {
   /** ISO time of the record, or null. */
   readonly at: string | null;
@@ -291,3 +288,82 @@ export interface RunItemView {
   readonly kind: string;
   readonly text: string;
 }
+
+export const RUN_STATUSES = ["done", "failed", "needs-input", "cancelled", "budget-exhausted"] as const;
+
+/**
+ * U-40 (DR-52, AXM-17): whether masking worked, in counts only (EngineResult.masking): the values
+ * registered for masking, and the places masked in what was sent to the model. Never a value, a
+ * place or a length. The screens show it as the CLI's end summary does (`summary.masking`).
+ */
+export interface MaskingView {
+  readonly registeredValues: number;
+  readonly maskedPlaces: number;
+}
+
+/**
+ * The two counts rebuilt from `value`, or null: when there is none (nothing registered, a result
+ * written before DR-52), and when either is not a count (a whole number from 0), as the CLI's end
+ * summary shows no line then. Nothing else the field holds is carried. The engine host and the
+ * main process both use it.
+ */
+export function maskingOf(value: unknown): MaskingView | null {
+  if (!isObj(value)) return null;
+  const { registeredValues, maskedPlaces } = value;
+  return count(registeredValues) && count(maskedPlaces) ? { registeredValues, maskedPlaces } : null;
+}
+
+/** GU-3 (3.7 summary): what the window shows of a finished run. Texts are masked and cleaned. */
+export interface RunResultView {
+  readonly runId: string;
+  readonly status: (typeof RUN_STATUSES)[number];
+  readonly reason: string;
+  readonly exitCode: number | null;
+  readonly changes: readonly { readonly path: string; readonly created: boolean }[];
+  readonly verifiers: readonly { readonly number: number; readonly outcome: string }[];
+  readonly usage: {
+    readonly turns: number | null;
+    readonly tools: number | null;
+    readonly inputTokens: number | null;
+    readonly outputTokens: number | null;
+    readonly durationMs: number | null;
+  };
+  readonly notices: readonly string[];
+  /** U-226 (U-221): `kind` "changes" for a run plan, whose `actions` is its number of files. */
+  readonly plan: { readonly digest: string; readonly actions: number | null; readonly kind?: "changes" } | null;
+  readonly review: { readonly checklist: readonly string[] } | null;
+  readonly protectedChanged: number | null;
+  /** GU-5: "apply" for an apply run (DR-2), with its plan run, its done actions and the unsafe moves its check found. */
+  readonly kind: "run" | "apply";
+  readonly planRunId: string | null;
+  readonly unsafeMoves: number | null;
+  readonly applied: readonly PlanActionView[];
+  /** U-21 (DR-47): the agent's last message; null when there is none (a plan or apply run, an older result). */
+  readonly finalMessage?: FinalMessageView | null;
+  /** U-40 (DR-52): the masking counts; null when there are none or they are not counts. */
+  readonly masking?: MaskingView | null;
+  /** U-124: how the run's permission questions ended (counts), or null/absent when none was asked. */
+  readonly confirmations?: ConfirmationsView | null;
+  /**
+   * U-226 (U-218): a run that carried out a run plan (kind "run" with `planRunId`): its writes
+   * refused because the approved plan does not name the file (path_not_writable). Absent otherwise.
+   */
+  readonly deniedNotPlanned?: number;
+  /** U-226 (R-109, U-193): the run's (or apply's) workspace lock could not be released at its end. */
+  readonly lockLeft?: true;
+}
+
+/**
+ * U-124 (3.6, DR-3, DR-10): how a run's permission questions ended, from its own records: allowed
+ * for one call, and denied by the person, by default (no answer: the dialog could not be shown, or
+ * the time limit ended the wait) or because the run was cancelled while it waited.
+ */
+export interface ConfirmationsView {
+  readonly allowed: number;
+  readonly user: number;
+  readonly default: number;
+  readonly cancelled: number;
+}
+
+// Internal view conversions shared by run, plan and report checks.
+export { toFinalMessage, toPlanActions };

@@ -131,7 +131,9 @@ export class RunModel {
     if (!this.canStart) return false;
     const last = this.last;
     this.starting({ goal: "", profile: null, workflow: null });
-    this.last = last;
+    // An apply belongs to the open plan's workspace, even after a task-file run.
+    // Keep the session's quick-run form, but not the earlier task-file marker.
+    this.last = last === null ? null : { goal: last.goal, profile: last.profile, workflow: last.workflow };
     this.approval = approval;
     return true;
   }

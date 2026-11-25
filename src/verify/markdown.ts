@@ -51,9 +51,7 @@ import {
   MAX_MARKDOWN_BRACKET_DEPTH,
   MAX_MARKDOWN_LINE_CHARS,
   MAX_MARKDOWN_RULE_FILE_BYTES,
-  markdownBracketsTooDeepNote,
   markdownEvidenceList,
-  markdownLineTooLongNote,
 } from "../contracts/index.js";
 import type { MarkdownEvidenceItem, MarkdownHeading, MarkdownHeadingsRule, MarkdownLinksRule, Workspace } from "../contracts/index.js";
 import { FILE_NOT_JUDGED_NOTE } from "./unreadable.js";

@@ -616,7 +616,7 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 - 제공자는 anthropic과 openai다(키 없는 시험용 `scripted` 제외). 간편 형식과 한 줄 실행은 설정 파일의 `provider`를 쓰고, 없으면 anthropic이다(4절 "두 번째 제공자: OpenAI").
 - 예시를 직접 돌릴 때는 `examples` 폴더를 저장소 밖에 복사한 뒤 그 사본의 task를 실행한다. 모델이 예시 파일을 실제로 고치고, 작업 공간에 `.codaryn/`가 생긴다.
 - 옵션은 `--config`, `--vars-file`, `--cancel-file`, `--profile`, `--quiet`이다.
-- 취소는 Ctrl+C로 하거나, `--cancel-file`로 지정한 파일(작업 공간 밖)을 만들어서 한다. 상태는 `cancelled`(5)가 되고 이미 적용한 변경은 남는다.
+- 취소는 Ctrl+C로 하거나, `--cancel-file`로 지정한 파일(작업 공간 밖)을 만들어서 한다. 상태는 `cancelled`(5)가 되고 이미 적용한 변경은 남는다. 실행이 끝을 정한 뒤 마지막 안전 점검(보호 대상 무결성·상태 폴더) 도중에 취소하면 이미 정한 끝(예: `done`)은 그대로이고, 그 점검이 변경을 찾을 때만 바뀐다(무결성은 `done`이 `protected_changed`로, 상태 폴더는 `state_changed`로; IR-E3).
 - 모델은 허용 명령 목록을 따로 받지 않는다. 실행할 명령을 `goal`에 정확히 적는다(예: `code-task.json`).
 
 **사람용 출력(stderr):** 사람이 읽는 글은 stderr에 나온다. stdout에는 결과 JSON 한 줄이 나온다. 다만 콘솔처럼 stdout과 stderr가 둘 다 터미널이면, `--json`이나 `--quiet`가 없는 한 그 줄을 내지 않는다(10절 "터미널에서").

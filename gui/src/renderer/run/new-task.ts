@@ -56,21 +56,37 @@ function select(id: string, label: string, options: readonly (readonly [string, 
   return { field, input };
 }
 
-export function newTaskScreen(deps: NewTaskDeps): Screen {
+export interface NewTaskScreen extends Screen {
+  /** A one-shot task-file action, continued when this screen's settings and controls are ready. */
+  chooseTaskFile(): void;
+}
+
+export function newTaskScreen(deps: NewTaskDeps): NewTaskScreen {
   const { texts: t, api, run } = deps;
+  let generation = 0, requestedFile = false;
+  let selectFile: (() => void) | null = null;
   return {
     id: "newtask",
     title: "nav.newtask",
+    chooseTaskFile() {
+      requestedFile = true;
+      selectFile?.();
+    },
     show(root) {
+      const shown = ++generation;
+      requestedFile = false;
+      selectFile = null;
       const workspace = deps.current();
       if (workspace === null) {
         root.replaceChildren(el("h2", t.format("task.title")), el("p", t.format("task.noWorkspace")), button(t.format("home.open"), deps.open, { id: "task-open" }));
         return;
       }
       const body = el("div", undefined, { id: "newtask" });
+      const active = (): boolean => shown === generation && root.contains(body) && body.isConnected !== false;
       root.replaceChildren(el("h2", t.format("task.titleIn", { name: workspace.name })), body);
       void (async () => {
         const reply = asSettings(await api.settings());
+        if (!active()) return;
         const view = reply.ok ? reply.view : null;
         const workflows: [string, string][] = [["", t.format("task.workflowDefault")]];
         for (const id of view?.workflows.builtin ?? []) workflows.push([id, id]);
@@ -204,7 +220,8 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         const withVars = el("input", undefined, { type: "checkbox", id: "task-with-vars" });
         const varsField = el("p", undefined, { class: "field" });
         varsField.append(withVars, el("label", t.format("task.withVars"), { for: "task-with-vars" }));
-        const fromFile = button(t.format("task.runFile"), () => {
+        const startFile = (): void => {
+          if (!active()) return;
           const before = run.last;
           if (!run.starting({ goal: "", profile: null, workflow: null, taskFile: true })) return;
           void (async () => {
@@ -218,11 +235,18 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
             run.failedToStart(started.code === "cancelled" ? "start_cancelled" : started.code, started.hint);
             run.last = before;
           })();
-        }, { id: "task-run-file" });
+        };
+        const fromFile = button(t.format("task.runFile"), startFile, { id: "task-run-file" });
         if (!run.canStart) fromFile.setAttribute("disabled", "");
         taskFile.append(el("h3", t.format("task.fileTitle"), { id: "task-file-title" }), el("p", t.format("task.fileText"), { class: "notice" }), varsField, fromFile);
         body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, privateNotice, advanced, message, lockNote, runButton, taskFile);
         body.setAttribute("data-newtask-ready", reply.ok ? "ok" : "error");
+        selectFile = () => {
+          if (!requestedFile) return;
+          requestedFile = false;
+          startFile();
+        };
+        selectFile();
       })();
     },
   };

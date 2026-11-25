@@ -42,7 +42,7 @@ import type {
   StateSummary,
   SummarizeState,
 } from "../contracts/index.js";
-import { applyCleanupWith, isStoredRunId, planCleanup, summarizeState } from "../store/index.js";
+import { STATE_DIR_NOT_PLAIN_MESSAGE, applyCleanupWith, isStoredRunId, planCleanup, summarizeState } from "../store/index.js";
 import type { CleanupOperations } from "../store/index.js";
 import { INTERNAL_ERROR, appError } from "./errors.js";
 import { workspaceRootOf } from "./runs.js";
@@ -169,13 +169,21 @@ export async function cleanupConfirmed(
   return { ok: true, status, outcome: { ...outcome, ok: status === "removed" } };
 }
 
+/** IR-E1: the store refused because `.codaryn` or its `runs` is a link or not a plain directory. */
+export function isStateDirNotPlain(error: unknown): boolean {
+  return error instanceof Error && (error as { readonly code?: unknown }).code === "state_dir_not_plain";
+}
+
+/** IR-E1: the refusal as the call's error, the same as every command that takes the lock. */
+const stateDirNotPlain = (): AppError => appError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE);
+
 export async function stateSummaryIn(environment: AppEnvironment, request: StateSummaryRequest): Promise<AppCallOutcome<StateSummaryView>> {
   const root = await workspaceRootOf(request.workspace, environment.cwd);
   if (!root.ok) return root;
   try {
     return { ok: true, output: { kind: "state_summary", summary: await summaryOf(root.value) } };
-  } catch {
-    return { ok: false, error: INTERNAL_ERROR };
+  } catch (error) {
+    return { ok: false, error: isStateDirNotPlain(error) ? stateDirNotPlain() : INTERNAL_ERROR };
   }
 }
 
@@ -187,8 +195,8 @@ export async function previewCleanupIn(environment: AppEnvironment, request: Cle
   const now = new Date(environment.clock.now()).toISOString();
   try {
     return { ok: true, output: { kind: "cleanup_preview", now, plan: await cleanupPlanOf(root.value, selection.value, now) } };
-  } catch {
-    return { ok: false, error: INTERNAL_ERROR };
+  } catch (error) {
+    return { ok: false, error: isStateDirNotPlain(error) ? stateDirNotPlain() : INTERNAL_ERROR };
   }
 }
 
@@ -199,6 +207,8 @@ function cleanupFailure(code: CleanupFailureCode): AppError {
       return appError("cleanup_plan_changed", "the plan made again under the lock is not the confirmed one (the state changed since the preview, or another digest was given); nothing was removed. Preview again and confirm its digest.");
     case "workspace_locked":
       return appError("workspace_locked", "another task holds the workspace lock; nothing was removed. Try again when it ends.");
+    case "state_dir_not_plain":
+      return stateDirNotPlain();
   }
 }
 
@@ -214,7 +224,7 @@ export async function applyCleanupIn(environment: AppEnvironment, request: Apply
     const done = await cleanupConfirmed(root.value, selection.value, request.now, confirmation.value, { operations });
     if (!done.ok) return { ok: false, error: cleanupFailure(done.code) };
     return { ok: true, output: { kind: "cleanup_applied", status: done.status, outcome: done.outcome } };
-  } catch {
-    return { ok: false, error: INTERNAL_ERROR };
+  } catch (error) {
+    return { ok: false, error: isStateDirNotPlain(error) ? stateDirNotPlain() : INTERNAL_ERROR };
   }
 }

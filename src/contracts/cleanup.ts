@@ -330,9 +330,10 @@ export type CleanupKeptReason = (typeof CLEANUP_KEPT_REASONS)[number];
 
 /**
  * Why nothing was removed: plan_changed (the plan made again under the lock has another digest),
- * workspace_locked (another process holds the workspace lock).
+ * workspace_locked (another process holds the workspace lock), state_dir_not_plain (IR-E1: `.codaryn`
+ * or its `runs` is a link or not a plain directory; the summary and the preview refuse it too).
  */
-export const CLEANUP_FAILURE_CODES = ["plan_changed", "workspace_locked"] as const;
+export const CLEANUP_FAILURE_CODES = ["plan_changed", "workspace_locked", "state_dir_not_plain"] as const;
 export type CleanupFailureCode = (typeof CLEANUP_FAILURE_CODES)[number];
 
 export type CleanupOutcome =

@@ -286,7 +286,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `config_exists` | 2 | `state` | `false` | `init`: 쓸 자리에 파일이 이미 있음 |
 | `run_not_found` | 2 | `state` | `false` | 그 run id의 기록이 없음, 또는 `--run latest`가 고를 실행이 없음 |
 | `invalid_run_record` | 2 | `state` | `false` | 실행 기록을 읽을 수 없거나 손상됨 |
-| `state_dir_not_plain` | 2 | `state` | `false` | 작업 공간의 `.codaryn`이나 그 안의 `runs`가 링크·junction이거나 일반 폴더가 아님(IR-E1). 아무것도 쓰기 전에 거부한다. 잠금을 잡는 `run`·`apply`·`review`·`revert`와 앱의 적용 전 점검·글 저장. 실행 기록을 읽는 `runs`·`report` 등은 같은 배치를 `invalid_run_record`로 거부하고, `cleanup`의 요약·미리보기는 아직 빈 것으로 본다(후속) |
+| `state_dir_not_plain` | 2 | `state` | `false` | 작업 공간의 `.codaryn`이나 그 안의 `runs`가 링크·junction이거나 일반 폴더가 아님(IR-E1). 아무것도 쓰기 전에 거부한다. 잠금을 잡는 `run`·`apply`·`review`·`revert`와 앱의 적용 전 점검·글 저장. `cleanup`도 요약·미리보기·확인 적용 모두 같은 code로 거부한다(아무것도 만들거나 지우지 않음; 상태 폴더가 없으면 전처럼 빈 상태). 실행 기록을 읽는 `runs`·`report` 등은 같은 배치를 `invalid_run_record`로 거부한다 |
 | `plan_run_missing` | 2 | `state` | `false` | `plan`·`apply`: 계획 실행의 `plan.json`이 없음. `revert`(적용 실행): 그 적용이 쓴 계획 실행이나 그 `plan.json`이 없음 |
 | `run_not_plan` | 2 | `input` | `false` | `plan`·`apply`: 계획을 만든 실행이 아님, 또는 `apply`에 준 task가 `plan: "apply"`가 아님 |
 | `plan_not_approved` | 2 | `input` | `false` | `apply`: 승인 없음(`--digest`가 없거나 짧거나 맞지 않음, 터미널의 답이 아니오) |

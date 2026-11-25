@@ -65,6 +65,25 @@ export async function isPlainRunDir(workspaceRoot: string, runId: string): Promi
   );
 }
 
+/**
+ * IR-E1 (cleanup): `.codaryn` and its `runs` as ensureStateDir requires them, without making
+ * anything: false when either is there but a link or not a plain directory; true when both are plain
+ * or missing (a missing state directory is the empty state).
+ */
+export async function isStateDirPlainIfPresent(workspaceRoot: string): Promise<boolean> {
+  const stateDir = join(workspaceRoot, STATE_DIR_NAME);
+  for (const dir of [stateDir, join(stateDir, RUNS_DIR_NAME)]) {
+    try {
+      await lstat(dir);
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") return true;
+      throw error;
+    }
+    if (!(await isPlainChildDirectory(dir))) return false;
+  }
+  return true;
+}
+
 /** IR-E1: makes `dir` when it is missing (not recursively), then requires it to be plain. */
 async function ensurePlainChild(dir: string): Promise<void> {
   try {

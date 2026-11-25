@@ -39,7 +39,18 @@ for (const kind of ["junction", "hardlink", "normal"] as const) {
       const f = await fixture(t, kind);
       const args = ["cleanup", "--workspace", f.root, ...(kind === "junction" ? [] : ["--run", RUN])];
       const run = (extra: string[]) => startCli([...args, ...extra], { cwd: f.base, env: cliEnv({ extra: { CODARYN_LANG: language } }), timeoutMs: 15000 }).done;
-      const preview = await run(["--json"]); assert.equal(preview.exitCode, 0);
+      const preview = await run(["--json"]);
+      if (kind === "junction") {
+        // IR-E1: a linked `.codaryn` is refused from the preview on (exit 2), so no plan reaches a confirm; a confirm is refused too.
+        const confirm = await run(["--confirm", "0".repeat(64), "--include-not-reverted", "--json"]);
+        for (const refused of [preview, confirm]) {
+          assert.equal(refused.exitCode, 2); assert.equal(JSON.parse(refused.stdout).code, "state_dir_not_plain");
+          assert.equal((refused.stdout + refused.stderr).includes(f.outside), false);
+        }
+        assert.equal(existsSync(join(f.state, "lock.json")), false); await outsideUnchanged(f.outside);
+        return;
+      }
+      assert.equal(preview.exitCode, 0);
       const plan = JSON.parse(preview.stdout).plan as { digest: string };
       if (kind !== "normal") {
         const stale = await run(["--confirm", "0".repeat(64), "--json"]);
@@ -59,7 +70,16 @@ for (const kind of ["junction", "hardlink", "normal"] as const) {
   test(`U321 public app: ${kind}, existing error mapping and outside unchanged`, async (t) => {
     const f = await fixture(t, kind), selection = kind === "junction" ? {} : { runs: { runIds: [RUN] } };
     const app = createCodarynApp(await appEnvironment(f.base));
-    const preview = await app.previewCleanup({ workspace: f.root, selection }); assert.ok(preview.ok);
+    const preview = await app.previewCleanup({ workspace: f.root, selection });
+    if (kind === "junction") {
+      // IR-E1: the preview and the apply both refuse a linked `.codaryn` with state_dir_not_plain.
+      const applied = await app.applyCleanup({ workspace: f.root, selection, now: "2026-03-01T00:00:00.000Z", confirmation: { digest: "0".repeat(64), discarded: false, includeNotReverted: true } });
+      assert.equal(preview.ok ? "ok" : preview.error.code, "state_dir_not_plain");
+      assert.equal(applied.ok ? "ok" : applied.error.code, "state_dir_not_plain");
+      assert.equal(existsSync(join(f.state, "lock.json")), false); await outsideUnchanged(f.outside);
+      return;
+    }
+    assert.ok(preview.ok);
     const applied = await app.applyCleanup({ workspace: f.root, selection, now: preview.output.now, confirmation: { digest: preview.output.plan.digest, discarded: false, includeNotReverted: true } });
     if (kind === "normal") { assert.ok(applied.ok); assert.equal(applied.output.status, "removed"); }
     else { assert.equal(applied.ok, false); if (!applied.ok) assert.equal(applied.error.code, "internal_error"); if (kind === "hardlink") assert.ok(existsSync(join(f.state, "runs", RUN))); }

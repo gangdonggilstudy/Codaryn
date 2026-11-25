@@ -61,7 +61,7 @@ describe("DR-39: cleaning up run records and discarded files", () => {
       "io_error",
       "partly_removed",
     ]);
-    assert.deepEqual([...CLEANUP_FAILURE_CODES], ["plan_changed", "workspace_locked"]);
+    assert.deepEqual([...CLEANUP_FAILURE_CODES], ["plan_changed", "workspace_locked", "state_dir_not_plain"]);
   });
 
   test("a summary, a plan with both targets, two confirmations, an outcome and its log line", async () => {

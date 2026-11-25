@@ -56,7 +56,7 @@ export function previewValue(outcome: unknown): Obj | HostFailure {
  * `applyCleanup` → `{ok, result}`: what the cleanup did (DR-48 `status`), removed entirely, kept and
  * why. U-22 (R51-M-1): the app's `outcome.ok` is true for `removed` only, so it is not read here; a
  * cleanup that removed nothing or failed in part is still a result. A digest that is not the plan's
- * (cleanup_plan_changed) and a held lock (workspace_locked) are the call's errors.
+ * (cleanup_plan_changed), a held lock (workspace_locked) and state_dir_not_plain are the call's errors.
  */
 export function appliedValue(outcome: unknown): Obj | HostFailure {
   const output = outputOf(outcome, "cleanup_applied");

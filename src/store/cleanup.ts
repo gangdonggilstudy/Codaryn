@@ -60,7 +60,7 @@ import type {
   StateSummary,
   SummarizeState,
 } from "../contracts/index.js";
-import { ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, sameFsPath, sha256Hex } from "./common.js";
+import { StateDirNotPlainError, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, isStateDirPlainIfPresent, sameFsPath, sha256Hex } from "./common.js";
 import { acquireLock, inspectLock, releaseLock } from "./lock.js";
 import { recordsChangedMarkIn } from "./marks.js";
 import { isStoredRunId, listRuns, runIdSecond } from "./runs.js";
@@ -286,6 +286,8 @@ function startOf(runId: string, startedAt: string | null): number | null {
 }
 
 async function scan(workspaceRoot: string): Promise<Scan> {
+  // IR-E1: a linked `.codaryn` or `runs` is refused, not shown as an empty state (nothing is made here).
+  if (!(await isStateDirPlainIfPresent(workspaceRoot))) throw new StateDirNotPlainError();
   const stateDir = join(workspaceRoot, STATE_DIR_NAME);
   const runsDir = join(stateDir, RUNS_DIR_NAME);
   const discardedDir = join(stateDir, DISCARDED_DIR_NAME);
@@ -694,6 +696,8 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     }
     return removeTried(dir);
   };
+  // IR-E1: refused before anything is made, locked or removed.
+  if (!(await isStateDirPlainIfPresent(workspaceRoot))) return { ok: false, code: "state_dir_not_plain" };
   const parents = await cleanupParents(workspaceRoot);
   await parents.check();
   const stateDir = await ensureStateDir(workspaceRoot);

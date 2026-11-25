@@ -20,6 +20,7 @@ import {
   STATE_DIR_NAME,
 } from "../../src/contracts/index.js";
 import type { RunListEntry } from "../../src/contracts/index.js";
+import { listRuns } from "../../src/store/index.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { FORGED_FUTURE_AT, FORGED_FUTURE_RUN_ID, FORGED_MISMATCH_RUN_ID } from "../fixtures/review-inputs.js";
@@ -192,17 +193,29 @@ test("N-E E-6 실행 목록의 경계: 기록 없음, latest 없음, latest라�
   await t.test("실행이 잠금을 쥐고 있어도 runs는 동작하고 그 실행을 결과 없이 보인다", async (st) => {
     const sb = createSandbox(st);
     writeWorkspaceFile(sb, "README.md", "# a\n");
-    const task = writeTask(sb, { id: "e6-live", verifiers: [{ id: "r", kind: "file_rules", rules: [{ type: "exists", path: "README.md" }] }] }, [
-      { text: "잠금을 쥐고 기다린다", delayMs: 3000 },
+    const task = writeTask(sb, { id: "e6-live", limits: { maxDurationMs: 300_000 }, verifiers: [{ id: "r", kind: "file_rules", rules: [{ type: "exists", path: "README.md" }] }] }, [
+      { text: "잠금을 쥐고 기다린다", delayMs: 300_000 },
       { text: "끝" },
     ]);
-    const live = startCli(["run", "--task", task], { cwd: sb.base, env: cliEnv(), timeoutMs: 60_000 });
-    await waitFor(() => existsSync(lockPath(sb.workspace)), 20_000, "the run holds the lock");
-    const output = expectRunsOutput(await cli(sb, ["runs", "--workspace", sb.workspace, "--json"]));
-    assert.equal(output.runs.length, 1);
-    assert.equal(checked(output.runs[0]).status, null, "no result yet");
-    assert.ok(existsSync(lockPath(sb.workspace)), "runs takes no lock and leaves the run's lock alone");
-    expectRunResult(await live.done);
+    const live = startCli(["run", "--task", task, "--cancel-file", sb.cancelFile], { cwd: sb.base, env: cliEnv(), timeoutMs: 60_000 });
+    // Completion is owned by this case's cancel file; the long model wait is only a safety bound.
+    try {
+      await waitFor(() => existsSync(lockPath(sb.workspace)), 20_000, "the run holds the lock");
+      let ready = false;
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        const listing = await listRuns({ workspaceRoot: sb.workspace });
+        if (listing.runs.some(entry => entry.state === "checked" && entry.phase === "running")) { ready = true; break; }
+        await delay(50);
+      }
+      assert.ok(ready, "the held run has complete records and a live matching lock");
+      const output = expectRunsOutput(await cli(sb, ["runs", "--workspace", sb.workspace, "--json"]));
+      assert.equal(output.runs.length, 1);
+      assert.equal(checked(output.runs[0]).status, null, "no result yet");
+      assert.ok(existsSync(lockPath(sb.workspace)), "runs takes no lock and leaves the run's lock alone");
+    } finally {
+      writeFileSync(sb.cancelFile, "cancel");
+      expectRunResult(await live.done);
+    }
   });
 });
 

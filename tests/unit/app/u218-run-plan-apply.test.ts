@@ -21,6 +21,7 @@ import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
+import type { TestContext } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppError, AppHooks, ApplyHandle, ApplyObserver, CodarynApp, PlanCheck, RunEvent, TaskForm } from "../../../src/app/index.js";
 import type { ConfirmRequest, EngineResult, JournalRecord } from "../../../src/contracts/index.js";
@@ -82,18 +83,37 @@ async function started(app: CodarynApp, made: Made, observer?: PlanObserver): Pr
   return applied.handle;
 }
 
-/** Another process opens `file` for `ms` milliseconds sharing reading only (no deletion); resolves once it holds it. */
-async function holdOpen(file: string, ms: number): Promise<{ readonly closed: Promise<void> }> {
-  const script = `$h = [System.IO.File]::Open($env:U218_FILE, "Open", "Read", "Read"); [Console]::Out.WriteLine("held"); Start-Sleep -Milliseconds ${ms}; $h.Close()`;
-  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, U218_FILE: file }, stdio: ["ignore", "pipe", "ignore"] });
-  const closed = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  await new Promise<void>((resolve, reject) => {
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes("held")) resolve();
+/** A real owned handle; null means the parent explicitly releases it. */
+interface HeldFile { readonly closed: Promise<void>; release(): Promise<void> }
+async function holdOpen(t: TestContext, file: string, autoCloseMs: number | null = null, share: "Read" | "None" = "Read"): Promise<HeldFile> {
+  const wait = autoCloseMs === null ? 'if ([Console]::In.ReadLine() -ne "release") { exit 2 }' : 'Start-Sleep -Milliseconds ' + autoCloseMs;
+  const script = '$h = [System.IO.File]::Open($env:U218_FILE, "Open", "Read", "' + share + '"); try { [Console]::Out.WriteLine("held"); ' + wait + ' } finally { $h.Dispose() }';
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, U218_FILE: file }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  let ended = false, released = false, expired = false, output = "", errors = "";
+  child.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-2048); });
+  child.stdin.on("error", () => undefined);
+  // A safety bound, independent of the release/retry timing the case verifies.
+  const watchdog = setTimeout(() => { expired = true; if (child.exitCode === null && child.signalCode === null) child.kill(); }, 60_000);
+  watchdog.unref();
+  const closed = new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => {
+      ended = true; clearTimeout(watchdog);
+      if (code === 0 && !expired) resolve(); else reject(new Error('holder failed (watchdog=' + expired + ', code=' + code + '): ' + errors));
     });
-    child.once("exit", () => reject(new Error("the holder ended before it held the file")));
   });
-  return { closed };
+  void closed.catch(() => undefined);
+  const release = async (): Promise<void> => {
+    if (!ended && !released) { released = true; child.stdin.end("release\n"); }
+    await closed;
+  };
+  t.after(release);
+  await new Promise<void>((resolve, reject) => {
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); if (output.includes("held")) resolve(); });
+    child.once("error", reject);
+    child.once("close", () => reject(new Error('holder ended before readiness: ' + errors)));
+  });
+  return { closed, release };
 }
 
 describe("U-218: applyPlan carries out a run plan through the CLI's way", () => {
@@ -176,13 +196,13 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
     assert.equal(process.env["LANG"] === lang, false, "not from this process's environment");
   });
 
-  test("a lock left at the carrying run's end is told, and stays", { skip: windowsOnly }, async () => {
-    let holder: { readonly closed: Promise<void> } | null = null;
+  test("a lock left at the carrying run's end is told, and stays", { skip: windowsOnly }, async (t) => {
+    let holder: HeldFile | null = null;
     let work = "";
     const made = await runPlanMade({
       runApprovedPlan: async (deps: Parameters<typeof engineRunApprovedPlan>[0]) => {
         const result = await engineRunApprovedPlan(deps);
-        holder = await holdOpen(path.join(work, ".codaryn", "lock.json"), 1500);
+        holder = await holdOpen(t, path.join(work, ".codaryn", "lock.json"));
         return result;
       },
     });
@@ -193,11 +213,11 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
       assert.ok(done.ok, JSON.stringify(done));
       assert.equal(done.lockLeft, true);
       // No later try (Codex V-17b, PM): once the other process let the file go, the lock still stays.
-      await (holder as { closed: Promise<void> } | null)?.closed;
+      await (holder as HeldFile | null)?.release();
       await new Promise((resolve) => setTimeout(resolve, 500));
       assert.equal(await exists(path.join(work, ".codaryn", "lock.json")), true, "the lock is left");
     } finally {
-      await (holder as { closed: Promise<void> } | null)?.closed;
+      await (holder as HeldFile | null)?.release();
       if (await exists(path.join(work, ".codaryn", "lock.json"))) await releaseLock({ workspaceRoot: work, runId: handle.runId });
     }
   });

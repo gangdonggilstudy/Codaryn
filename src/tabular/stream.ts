@@ -25,7 +25,10 @@
 import type { TableFormat } from "../contracts/index.js";
 import type { TableProblem, TableProblemCode } from "./table.js";
 
-/** Where a scan sends what it reads. Both are optional: a scan without a sink only checks the table. */
+/** Internal row storage: absent JSONL keys read as empty cells, without expanding every column. */
+export type TableCells = readonly string[] | ReadonlyMap<string, string>;
+
+/** Where a scan sends what it reads. A scan without a sink only checks the table. */
 export interface TableSink {
   /**
    * The columns known so far. csv and tsv give the header once, before any row. jsonl gives the list
@@ -39,6 +42,14 @@ export interface TableSink {
    * outcome is ok.
    */
   row?(cells: readonly string[], dataRow: number): void;
+  /**
+   * JSONL opt-in: missing keys are absent. Replaces dense row delivery for incomplete rows (or
+   * when the sink has no dense callbacks). Complete rows may still use columns/row, with a fresh
+   * columns notification whenever its width changed since the previous dense notification.
+   */
+  sparseRow?(cells: ReadonlyMap<string, string>, dataRow: number): void;
+  /** With sparseRow: only newly seen names, before their row; firstIndex is their final offset. */
+  columnsAdded?(names: readonly string[], firstIndex: number): void;
 }
 
 /** The outcome of reading a table's text. */
@@ -350,6 +361,7 @@ function cellOf(value: unknown): string {
 class JsonLinesParser extends LineParser {
   private readonly columns: string[] = [];
   private readonly known = new Set<string>();
+  private denseColumnsAt = 0;
 
   constructor(private readonly sink: TableSink) {
     super();
@@ -373,12 +385,31 @@ class JsonLinesParser extends LineParser {
       return;
     }
     const object = value as Record<string, unknown>;
+    const firstIndex = this.columns.length;
+    const keys = Object.keys(object);
     let grew = false;
-    for (const key of Object.keys(object)) {
+    for (const key of keys) {
       if (this.known.has(key)) continue;
       this.known.add(key);
       this.columns.push(key);
       grew = true;
+    }
+    if (this.sink.sparseRow !== undefined) {
+      if (grew) this.sink.columnsAdded?.(this.columns.slice(firstIndex), firstIndex);
+      if (keys.length < this.columns.length || this.sink.row === undefined || this.sink.columns === undefined) {
+        // Convert every present value, including unselected ones, as the dense reader did.
+        const cells = new Map<string, string>();
+        for (const key of keys) cells.set(key, cellOf(object[key]));
+        this.sink.sparseRow(cells, dataRow);
+      } else {
+        // Full rows cost only their input width; keep fixed-column tables on the dense fast path.
+        if (this.denseColumnsAt !== this.columns.length) {
+          this.sink.columns(this.columns.slice());
+          this.denseColumnsAt = this.columns.length;
+        }
+        this.sink.row(this.columns.map((column) => cellOf(object[column])), dataRow);
+      }
+      return;
     }
     if (grew) this.sink.columns?.(this.columns.slice());
     if (this.sink.row !== undefined) {

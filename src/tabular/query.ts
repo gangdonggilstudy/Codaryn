@@ -30,7 +30,7 @@ import { MAX_QUERY_COUNTED_GROUPS } from "../contracts/index.js";
 import type { QueryColumnShape, QueryGroup, QueryOperation, TableFormat } from "../contracts/index.js";
 import { RunningAggregate, parseNumber } from "./aggregate.js";
 import { scanTable } from "./stream.js";
-import type { TableScanOutcome, TableSink } from "./stream.js";
+import type { TableCells, TableScanOutcome, TableSink } from "./stream.js";
 import { findColumn } from "./table.js";
 import type { TableProblem } from "./table.js";
 
@@ -106,7 +106,8 @@ class ColumnAt {
     if (found.ok) this.index = found.index;
   }
 
-  cell(cells: readonly string[]): string {
+  cell(cells: TableCells): string {
+    if ("get" in cells) return cells.get(this.name) ?? "";
     return this.index === null ? "" : (cells[this.index] ?? "");
   }
 }
@@ -163,7 +164,11 @@ export class TableQuerySink implements TableSink {
     for (const column of this.opColumns) column.see(columns);
   }
 
-  row(cells: readonly string[], dataRow: number): void {
+  sparseRow(cells: ReadonlyMap<string, string>, dataRow: number): void {
+    this.row(cells, dataRow);
+  }
+
+  row(cells: TableCells, dataRow: number): void {
     const keys = this.keyColumns.map((column) => column.cell(cells));
     if (keys.some((key) => key.length === 0)) {
       this.withoutKey += 1;
@@ -184,7 +189,7 @@ export class TableQuerySink implements TableSink {
     for (const [index, column] of this.opColumns.entries()) (group.aggregates[index] as RunningAggregate).add(column.cell(cells), dataRow);
   }
 
-  private checkNumbers(cells: readonly string[], dataRow: number): void {
+  private checkNumbers(cells: TableCells, dataRow: number): void {
     for (const [index, operation] of this.query.operations.entries()) {
       if (operation.op === "count" || this.notKeptNotNumber[index] !== null) continue;
       const cell = (this.opColumns[index] as ColumnAt).cell(cells);
@@ -237,6 +242,24 @@ export class TableShapeSink implements TableSink {
   private names: readonly string[] = [];
   private readonly nonEmpty: number[] = [];
   private readonly numeric: number[] = [];
+  private readonly sparseIndexes = new Map<string, number>();
+
+  columnsAdded(names: readonly string[], firstIndex: number): void {
+    names.forEach((name, index) => {
+      this.sparseIndexes.set(name, firstIndex + index);
+      this.nonEmpty.push(0);
+      this.numeric.push(0);
+    });
+  }
+
+  sparseRow(cells: ReadonlyMap<string, string>): void {
+    for (const [name, cell] of cells) {
+      if (cell.length === 0) continue;
+      const index = this.sparseIndexes.get(name) as number;
+      this.nonEmpty[index] = (this.nonEmpty[index] ?? 0) + 1;
+      if (parseNumber(cell) !== null) this.numeric[index] = (this.numeric[index] ?? 0) + 1;
+    }
+  }
 
   columns(columns: readonly string[]): void {
     this.names = columns;

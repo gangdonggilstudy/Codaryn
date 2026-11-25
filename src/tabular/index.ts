@@ -7,7 +7,7 @@
 export { TABLE_PROBLEM_CODES, findColumn, parseTable } from "./table.js";
 export type { ColumnLookup, ParseTableOutcome, Table, TableProblem, TableProblemCode } from "./table.js";
 export { TableScanner, scanTable } from "./stream.js";
-export type { TableScanOutcome, TableSink, TableTextOutcome } from "./stream.js";
+export type { TableCells, TableScanOutcome, TableSink, TableTextOutcome } from "./stream.js";
 export { RunningAggregate, aggregate, columnCells, groupCells, parseNumber, withinTolerance } from "./aggregate.js";
 export type { AggregateOutcome, CellAt, Group, Grouping, Tolerance } from "./aggregate.js";
 export { TableQuerySink, TableShapeSink, queryTable, tableShape } from "./query.js";

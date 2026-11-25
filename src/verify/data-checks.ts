@@ -821,6 +821,8 @@ export async function runDataChecksVerifier(
         if (error instanceof RuleCancelled) verdict = undecided("cancelled while this rule was checked");
         else verdict = undecided(`check failed: ${error instanceof Error ? error.message : String(error)}`);
       }
+      // C2R-1/2: cancellation wins for this rule after any returned verdict or thrown error.
+      if (signal.aborted) verdict = undecided("cancelled while this rule was checked");
     }
     if (verdict.state === "not_held") failed = true;
     if (verdict.state === "undecided") open = true;

@@ -23,7 +23,49 @@ const FORBIDDEN_PATHS = [/(^|\/)\.env$/, /(^|\/)\.env\.(?!example$)[^/]+$/, /\.p
 const LIVE_ENV = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 
 function git(args) {
-  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+}
+
+/** Git patch headers use C quoting (including octal UTF-8 bytes), unlike -z path lists. */
+function patchPath(value) {
+  if (!value.startsWith('"')) return value.endsWith("\t") ? value.slice(0, -1) : value;
+  const bytes = [];
+  const escapes = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+  for (let i = 1; i < value.length; i++) {
+    const char = value[i];
+    if (char === '"') {
+      if (value.slice(i + 1) !== "" && value.slice(i + 1) !== "\t") throw new Error("invalid patch path");
+      return Buffer.from(bytes).toString("utf8");
+    }
+    if (char === "\\") {
+      const octal = /^[0-7]{1,3}/.exec(value.slice(i + 1));
+      if (octal !== null) {
+        const byte = Number.parseInt(octal[0], 8);
+        if (byte > 255) throw new Error("invalid patch path");
+        bytes.push(byte);
+        i += octal[0].length;
+      } else {
+        const escaped = value[++i];
+        if (!Object.hasOwn(escapes, escaped)) throw new Error("invalid patch path");
+        bytes.push(escapes[escaped]);
+      }
+    } else {
+      const cp = value.codePointAt(i);
+      bytes.push(...Buffer.from(String.fromCodePoint(cp), "utf8"));
+      if (cp > 0xffff) i++;
+    }
+  }
+  throw new Error("invalid patch path");
+}
+
+function diagnosticPath(file) {
+  if (file === null) return "null";
+  return file.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, (char) => {
+    if (char === "\n") return "\\n";
+    if (char === "\t") return "\\t";
+    if (char === "\r") return "\\r";
+    return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+  });
 }
 
 function scanLine(text) {
@@ -36,20 +78,29 @@ function scanLine(text) {
   return hits;
 }
 
+class CombinedDiffError extends Error {}
+
 function scanDiff(diffText) {
   const findings = [];
   let file = null;
   let line = 0;
+  let inHunk = false;
   for (const raw of diffText.split("\n")) {
-    if (raw.startsWith("+++ ")) {
-      file = raw.startsWith("+++ b/") ? raw.slice(6) : null;
+    if (raw.startsWith("@@@")) throw new CombinedDiffError();
+    if (raw.startsWith("diff --git ")) {
+      file = null;
+      inHunk = false;
     } else if (raw.startsWith("@@")) {
-      const m = /\+(\d+)/.exec(raw);
+      const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+      inHunk = m !== null;
       line = m ? Number(m[1]) - 1 : 0;
-    } else if (raw.startsWith("+") && !raw.startsWith("+++")) {
+    } else if (!inHunk && raw.startsWith("+++ ")) {
+      const named = patchPath(raw.slice(4));
+      file = named.startsWith("b/") ? named.slice(2) : null;
+    } else if (inHunk && raw.startsWith("+")) {
       line += 1;
       for (const rule of scanLine(raw.slice(1))) findings.push({ file, line, rule });
-    } else if (!raw.startsWith("-")) {
+    } else if (inHunk && raw.startsWith(" ")) {
       line += 1;
     }
   }
@@ -64,23 +115,37 @@ function checkPaths(paths) {
   return findings;
 }
 
+/** Keep the NUL path intact after the metadata tab, including tabs and newlines in the name. */
+function indexEntries() {
+  return git(["ls-files", "--stage", "-z"]).split("\0").filter(Boolean).map((entry) => {
+    const parsed = /^([0-7]{6}) (?:[0-9a-f]{40}|[0-9a-f]{64}) ([0-3])\t([\s\S]+)$/.exec(entry);
+    if (parsed === null) throw new Error("invalid index entry");
+    return { mode: parsed[1], stage: parsed[2], file: parsed[3] };
+  });
+}
+
+// Only resolved gitlinks are opaque references to another repository, never parent blobs.
+const isGitlink = (entry) => entry.mode === "160000" && entry.stage === "0";
+
 const [mode, arg] = process.argv.slice(2);
 let findings = [];
 try {
   if (mode === "--staged") {
-    findings = scanDiff(git(["diff", "--cached", "-U0", "--no-color"]));
-    findings.push(...checkPaths(git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"]).split("\n")));
+    const gitlinks = new Set(indexEntries().filter(isGitlink).map((entry) => entry.file));
+    findings = scanDiff(git(["diff", "--cached", "-U0", "--no-color", "--submodule=short", "--src-prefix=a/", "--dst-prefix=b/"]));
+    findings.push(...checkPaths(git(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]).split("\0").filter((file) => !gitlinks.has(file))));
   } else if (mode === "--range" && arg) {
-    findings = scanDiff(git(["diff", "-U0", "--no-color", arg]));
-    findings.push(...checkPaths(git(["diff", "--name-only", "--diff-filter=ACMR", arg]).split("\n")));
+    findings = scanDiff(git(["diff", "-U0", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", arg]));
+    findings.push(...checkPaths(git(["diff", "--name-only", "-z", "--diff-filter=ACMR", arg]).split("\0")));
   } else if (mode === "--tracked") {
-    const files = git(["ls-files"]).split("\n").filter(Boolean);
+    const files = indexEntries().filter((entry) => !isGitlink(entry)).map((entry) => entry.file);
     findings.push(...checkPaths(files));
     for (const file of files) {
       let text;
       try {
         text = git(["show", `:${file}`]);
       } catch {
+        findings.push({ file, line: 0, rule: "index-read-failed" });
         continue;
       }
       text.split("\n").forEach((content, index) => {
@@ -92,7 +157,8 @@ try {
     process.exit(2);
   }
 } catch (error) {
-  console.error(`check-secrets: git failed (${error.status ?? "unknown"})`);
+  if (error instanceof CombinedDiffError) console.error("check-secrets: combined diff is not supported");
+  else console.error(`check-secrets: git failed (${error.status ?? "unknown"})`);
   process.exit(2);
 }
 
@@ -100,6 +166,6 @@ if (findings.length === 0) {
   console.log("check-secrets: no findings");
   process.exit(0);
 }
-for (const f of findings) console.error(`check-secrets: ${f.file}:${f.line} ${f.rule}`);
+for (const f of findings) console.error(`check-secrets: ${diagnosticPath(f.file)}:${f.line} ${f.rule}`);
 console.error(`check-secrets: ${findings.length} finding(s). Matched values are not printed.`);
 process.exit(1);

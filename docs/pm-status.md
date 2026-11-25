@@ -40,6 +40,16 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-75, 2026-11-27) — F1·F2·F4 Codex 인수와 채택, GGR 보완 재검토 통과
+
+- **F1·F2·F4 채택:** 원 작업자 보고 `4ef7cd40…df7261`과 add -N 미준수 이력은 그대로 보존하고, Codex 인수 보고 `e7787647…8038f9d`를 읽고 ACK했다. Codex 작업자는 같은 미커밋 7파일을 바꾸지 않고 build·새 회귀 9/9를 확인했다. PM은 제품 코드를 수정하지 않은 독립 검토자로서 HTTP 취소·wx 임시 파일 소유·apply 잠금 finally를 검토했다.
+  - 작업 branch `1e21fc4d`, main `9a6e8596`. 합친 PM 보드에서 타입 검사 exit 0, unit 4,672건(4,661 통과·10 건너뜀·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), 실패 0. 검토 도구 PASS·트리/패치 일치·별도 비밀 검사를 확인했다.
+  - exclusive 새 config의 부분 쓰기와 별도 close 실패 주입은 이번 범위에서 미수정/미실행으로 남긴다. 원 보고의 “인덱스 쓰기 없음”을 다시 인증하지 않으며 현재 빈 인덱스와 Codex 인수 중의 바이트 보존을 확인했다.
+- **GGR-1·GGR-2 보완:** PM이 구현한 보완을 codex-worker-2가 재검토했고 `48dfcf33…4ea523d`에서 새 발견 0·채택 권고다. CLI가 실제 쓰는 `rawTextHoldsKey`에 16/64/256KiB의 작업량 관측과 알려진 제곱 시간 source 대조를 추가했다. 느린 host 시험은 gate 해제·진행 중 close 재사용·동결 kill 소진·중첩 finally 정리를 갖췄다. 임의 정규식 VM 시간이나 모든 I/O 실패의 정리를 보장한다는 뜻은 아니다.
+  - 작업 branch `70660220`으로 커밋했고 review-branch PASS다. 관련 66/66, 통제 지연 45/45 및 EOF 실패 사본의 종료·정리 대조가 통과했다. GUI를 포함한 main 병합 보드를 다음에 실행하며 아직 이 시험 후보는 main에 채택하지 않았다.
+- **운영:** `latest` 채택과 CP-74는 `1d35c1d1`까지 원격 main에서 확인했다. 새 PM의 배정·통합·푸시 전 위임 확인, separate check-secrets, 지정 작성자·trailer 금지, 기존 작업 공간 재사용을 계속 적용한다.
+- **다음 단위:** G7(포트 반환 뒤 소유권 공백)·G8(실행 정리 finally)을 재현 먼저로 시험만 보완한다. 낮음 G10~G13은 현재 동작과 재현 근거에 따라 처리하고, 근거 없이 모든 tick을 바꾸지 않는다.
+
 ## 진행 요약 (CP-74, 2026-11-27) — Codex PM 인수, latest 재작업 채택
 
 - **PM 인수:** 새 위임 ID·active·w3:pJ 및 main과 origin/main의 동일·clean 상태를 확인했다. 기존 네 작업 공간을 재사용하며 Claude 작업자에게 새 일을 주지 않는다. Herdr의 관리자 서버 접근에는 권한 있는 실행을 사용했고 질문·피드백·사용량 화면에는 응답하지 않았다.

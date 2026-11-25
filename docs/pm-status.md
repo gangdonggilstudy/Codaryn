@@ -40,6 +40,20 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-67, 2026-11-25~26) — 계약 층 분기 모두 비교, IR-26 앱 분할 끝, 엔진 2단계 U1~U3, H-1
+
+- **사용자 결정(2026-11-25):** 계약 층 남은 분기 설계(claude-worker)의 Q-4에 "규칙으로 적기" — 제품 코드(`src/`, `gui/src/`)에 시험할 때만 읽는 환경 변수·플래그를 두지 않고, 시험 주입은 코드로 넘기는 선택지와 `tests/` 아래 preload로만 한다(`docs/development-workflow.md` 7절, `4bccd1c4`). 사용자가 다시 로그인해 claude-worker 주간 한도(11-29 21시 KST 해제 예정)와 무관하게 이어 썼다.
+- **계약 층(설계 12절) 모든 분기 비교(`809cb4f2`, claude-worker 설계·구현, codex-worker 검토):** C-5 사람의 거부, C-6 질문 중 취소(CLI는 Ctrl+C → SIGINT, 호스트는 `cancelRun`), C-7 질문 대기 시간 한도(쪽마다 4초). 실제 CLI child를 기존 시험 preload(`isTTY`만 바꿈)로 띄워 실제 `main.ts` 질문·터미널 읽기·SIGINT 길을 지나게 하고 두 쪽 저장 result·journal을 엄격 비교 — 차이 없음. 제품 코드 변경 없음. 남는 한계: raw mode·echo는 흉내 내지 않음, C-7은 시간에 기댐, Windows에서만 측정. 현재형 문서는 `8242abb0`로 맞췄다.
+- **GUI 실행 흐름 후속:** H-1(`883b0b12`, codex-worker 구현, claude-worker 검토) — 적용 결과가 앞 요청이 아니라 적용한 계획의 form(profile·workflow)을 쓴다. 재현에서 계획 프로필의 합성 가릴 값이 검토 메모에 남는 것을 확인(19건 중 15 실패 → 19/19). F-1·F-3(`511a5ea9`) — form 인자를 필수로, 시험 두 사례 추가.
+- **IR-26 큰 파일 나누기(이동만, 단위마다 구현하지 않은 세션의 정적 검토, 합친 판마다 PM 전체 시험):**
+  - 앱: 2a 읽기 문맥(`ddcb6c6a`), 2b 읽기 명령(`333ddccd`), `AppHooks` 형 파일(`5796d665`, 빌드 JS 동일), 3 보고서·되돌리기·실행 조회(`bd60ed2d`), 4 doctor·models·settings(`5526fb94`), 5a 계획 보기·검토(`9ea68544`), 5b 적용·적용 점검 한 덩어리(`0cb1fc18`), 쓰지 않는 import 정리(`fcb0a45f`). **앱 분할 끝: `app.ts` 1,247 → 300줄**(모듈 도우미, factory 조립, `startRun`, 26개 facade). 평가 순서를 지키는 부수효과 import에는 모두 주석을 달았다.
+  - 엔진 2단계(claude-worker 설계 `engine-split-2-design-claude-01`, PM 결정 D-1~D-6): U1 상수만 쓰는 도우미 → `run-helpers.ts`(`ef3222d7`), U2 호출 id·권한 질문 → `run-calls.ts`(`3dfefccb`), U3 무결성·상태 점검 → `run-checks.ts`(`1ed48aea`, `sinceCheck` 소유와 `noteActivity`). `engine/index.ts` 1,792 → 1,074줄. 단위마다 기준·후보 빌드로 같은 대본을 돌려 결과·journal·경계 호출 bytes를 비교(U1 57, U2 73, U3 113개 모두 같음).
+  - GUI 공유 IPC 1단계(`1f79c10b`): `shared/ipc.ts` 1,838 → 1,584줄, facade 157개 이름 그대로. 계약 `human.ts` 1단계(`f1b14834`): 고정 문구 표를 `human-messages.ts`로, 1,617 → 843줄.
+  - 진행 중(branch): 엔진 U4 `RunTally`(`b7812382`), U5 도구 호출, IPC 2 설정·모델(`d859107a`), IPC 3a 실행 묶음.
+- **PM 측정(합친 판마다 프로젝트 스크립트, 실패 0):** 마지막 `fcb0a45f`에서 unit 4,364건(4,357 통과·6 건너뜀·1 TODO), integration 684건(682 통과·1 건너뜀·1 TODO), GUI 582건(580 통과·2 건너뜀), 연기 시험 227/227. 부하로 한 번씩 실패한 시험 둘: n13 잠금(기록된 한계 Z-1, 재실행 통과), GUI `u298`(고정 40ms 대기 — `b0c6c8be`에서 "등록부의 끝까지" 기다리도록 고침). 로그는 `.codaryn/pm-tools/evidence/main-*`.
+- **운영:** claude-worker가 주간 사용 한도에 한 번 걸렸다(작업 중 멈춤, 바뀐 파일 없음). 그 창에 자기 동작 버그 보고 초안(금지된 `git add -N` 실행)이 떴다 — 작업자 창 UI에는 답하지 않았고, 모든 작업 공간의 인덱스에 남은 항목이 없음을 확인했다. Codex 세션 ID 변동으로 도구 ACK가 거절되면 보고를 끝까지 읽고 해시를 확인한 뒤 수동 수신 기록을 남겼다.
+- 남은 것: 엔진 U4~U7, IPC 2~4, 사용자의 꾸러미 화면 확인(M-3.19), 실제 API 3.1, 키 없는 수동 12항목, 서명·설치 파일·외부 게시(GUI-D9, 미승인), E-5·E-6 보류.
+
 ## 진행 요약 (CP-66, 2026-11-25) — Codex 작업자 추가, 개선 검토 A·B와 수정, IR-26 나누기 1단계
 
 - **사용자 지시(2026-11-25):** "codex 작업 세션 추가했으니 교육 후 활용하고 codex 위주로 작업 할당해줘", 외부 검토 의견(IR-26 큰 파일, IR-27 libuv 변수 등의 끝부분)을 "참고해서 지너릭하게 적용". 사용자 결정: 받은 끝부분만으로 판단하지 않고 **Codex가 같은 형식으로 새로 검토**, 그 형식을 **개발 절차 문서에 검토 틀로 추가**, IR-A2(토큰 한도)는 **추가 요청만 금지(지금 동작) + 문서 고침**.

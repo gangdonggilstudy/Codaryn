@@ -82,7 +82,7 @@ describe("EN-03 limits end the run and stop model calls", () => {
     assert.equal(h.model.requests.length, 1);
   });
 
-  test("max total tokens", async () => {
+  test("max total tokens stops additional model requests after processing the received tools", async () => {
     const h = harness({
       steps: [() => response([readCall("c1")], { usage: { inputTokens: 60, outputTokens: 50 } }), () => finalAnswer()],
       task: { limits: { maxModelTurns: 10, maxToolCalls: 10, maxTotalTokens: 100, maxDurationMs: 600_000 } },

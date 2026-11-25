@@ -472,6 +472,8 @@ run id (UTC)               started (local)      changes  result
 **한도(`limits`):**
 
 - 예산 한도 넷은 재수정을 포함한 실행 전체에 적용한다: `maxModelTurns`, `maxToolCalls`, `maxTotalTokens`(모든 요청의 입력과 출력 토큰 합), `maxDurationMs`. 처음에는 낮게 두고 결과의 `usage`를 보며 올린다.
+- 턴·토큰 한도는 **추가 모델 요청을 막는 기준**이다. 누적 토큰 합이 `maxTotalTokens`에 닿거나 넘으면 다음 모델 요청을 하지 않고, 추가 요청이 필요한 실행은 `budget-exhausted`/`max_total_tokens`(종료 4)로 끝난다.
+- 이미 받은 응답은 토큰 한도를 넘긴 응답도 처리한다. 그 안의 도구 호출도 다른 권한·한도·취소 규칙 안에서 처리하며, 최종 답이면 검증을 거쳐 끝날 수 있다. 마지막 허용 턴의 응답을 처리하는 `maxModelTurns`와 같다. 따라서 실제 누적 사용량이 토큰 한도보다 클 수 있고, 응답을 받은 즉시 중단하거나 사용한 토큰을 되돌리는 상한은 아니다.
 - 재수정 한도 둘(9절): `maxRepairAttempts`(0 이상, 기본 0)와 `maxSameFailures`(1 이상, 기본 2). 두 파일 모두에서 생략할 수 있다.
 - **설정 파일의 한도는 상한이다.** task는 필드마다 그 값 이하만 정할 수 있고, 넘으면 `invalid_task`다. 설정이 숫자인데 task가 `maxTotalTokens: null`을 주어도 `invalid_task`다. 예산 한도가 어디에도 없으면 task 형식은 `invalid_task`, 간편 형식은 `invalid_config`다. 모델과 검증기를 돌리지 않는 `plan`·`review`·`changes`의 간편 형식은 한도를 요구하지 않는다(18.1절 "간편 형식").
 - **anthropic에서는 총 토큰 한도가 필수다.** `maxTotalTokens: null`은 task에 있으면 `invalid_task`, 설정에 있으면 `invalid_config`다.

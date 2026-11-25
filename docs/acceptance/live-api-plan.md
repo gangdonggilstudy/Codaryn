@@ -161,7 +161,7 @@ node <실행본>\dist\src\cli\main.js report --workspace <후보 디렉터리> -
 | 명령 허용 | 필요한 명령만, `allowExtraArgs: false`. 네트워크와 파괴적 동작은 `deny` | usage.md:1204, code-task.json |
 | 계획 승인 | 파일 정리·계획 실행(`plan: "run"`)은 승인한 계획만 적용한다. 이 계획의 과제는 쓰지 않는다 | roadmap.md:114, usage.md 18.3·18.11절 |
 | 취소 | Ctrl+C 또는 `--cancel-file` → `cancelled`(5) | usage.md:593 |
-| 상한 | 한도를 넘기 전에 `budget-exhausted`(4)로 멈춘다. 한도 없이 실행하지 않는다 | usage.md:696·831, roadmap.md:102 |
+| 상한 | 한도 없이 실행하지 않는다. 턴·토큰 한도는 추가 모델 요청을 막는다. 누적 토큰 합이 한도에 닿거나 넘은 뒤 추가 요청이 필요하면 `budget-exhausted`/`max_total_tokens`(4)다. 이미 받은 응답은 한도를 넘겨도 처리하며, 최종 답이면 검증 후 끝날 수 있다. 실행 시간 한도는 진행 중에도 검사한다 | usage.md 한도 절·9절, roadmap.md:102 |
 | 키 | 사용자 환경 변수만. 키는 그 제공자 주소의 요청 헤더에만 간다. 401·403은 고정 문구로만 남는다 | privacy.md:256–263 |
 | 후보 분리 | 후보는 별도 worktree, 실행본은 후보 밖. 자동 채택·병합·교체·push 없음 | self-development.md:11–16, roadmap.md:101·103 |
 | 카나리 | 실제 API 단계에서도 가짜 비밀(카나리)만 쓴다. 실제 개인정보·비밀을 과제에 넣지 않는다 | testing.md:152 |

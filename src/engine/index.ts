@@ -1510,6 +1510,8 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
 
   const verify = async (): Promise<End | RepairNeeded> => {
     state.transition("verifying");
+    const interruption = interrupted();
+    if (interruption !== null) return interruption;
     if (task.verifiers.length === 0) {
       const notice = mask(NO_VERIFIER_NOTICE);
       if (notice !== null) notices.push(notice);
@@ -1642,7 +1644,7 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
     for (const [index, file] of plan.plan.files.entries()) {
       let now: PlannedFileNow;
       try {
-        now = await plan.fileNow(file, signal);
+        now = await plan.fileNow(file, runSignal);
       } catch {
         now = { kind: "other" };
       }

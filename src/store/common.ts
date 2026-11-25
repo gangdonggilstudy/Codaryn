@@ -3,7 +3,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { realpath as realpathCallback } from "node:fs";
 import { link, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { PRIVACY_TOKEN_PATTERN_SOURCE, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
@@ -23,10 +23,61 @@ export function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | null)?.code;
 }
 
-/** Creates the state directory and keeps its content out of version control tools. */
+/**
+ * IR-E1: the state directory, or its `runs` directory, is a link, a junction or not a plain
+ * directory. Thrown before anything is written through it (the lock answers state_dir_not_plain).
+ */
+export class StateDirNotPlainError extends Error {
+  readonly code = "state_dir_not_plain";
+  constructor() {
+    super("the state directory or its runs directory is a link or not a plain directory; nothing was written");
+    this.name = "StateDirNotPlainError";
+  }
+}
+
+/**
+ * IR-E1: `dir` is a directory of its own below its parent: not a link or junction, and its real path
+ * is its parent's real path with its name (so a link anywhere from the parent down is found, however
+ * the parent itself was named).
+ */
+async function isPlainChildDirectory(dir: string): Promise<boolean> {
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) return false;
+    const [real, parent] = await Promise.all([realpathNative(dir), realpathNative(dirname(dir))]);
+    return sameFsPath(real, join(parent, basename(dir)));
+  } catch {
+    return false;
+  }
+}
+
+/** IR-E1: makes `dir` when it is missing (not recursively), then requires it to be plain. */
+async function ensurePlainChild(dir: string): Promise<void> {
+  try {
+    await mkdir(dir);
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+  }
+  if (!(await isPlainChildDirectory(dir))) throw new StateDirNotPlainError();
+}
+
+/**
+ * Creates the state directory and keeps its content out of version control tools. IR-E1: the state
+ * directory must be plain before anything is written in it, and so must `runs` when it is there
+ * (StateDirNotPlainError); nothing, not even `.gitignore`, is written otherwise.
+ */
 export async function ensureStateDir(workspaceRoot: string): Promise<string> {
   const stateDir = join(workspaceRoot, STATE_DIR_NAME);
-  await mkdir(stateDir, { recursive: true });
+  await ensurePlainChild(stateDir);
+  const runs = join(stateDir, RUNS_DIR_NAME);
+  let runsThere = true;
+  try {
+    await lstat(runs);
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+    runsThere = false;
+  }
+  if (runsThere && !(await isPlainChildDirectory(runs))) throw new StateDirNotPlainError();
   try {
     await writeFile(join(stateDir, ".gitignore"), "*\n", { encoding: "utf8", flag: "wx" });
   } catch (error) {
@@ -147,13 +198,24 @@ export async function isOwnRunDir(workspaceRoot: string, runId: string): Promise
   return (await hasExactRunEntry(workspaceRoot, runId)) && (await isPlainDirectory(runDir(workspaceRoot, runId)));
 }
 
+/** IR-E1: the state directory and its `runs` directory, made when missing and required to be plain. */
+export async function ensureRunsDir(workspaceRoot: string): Promise<string> {
+  const runs = join(await ensureStateDir(workspaceRoot), RUNS_DIR_NAME);
+  await ensurePlainChild(runs);
+  return runs;
+}
+
 /** Creates the state directory and `runs/<runId>/` when missing; the run directory must then be plain. */
 export async function ensureRunDir(workspaceRoot: string, runId: string): Promise<string> {
   assertRunId(runId);
-  await ensureStateDir(workspaceRoot);
+  await ensureRunsDir(workspaceRoot);
   const dir = runDir(workspaceRoot, runId);
-  await mkdir(dir, { recursive: true });
-  if (!(await isPlainDirectory(dir))) throw new Error("the run directory is a link or not a directory; nothing was written");
+  try {
+    await mkdir(dir);
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+  }
+  if (!(await isPlainChildDirectory(dir))) throw new Error("the run directory is a link or not a directory; nothing was written");
   return dir;
 }
 

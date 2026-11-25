@@ -76,7 +76,7 @@ import type { Clock, ContentHash, MaskedText, PrivacyGateway, ResolvedPath, Work
 import { cleanText, hideKeys } from "./input/text-safety.js";
 import { createRunId } from "./input/run-id.js";
 import { compileProtectedPaths } from "../policy/index.js";
-import { acquireLock, inspectLock, releaseLock as storeReleaseLock } from "../store/index.js";
+import { STATE_DIR_NOT_PLAIN_MESSAGE, acquireLock, inspectLock, releaseLock as storeReleaseLock } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { appError } from "./errors.js";
 import { isWorkspaceDir } from "./workspace-dir.js";
@@ -434,6 +434,8 @@ export async function writeWorkspaceTextIn(
 
   const lockId = createRunId(new Date(source.clock.now()), source.randomBytes);
   const lock = await acquireLock({ workspaceRoot: workspace.root, runId: lockId, clock: source.clock });
+  // IR-E1: refused as the call's error (the write statuses stay as they are); nothing was written.
+  if (!lock.ok && lock.code === "state_dir_not_plain") return { ok: false, error: appError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE) };
   if (!lock.ok) return { ok: true, output: answer("workspace_locked") };
   let result: WorkspaceTextWritten;
   try {

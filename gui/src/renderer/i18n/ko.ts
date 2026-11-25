@@ -612,6 +612,7 @@ export const KO = {
   "error.key_in_file": "설정 파일이나 목표에 키 값이 들어 있어 보내지 않았습니다. 키를 지우고 제공자의 환경 변수로 등록하세요(변수 이름은 설정 화면에 있습니다).",
   "error.plan_not_approved": "계획이 승인되지 않아 아무것도 바꾸지 않았습니다. 계획 화면에서 계획을 다시 연 뒤 적용하세요.",
   "error.invalid_run_record": "실행 기록을 읽거나 해석할 수 없어 아무것도 바꾸지 않았습니다. 작업 공간의 .codaryn/runs 아래 파일이 바뀌지 않았는지 확인하세요.",
+  "error.state_dir_not_plain": "실행 기록 폴더(.codaryn)나 그 안의 runs가 링크·junction이거나 일반 폴더가 아니어서 아무것도 쓰지 않았습니다. 링크를 지우거나 일반 폴더로 바꾼 뒤 다시 하세요.",
   "error.invalid_task": "작업 정의(task 파일)를 읽을 수 없거나 값이 올바르지 않습니다. 점검 화면에서 이유를 확인하세요.",
   "error.secret_env_missing": "가릴 값으로 정한 환경 변수가 설정되지 않았습니다. 그 변수를 설정하고 앱을 다시 시작하거나, 설정 화면의 가릴 값에서 이름을 빼세요.",
   "error.workspace_is_install_dir": "작업 공간이 Codaryn 설치 위치와 겹칩니다. 다른 폴더(사본 등)를 작업 공간으로 여세요.",

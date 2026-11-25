@@ -5,12 +5,12 @@
  * whose free text fields are MaskedText. A raw string cannot be passed to them.
  */
 
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { JOURNAL_FILE_NAME, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { ApplyJournal, ApplyJournalEntry, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
-import { assertRunId, ensureStateDir, runDir } from "./common.js";
+import { assertRunId, ensureRunDir } from "./common.js";
 import { appendOnlyJournal } from "./journal.js";
 import type { JournalOptions } from "./journal.js";
 
@@ -18,7 +18,7 @@ export { RevertRunError, createChangeRecorder, readRunOriginals, revertRun, snap
 export type { OriginalUnavailable, RevertRunErrorCode, RunOriginal } from "./changes.js";
 export { RUN_START_TOLERANCE_MS, RunListError, inspectRun, isRunTimestamp, isStoredRunId, latestRun, latestRunId, listRuns, listRunsAt, readRevertRecord, runIdSecond, writeRevertRecord } from "./runs.js";
 export type { RunInspection } from "./runs.js";
-export { PROCESS_START_TOLERANCE_MS, acquireLock, inspectLock, linuxProcessIdentity, lockHolderAlive, nodeLockFileSystem, parseProcStartTicks, processStartTime, releaseLock } from "./lock.js";
+export { PROCESS_START_TOLERANCE_MS, STATE_DIR_NOT_PLAIN_MESSAGE, acquireLock, inspectLock, linuxProcessIdentity, lockHolderAlive, nodeLockFileSystem, parseProcStartTicks, processStartTime, releaseLock } from "./lock.js";
 export { canonicalActions, canonicalPlannedFiles, createPlanRecorder, isWorkspaceRelativePath, loadAnyPlan, loadPlan, markPlanApplied } from "./plan.js";
 export type { MarkPlanAppliedRequest } from "./plan.js";
 export { readReviewRecord, writeReviewRecord } from "./review.js";
@@ -54,9 +54,8 @@ export function createApplyJournal(options: JournalOptions): ApplyJournal {
 /** Writes `<root>/.codaryn/runs/<result.runId>/result.json`: the object the CLI prints, plus LF. */
 export async function writeResult(workspaceRoot: string, result: EngineResult): Promise<void> {
   assertRunId(result.runId);
-  await ensureStateDir(workspaceRoot);
-  const dir = runDir(workspaceRoot, result.runId);
-  await mkdir(dir, { recursive: true });
+  // IR-E1: through a plain state directory and runs directory only (StateDirNotPlainError).
+  const dir = await ensureRunDir(workspaceRoot, result.runId);
   const target = join(dir, RESULT_FILE_NAME);
   const temporary = `${target}.${process.pid}.tmp`;
   await writeFile(temporary, `${JSON.stringify(result)}\n`, "utf8");

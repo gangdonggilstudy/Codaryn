@@ -51,6 +51,7 @@ import type {
 } from "../contracts/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
+  STATE_DIR_NOT_PLAIN_MESSAGE,
   acquireLock,
   hasRecordsChangedMark as storeHasRecordsChangedMark,
   inspectRun as storeInspectRun,
@@ -506,6 +507,7 @@ export async function recordReview(
 
   const lockId = createRunId(new Date(io.clock.now()), io.randomBytes);
   const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: io.clock });
+  if (!lock.ok && lock.code === "state_dir_not_plain") return { ok: false, outcome: cliError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE) };
   if (!lock.ok) return { ok: false, outcome: cliError("workspace_locked", "another run or revert holds the workspace; nothing was written") };
   let replaced: boolean;
   try {

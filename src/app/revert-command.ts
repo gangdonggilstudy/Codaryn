@@ -15,7 +15,7 @@ import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
 import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, REVERT_EXIT_CODES, RESULT_SCHEMA_VERSION, RUNS_DIR_NAME, STATE_DIR_NAME, UNSAFE_MOVE_CONSENT_ARGUMENT, planApplyStateOf } from "../contracts/index.js";
 import type { PlanApplyState, RunId, RunListEntry, RunReason } from "../contracts/index.js";
-import { RevertRunError, acquireLock, hasRecordsChangedMark, listRuns as storeListRuns, releaseLock } from "../store/index.js";
+import { RevertRunError, STATE_DIR_NOT_PLAIN_MESSAGE, acquireLock, hasRecordsChangedMark, listRuns as storeListRuns, releaseLock } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
@@ -293,6 +293,7 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     }
 
     const lock = await acquireLock({ workspaceRoot, runId: lockId, clock });
+    if (!lock.ok && lock.code === "state_dir_not_plain") return { ok: false, code: "state_dir_not_plain", message: STATE_DIR_NOT_PLAIN_MESSAGE };
     if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
     /** The revert itself, under the lock. */
     const underLock = async (): Promise<RevertCommandOutcome> => {

@@ -37,7 +37,7 @@ U333 최초 u22 원인, U321 부모 교체/마지막 검사 뒤 hard-link 경합
 | 2 | 코드 수정·검증 반복 | 오프라인 구현과 검증 완료(2026-11-12, main `4074d5c`). 실 API 기준은 확인하지 않았다. 그 기준이 말하는 연습 과제 묶음과 합격 기준은 testing.md에 아직 정해지지 않았다 |
 | 3 | 자기 소스 후보 개발 | 오프라인 기구(무결성 확인, 설치 위치 거부, `report`, `doctor`, 후보 스크립트)와 대본 모델 예행(통합 `k03`)까지다. 실제 모델의 자기 개발은 확인하지 않았다. 입력 조건(단계 2 실 API 통과)을 충족하지 않았고 과제별 한도 값도 정하지 않아 완료가 아니다 |
 | 4 | 범용 작업 확장 | P0 구현(main `d7f8381`부터): 작업 종류 다섯, 계획 확인 → 승인·적용 → 되돌리기, 사람 확인. 완료 기준 셋을 충족했다(통합 n06~n08). P1 묶음 가운데 `markdown` 규칙(`markdown_headings`, `markdown_links`)은 있다(U-116 `4df5be8`). `query_table`, `analyze-private`, `plan:"run"`, 읽기 제외 경로는 없다 |
-| 5 | GUI·IDE | 독립 GUI 구현(DR-20 Electron, DR-26 엔진 전용 Node 프로세스, `gui/`). VS Code 확장은 만들지 않는다(DR-20). 실행 중 권한 확인(DR-3)은 엔진·앱 계층·CLI까지 들어왔다(U-74 `08bee85`, U-108 `7f2de4c`, U-109·U-110 `15e49a4`, U-137 `118338d`). GUI는 메인 프로세스의 OS 대화상자로 묻는다(U-124 `aa723d2`). DR-65의 C1~C11 공통 규칙 이동과 app→CLI 임시 의존 제거는 완료했다(AC-D16은 과거 이력). 완료가 아니다: CLI와 비교하는 계약 층 시험(같은 대본을 CLI와 GUI 엔진 호스트로 돌려 결과와 기록을 비교, 설계 12절)은 실제 CLI와 별도 엔진 호스트의 전체 저장 result·journal 비교로 다섯 사례다: CP53의 한 사례(`823486b5`, `gui/tests/unit/cli-host-parity.test.ts`)와 CP-65의 C-1~C-4(`d692e8d6`, `gui/tests/unit/cli-host-contract.test.ts`: 재수정, 도구 호출 한도, 모델 요청 중 취소, 권한 질문의 기본 거부). 사람의 거부(`by: "user"`), 질문 중 취소(`by: "cancelled"`), 질문 대기의 시간 한도는 아직 비교하지 않는다. GUI는 로컬 zip 꾸러미까지 만들었고(GU-9, CP-64), 코드 서명·설치 파일·외부 게시는 승인 전이다(GUI-D9, DR-67) |
+| 5 | GUI·IDE | 독립 GUI 구현(DR-20 Electron, DR-26 엔진 전용 Node 프로세스, `gui/`). VS Code 확장은 만들지 않는다(DR-20). 실행 중 권한 확인(DR-3)은 엔진·앱 계층·CLI까지 들어왔다(U-74 `08bee85`, U-108 `7f2de4c`, U-109·U-110 `15e49a4`, U-137 `118338d`). GUI는 메인 프로세스의 OS 대화상자로 묻는다(U-124 `aa723d2`). DR-65의 C1~C11 공통 규칙 이동과 app→CLI 임시 의존 제거는 완료했다(AC-D16은 과거 이력). CLI와 비교하는 계약 층 시험(같은 대본을 CLI와 GUI 엔진 호스트로 돌려 결과와 기록을 비교, 설계 12절)은 실제 CLI와 별도 엔진 호스트의 전체 저장 result·journal 비교로 여덟 사례다: CP53의 한 사례(`823486b5`, `gui/tests/unit/cli-host-parity.test.ts`)와 `gui/tests/unit/cli-host-contract.test.ts`의 C-1~C-7(C-1~C-4 `d692e8d6`: 재수정, 도구 호출 한도, 모델 요청 중 취소, 권한 질문의 기본 거부. C-5~C-7 `809cb4f2`: 사람의 거부 `by: "user"`, 질문 중 취소 `by: "cancelled"`, 질문 대기의 시간 한도). 남는 한계: CLI 터미널은 `tests/` 아래 preload가 `isTTY`만 바꿔 흉내 내고(raw mode·echo 없음, [시험 전용 입력 길 없음](development-workflow.md#7-커밋)), C-7은 시간에 기대며, 이 PC의 Windows에서만 돌렸다. 완료가 아니다: GUI는 로컬 zip 꾸러미까지 만들었고(GU-9, CP-64), 코드 서명·설치 파일·외부 게시는 승인 전이다(GUI-D9, DR-67) |
 
 ## 단계 0. 문서와 설계
 
@@ -146,8 +146,10 @@ U333 최초 u22 원인, U321 부모 교체/마지막 검사 뒤 hard-link 경합
   - 산출물 GUI 어댑터: 충족(코드 기준). `gui/`의 화면과 엔진 호스트, GUI 유닛·연기 시험이 있다. 설치 패키지와 코드 서명은 없다(GU-9, 사용자 승인 사항).
   - 산출물 VS Code 어댑터: 만들지 않는다(DR-20). 이 기준은 낡았다.
   - 어댑터가 CLI와 같은 엔진·정책·기록을 씀: 일부. GUI는 앱 계층을 거쳐 같은 엔진을 쓰지만, 앱 계층 안에서 CLI 함수를 감싼다(`src/app/app.ts`가 `../cli/`를 가져다 씀, AC-D16 임시 의존). 같은 대본을 CLI와 GUI 엔진 호스트로 돌려 비교하는 계약 층 시험은 없다.
+    - 현재 상태(2026-11-25, main `ef3222d7`): `src/app`에서 `../cli/`를 가져오는 import는 0이다(C11에서 AC-D16 임시 의존 제거). 계약 층 시험은 실제 CLI와 별도 엔진 호스트를 비교하는 여덟 사례다(CP53의 한 사례와 `gui/tests/unit/cli-host-contract.test.ts`의 C-1~C-7, [구조](architecture.md)).
   - 어댑터에 작업 논리 없음: 충족(코드 기준, `gui/src/engine-host/host.ts`가 앱 계층만 부른다).
   - 확인 질문과 취소가 CLI와 같은 뜻: 일부. 취소는 같다. 확인 질문(DR-3)은 엔진·CLI·GUI 어디에도 없다.
+    - 현재 상태(2026-11-25, main `ef3222d7`): 권한 질문(DR-3)은 엔진이 묻고(`askPermission`, `src/engine`), 앱 계층이 실행 관찰자의 `confirm`으로 중계하며(`src/app/run-hooks.ts`, `src/app/apply-life.ts`), CLI는 터미널(`src/cli/confirm.ts`), GUI는 메인 프로세스의 OS 대화상자(`gui/src/main/app.ts`)로 받는다. 기본 거부·사람의 거부·질문 중 취소·대기 시간 한도의 기록이 두 쪽에서 같음을 C-4~C-7이 비교한다.
 - 입력의 현재 상태
   - 어댑터 경계: 엔진은 contracts만 쓴다. C1~C11 범위의 공통 규칙 이동과 app→CLI 임시 의존 제거는 완료했다. CLI는 run·apply 수명, report·revert·runs의 공통 규칙, doctor·models·init core를 앱과 공유하고 `changes`는 앱 명령을 부른다. CLI 고유 질문·출력·일부 명령 parser는 남는다([어댑터 계약 7.2절](design/adapter-contract.md)).
   - GUI 형태와 지원 OS: 독립 GUI 하나, Electron, Windows 11 x64 먼저(DR-20, 사용자 확정). 엔진은 Node 26 이상의 별도 프로세스(DR-26).

@@ -489,6 +489,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
   - 설정이 `null`이면 그 필드는 절대 상한만 적용한다.
   - 설정에 없는 필드는 task 값을 쓴다.
 - **API 제공자(anthropic, openai)는 `maxTotalTokens: null`을 쓸 수 없다**(19.2). task가 준 `null`이면 `invalid_task`, 설정이 준 `null`이면 `invalid_config`다. scripted는 `null`을 허용한다.
+- **턴·토큰 한도는 추가 모델 요청의 기준이다.** 누적 입력·출력 토큰 합이 한도에 닿거나 넘으면 다음 모델 요청을 하지 않으며, 추가 요청이 필요하면 `budget-exhausted`/`max_total_tokens`(종료 4)로 끝난다. 이미 받은 응답은 한도를 넘긴 응답도 처리한다. 도구 호출은 다른 권한·한도·취소 규칙을 따르고, 최종 답이면 검증을 거쳐 끝날 수 있다. 마지막 허용 턴을 처리하는 `maxModelTurns`와 같으며, 실제 사용량이 토큰 한도를 넘지 않는다는 보장은 아니다.
 - **코드의 절대 상한(`ABSOLUTE_LIMITS`):**
   - 턴 1000
   - 도구 호출 5000

@@ -276,8 +276,12 @@ export interface ConfirmablePolicyConfig extends PolicyConfig {
 
 /**
  * Limits as a task or config file states them.
- * The four budget limits are positive integers and cover the whole run, repairs included.
- * Exceeding one ends the run as `budget-exhausted`.
+ * The four budget limits cover the whole run, repairs included.
+ * Turn and known-token totals at or above their limits forbid the next model request:
+ * if another request is needed, the run ends as `budget-exhausted`.
+ * A response already received is processed, even when its usage exceeds the token limit;
+ * its final answer may still be verified, as with the last permitted model turn.
+ * Tool-call and duration limits also stop processing in progress.
  * The two repair limits may be left out of both files; see `ResolvedLimits` for the defaults.
  */
 export interface Limits {

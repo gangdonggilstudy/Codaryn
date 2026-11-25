@@ -60,8 +60,11 @@ for (const link of LINKS) {
       const { root, outside } = await layout(t, place, link.kind);
       const lock = await acquireLock({ workspaceRoot: root, runId: RUN, clock });
       if (lock.ok) await releaseLock({ workspaceRoot: root, runId: RUN });
-      if (place === "state") assert.deepEqual(lock, { ok: false, code: "state_dir_not_plain", holder: null });
+      // E1R-2: refused in both places (a link at runs too), before anything is written.
+      assert.deepEqual(lock, { ok: false, code: "state_dir_not_plain", holder: null });
       assert.deepEqual(await listed(outside), [], "nothing was written through the link");
+      // E1R-2: nor in .codaryn itself: no lock, reclaim file or .gitignore beside the runs link.
+      if (place === "runs") assert.deepEqual(await readdir(join(root, ".codaryn")), ["runs"]);
     });
 
     test(`IR-E1 (${link.kind} at ${where}): the journal, the result and the change recorder reject and write nothing there`, { skip: link.skip }, async (t) => {

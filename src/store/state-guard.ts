@@ -52,7 +52,7 @@ import type {
 } from "../contracts/index.js";
 import { changeRecorderWith } from "./changes.js";
 import { discardedRootPath } from "./discarded.js";
-import { assertRunId, createExclusive, errorCode, hasExactRunEntry, isPlainDirectory, replaceAtomically, runDir, sha256Hex } from "./common.js";
+import { StateDirNotPlainError, assertRunId, createExclusive, errorCode, hasExactRunEntry, isPlainDirectory, isPlainRunDir, replaceAtomically, runDir, sha256Hex } from "./common.js";
 import { appendOnlyJournal } from "./journal.js";
 import { markPlanAppliedWith, planRecorderWith } from "./plan.js";
 import type { RunWriteNotes } from "./run-writes.js";
@@ -471,7 +471,11 @@ function guardFor(options: RunRecordersOptions): { readonly notes: RunWriteNotes
       for (const [id, paths] of byRun) {
         try {
           const dir = runDir(workspaceRoot, id);
-          if (id !== runId && !((await hasExactRunEntry(workspaceRoot, id)) && (await isPlainDirectory(dir)))) continue;
+          if (id === runId) {
+            // E1R-1: the run's own mark only through a plain .codaryn, runs and run directory (IR-E1);
+            // otherwise it is a mark that could not be written (the run still ends state_changed).
+            if (!(await isPlainRunDir(workspaceRoot, id))) throw new StateDirNotPlainError();
+          } else if (!((await hasExactRunEntry(workspaceRoot, id)) && (await isPlainDirectory(dir)))) continue;
           await writeMark(dir, id, { detectedBy: runId, at, paths });
           written += 1;
         } catch (error) {

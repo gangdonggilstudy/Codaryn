@@ -45,7 +45,7 @@ import type {
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { ApplyRecordError, PlanRunMissingError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
-import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir, sha256Hex } from "./common.js";
+import { assertRunId, ensureRunDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir, sha256Hex } from "./common.js";
 import { recordsChangedMarkIn } from "./marks.js";
 import type { RunWriteNotes } from "./run-writes.js";
 
@@ -212,7 +212,8 @@ export function changeRecorderWith(options: Parameters<CreateChangeRecorder>[0],
     const current = await load();
     if (current.some((entry) => entry.path === relative)) return;
 
-    await ensureStateDir(workspaceRoot);
+    // IR-E1: through a plain state directory and runs directory only (StateDirNotPlainError).
+    await ensureRunDir(workspaceRoot, runId);
     await mkdir(dir, { recursive: true });
     if (notes !== undefined) await notes.dir(dir);
     let entry: IndexEntry;

@@ -8,7 +8,7 @@
  */
 
 import { createPrivacyGateway } from "../privacy/index.js";
-import { acquireLock, createRunRecorders, hasRecordsChangedMark, releaseLock, stateUncheckedSince, writeResult } from "../store/index.js";
+import { STATE_DIR_NOT_PLAIN_MESSAGE, acquireLock, createRunRecorders, hasRecordsChangedMark, releaseLock, stateUncheckedSince, writeResult } from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createPlannedFileProbe, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
@@ -122,6 +122,8 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
   const workspaceRoot = workspace.root;
 
   const lock = await acquireLock({ workspaceRoot, runId, clock });
+  // IR-E1: a linked state directory is refused before anything is recorded or sent.
+  if (!lock.ok && lock.code === "state_dir_not_plain") return { ok: false, code: "state_dir_not_plain", message: STATE_DIR_NOT_PLAIN_MESSAGE };
   if (!lock.ok) return { ok: false, code: "workspace_locked", message: lockedMessage(lock.holder) };
 
   try {

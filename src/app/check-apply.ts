@@ -39,7 +39,7 @@ import { RUN_ID_PATTERN } from "../contracts/index.js";
 import { createRunId } from "./input/run-id.js";
 import { preflightPlan } from "../engine/index.js";
 import { runGuards } from "./input/unreadable.js";
-import { acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";
+import { STATE_DIR_NOT_PLAIN_MESSAGE, acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";
 import { createPlanExecutor } from "../tools/index.js";
 import type { PlanFileOps } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -158,6 +158,7 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
 
   const lockId = createRunId(new Date(source.clock.now()), source.randomBytes);
   const lock = await acquireLock({ workspaceRoot: workspace.root, runId: lockId, clock: source.clock });
+  if (!lock.ok && lock.code === "state_dir_not_plain") return { ok: false, error: appError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE) };
   if (!lock.ok) return { ok: false, error: appError("workspace_locked", "another run or revert holds the workspace; nothing was checked") };
 
   const problems: { index: number; problem: PlanItemProblem }[] = [];

@@ -589,6 +589,8 @@ export const KO_MESSAGES: MessageTexts = {
   "error.cleanup_plan_changed.fix": "미리보기를 다시 확인하고, 거기 보이는 다이제스트로 확인하세요.",
   "error.invalid_run_record.what": "실행 기록을 읽거나 해석할 수 없어 아무것도 바꾸지 않았습니다",
   "error.invalid_run_record.fix": ".codaryn/runs 아래 파일이 바뀌지 않았는지 확인하세요.",
+  "error.state_dir_not_plain.what": "작업 공간의 .codaryn(또는 그 안의 runs)이 링크·junction이거나 일반 폴더가 아닙니다. 아무것도 쓰지 않았습니다",
+  "error.state_dir_not_plain.fix": "링크를 지우거나 일반 폴더로 바꾼 뒤 다시 실행하세요.",
   "error.run_not_plan.what": "그 실행에는 저장된 계획이 없습니다",
   "error.run_not_plan.fix": "계획 승인 대기(plan_pending)로 끝난 실행의 id를 주세요. codaryn runs로 찾을 수 있습니다.",
   "error.plan_not_approved.what": "계획이 승인되지 않아 아무것도 바꾸지 않았습니다",

@@ -49,7 +49,7 @@ import { join } from "node:path";
 
 import { LOCK_FILE_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { Clock } from "../contracts/index.js";
-import { assertRunId, ensureStateDir, errorCode, isLinkUnsupported } from "./common.js";
+import { StateDirNotPlainError, assertRunId, ensureStateDir, errorCode, isLinkUnsupported } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
 
 export interface LockInfo {
@@ -137,7 +137,16 @@ export type AcquireLockOutcome =
       readonly code: "workspace_locked";
       /** `null` when the existing lock file could not be read or understood. It is never reclaimed then. */
       readonly holder: LockInfo | null;
-    };
+    }
+  /**
+   * IR-E1: `.codaryn` or its `runs` directory is a link or not a plain directory; nothing was written.
+   * No process holds anything (`holder` null, as every failure has one); callers tell it by `code`.
+   */
+  | { readonly ok: false; readonly code: "state_dir_not_plain"; readonly holder: null };
+
+/** IR-E1: the message of state_dir_not_plain, the same from every command that takes the lock. */
+export const STATE_DIR_NOT_PLAIN_MESSAGE =
+  "the state directory .codaryn (or its runs directory) is a link, a junction or not a plain directory; nothing was written";
 
 export interface ReleaseLockOptions {
   readonly workspaceRoot: string;
@@ -523,6 +532,7 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   try {
     stateDir = await ensureStateDir(workspaceRoot);
   } catch (error) {
+    if (error instanceof StateDirNotPlainError) return { ok: false, code: "state_dir_not_plain", holder: null };
     if (isTransient(error)) return locked(null);
     throw error;
   }

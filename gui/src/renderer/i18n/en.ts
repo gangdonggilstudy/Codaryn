@@ -610,6 +610,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "error.key_in_file": "A key value is in the config file or the goal, so nothing was sent. Remove it and register the key as the provider's environment variable (the variable's name is on the Settings screen).",
   "error.plan_not_approved": "The plan was not approved, so nothing was changed. Open the plan again on the Plan screen and apply it.",
   "error.invalid_run_record": "A run record cannot be read or understood, so nothing was changed. Check that no file under the workspace's .codaryn/runs was changed.",
+  "error.state_dir_not_plain": "The run record folder (.codaryn), or its runs folder, is a link, a junction or not a plain folder, so nothing was written. Remove the link or make it a plain folder, then try again.",
   "error.invalid_task": "The task definition (task file) cannot be read or has a wrong value. See why on the Checks screen.",
   "error.secret_env_missing": "An environment variable named as a secret is not set. Set it and start the app again, or remove the name from the secret names on the Settings screen.",
   "error.workspace_is_install_dir": "The workspace overlaps the folder Codaryn is installed in. Open another folder (a copy, for example) as the workspace.",

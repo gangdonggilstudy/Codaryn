@@ -7,12 +7,12 @@
 
 import { createHash } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { JOURNAL_FILE_NAME } from "../contracts/index.js";
 import type { Clock } from "../contracts/index.js";
-import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
+import { assertRunId, ensureRunDir, errorCode, runDir } from "./common.js";
 import type { RunWriteNotes } from "./run-writes.js";
 
 export interface JournalOptions {
@@ -51,8 +51,8 @@ export function appendOnlyJournal<E extends { readonly type: string }>(
   let expectedSize = 0;
 
   async function openForAppend(): Promise<FileHandle> {
-    await ensureStateDir(workspaceRoot);
-    await mkdir(dir, { recursive: true });
+    // IR-E1: through a plain state directory and runs directory only (StateDirNotPlainError).
+    await ensureRunDir(workspaceRoot, runId);
     if (notes !== undefined) await notes.dir(dir);
     let existing = "";
     try {

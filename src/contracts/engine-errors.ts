@@ -48,6 +48,12 @@ export const CLI_ERROR_EXIT_CODES = {
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
   invalid_run_record: 2,
   /**
+   * IR-E1: the workspace's state directory `.codaryn`, or its `runs` directory, is a link, a junction
+   * or not a plain directory. Every command that takes the workspace lock (run, apply, review, revert,
+   * the app's apply check and text save) refuses before anything is written. Nothing was written.
+   */
+  state_dir_not_plain: 2,
+  /**
    * G-A (R-9c C-1), `codaryn revert --run <apply runId>`: the plan run that apply used
    * (`apply_started.planRunId`) has no directory or no plan.json any more. The real paths of the
    * apply's files are known only from that plan (DR-24 f), so nothing was changed. A plan run must
@@ -129,6 +135,7 @@ export const CLI_ERROR_CATEGORY: { readonly [C in CliErrorCode]: CliErrorCategor
   config_exists: "state",
   run_not_found: "state",
   invalid_run_record: "state",
+  state_dir_not_plain: "state",
   plan_run_missing: "state",
   run_not_plan: "input",
   plan_not_approved: "input",
@@ -164,6 +171,7 @@ export const CLI_ERROR_RETRYABLE: { readonly [C in Exclude<CliErrorCode, "model_
   config_exists: false,
   run_not_found: false,
   invalid_run_record: false,
+  state_dir_not_plain: false,
   plan_run_missing: false,
   run_not_plan: false,
   plan_not_approved: false,

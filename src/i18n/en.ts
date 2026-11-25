@@ -590,6 +590,8 @@ export const EN_MESSAGES: MessageTexts = {
   "error.cleanup_plan_changed.fix": "Look at the preview again and confirm the digest it shows.",
   "error.invalid_run_record.what": "the run record cannot be read or parsed, so nothing was changed",
   "error.invalid_run_record.fix": "Check that the files under .codaryn/runs were not changed.",
+  "error.state_dir_not_plain.what": "the state directory .codaryn (or its runs directory) is a link, a junction or not a plain directory; nothing was written",
+  "error.state_dir_not_plain.fix": "Remove the link or make it a plain directory, then run again.",
   "error.run_not_plan.what": "that run has no stored plan",
   "error.run_not_plan.fix": "Give the id of a run that ended waiting for plan approval (plan_pending). codaryn runs lists them.",
   "error.plan_not_approved.what": "the plan was not approved, so nothing was changed",

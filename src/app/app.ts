@@ -17,19 +17,14 @@
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
-  AnthropicProviderDeps,
-  ApiProviderDeps,
-  ApiProviderName,
   ApplyPlan,
   AnyPlanOutput,
   ChangesPlanOutput,
   PlanOutput,
   ReviewOutput,
-  CreateAnthropicProvider,
   DefaultConfigLocation,
   DoctorOutput,
   InitOutput,
-  ListAnthropicModels,
   MessageCatalog,
   ModelsOutput,
   ReportOutput,
@@ -44,7 +39,6 @@ import { applyPlan as engineApplyPlan } from "../engine/index.js";
 import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
-import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand, revertOnce, revertOutput, startRevert } from "./revert-command.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { checkDoctor } from "./doctor.js";
@@ -74,14 +68,11 @@ import { applyArguments, deliverApply } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import "./changes.js";
-import type { ReadChangesDeps } from "./changes.js";
 import "./workspace-dir.js";
 import "./run-events.js";
 import { checkApplyArguments, checkApplyIn } from "./check-apply.js";
 import { changesPlanViewIn, checkChangesPlanFiles, storedPlanKindOf } from "./changes-plan.js";
-import type { ApplyCheckOperations } from "./check-apply.js";
 import "./workspace-text.js";
-import type { WorkspaceTextOperations } from "./workspace-text.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { appRunHooks } from "./run-hooks.js";
@@ -135,38 +126,9 @@ import type {
 } from "./types.js";
 import { createReadingContext } from "./reading-context.js";
 import { createReadingCommands } from "./reading-commands.js";
+import type { AppHooks } from "./app-hooks.js";
 
-/**
- * Replaceable parts, for tests: the Anthropic provider factory and its transport (as the CLI's
- * own tests inject them), and the engine. Leave them out in real use.
- */
-export interface AppHooks {
-  readonly createAnthropicProvider?: CreateAnthropicProvider;
-  readonly anthropicDeps?: AnthropicProviderDeps;
-  /**
-   * GUI F-2 (R21b-I-1): each API provider's injection points (its `fetch`, its `sleep`), as the CLI's
-   * runCli and runModels take them. For anthropic an entry here is used instead of `anthropicDeps`.
-   * Absent: the provider uses the global fetch.
-   */
-  readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
-  readonly runTask?: RunTask;
-  /** U-218: the engine of a run that carries out an approved run plan (runApprovedPlan of src/engine when absent). Tests only. */
-  readonly runApprovedPlan?: RunApprovedPlan;
-  /** The apply engine (`applyPlan` of src/engine when absent). Tests give a stand-in to see what it was given. */
-  readonly applyPlan?: ApplyPlan;
-  /** The model listing (`listAnthropicModels` when absent). Tests give a fake so nothing is sent. */
-  readonly listModels?: ListAnthropicModels;
-  /** The config writer of `selectModel` (`writeConfigAtomic` when absent). */
-  readonly writeConfig?: ModelsCommandEnvironment["writeConfig"];
-  /** The store's cleanup operations (its removal, its mark writer). Tests give a removal that refuses. */
-  readonly cleanupOperations?: CleanupOperations;
-  /** U-91: the check's executor file operations, probe removal and lock release. Tests give ones that fail. */
-  readonly applyCheck?: ApplyCheckOperations;
-  /** U-172: writeWorkspaceText's lock release, and a pause at each check (V-1's races). Tests only. */
-  readonly workspaceText?: WorkspaceTextOperations;
-  /** U-234: the changes view's reads (a wrapped workspace). Tests only; the signal comes from the call. */
-  readonly changesRead?: Pick<ReadChangesDeps, "createWorkspace">;
-}
+export type { AppHooks } from "./app-hooks.js";
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
 export function runArguments(request: StartRunRequest): string[] {

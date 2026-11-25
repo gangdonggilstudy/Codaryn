@@ -8,6 +8,7 @@ import { deliver, journalWithEvents } from "./events.js";
 import { confirmThrough } from "./permission.js";
 import type { RunLifeEnvironment } from "./run-life.js";
 import type { AppEnvironment, RunObserver } from "./types.js";
+import type { AppHooks } from "./app-hooks.js";
 
 /**
  * The hooks of a run through the app, for the CLI's run environment: startRun's, and since U-218
@@ -26,7 +27,7 @@ export function appRunHooks(
   observer: RunObserver | undefined,
   environment: AppEnvironment,
   platform: NodeJS.Platform,
-  hooks: { readonly runTask?: RunTask; readonly runApprovedPlan?: RunApprovedPlan },
+  hooks: Pick<AppHooks, "runTask" | "runApprovedPlan">,
   nextMacrotask: () => Promise<void>,
 ) {
   const cancelHandlers = new Set<() => void>();

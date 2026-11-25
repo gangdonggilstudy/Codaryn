@@ -553,10 +553,10 @@ export function registerIpc(deps: IpcDeps): void {
     if (deps.runs.running || starting) return { ok: false, code: "run_active" };
     const root = workspaces.path(parsed.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
     starting = true;
     try {
+      const state = await deps.host();
+      if (!("host" in state)) return { ok: false, code: state.failure };
       const request = { workspace: root, goal: parsed.goal, profile: parsed.profile, workflowRef: parsed.workflow, language };
       const response = await state.host.call("startRun", request, START_TIMEOUT_MS);
       if (!response.ok) return { ok: false, code: response.error.code };
@@ -720,20 +720,19 @@ export function registerIpc(deps: IpcDeps): void {
     if (deps.runs.running || starting) return { ok: false, code: "run_active" };
     const root = workspaces.path(approval.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
-    let consent = false;
-    if (parsed.askConsent) {
-      // DR-21: only after this plan's apply stopped as consent_required, and only from the person's answer.
-      if (!deps.approvals.mayAskConsent(parsed.approval)) return { ok: false, code: "consent_not_asked" };
-      if (!(await deps.confirmConsent(approval))) return { ok: false, code: "not_confirmed" };
-      consent = true;
-    } else if (!(await deps.confirmApply(approval))) {
-      return { ok: false, code: "not_confirmed" };
-    }
-    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
     starting = true;
     try {
+      let consent = false;
+      if (parsed.askConsent) {
+        // DR-21: only after this plan's apply stopped as consent_required, and only from the person's answer.
+        if (!deps.approvals.mayAskConsent(parsed.approval)) return { ok: false, code: "consent_not_asked" };
+        if (!(await deps.confirmConsent(approval))) return { ok: false, code: "not_confirmed" };
+        consent = true;
+      } else if (!(await deps.confirmApply(approval))) {
+        return { ok: false, code: "not_confirmed" };
+      }
+      const state = await deps.host();
+      if (!("host" in state)) return { ok: false, code: state.failure };
       const request = { workspace: root, profile: approval.profile, workflowRef: approval.workflowRef, planRunId: approval.planRunId, digest: approval.digest, consent, language };
       const response = await state.host.call("applyPlan", request, START_TIMEOUT_MS);
       if (!response.ok) return { ok: false, code: response.error.code };

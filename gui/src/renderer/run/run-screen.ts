@@ -31,6 +31,8 @@ export interface RunScreenDeps {
   readonly announce: (text: string) => void;
   /** GU-5: the open workspace (for a review) and the plan screen for a plan run. */
   readonly current: () => Workspace | null;
+  /** Selects the result's origin before a consent retry starts another run there. */
+  readonly activateWorkspace?: () => void;
   readonly openPlan: (runId: string, profile: string | null, workflow: string | null, formKnown?: boolean) => void;
   /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
   readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
@@ -85,6 +87,7 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView, formKno
       const approval = run.approval;
       const message = el("div", undefined, { role: "alert" });
       const agree = button(t.format("run.consentAsk"), () => {
+        deps.activateWorkspace?.();
         if (!run.startingApply(approval)) return;
         agree.setAttribute("disabled", "");
         void (async () => {

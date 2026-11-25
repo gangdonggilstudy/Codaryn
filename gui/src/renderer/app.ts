@@ -46,8 +46,8 @@ async function start(): Promise<void> {
   let shell = null as Shell | null;
   let tree = null as TreeView | null;
   let palette = null as Palette | null;
-  /** U-65: the handle of the workspace the run going on started in. */
-  let runWorkspace: string | null = null;
+  /** The run's origin, retained with its result even when another folder is opened. */
+  let runWorkspace: Workspace | null = null;
   /** U-64, U-69: the engine's state, kept over a redraw. */
   let engineState = info.engine;
   /** U-70 (4.5): the file panel's width as last chosen (kept over a redraw and by the main process). */
@@ -60,7 +60,7 @@ async function start(): Promise<void> {
   // holds the lock once its start answered (running, cancelling); the start call itself is kept, so one
   // refused for the lock does not count.
   const openCheck = new OpenCheck(api, {
-    busy: (handle) => runWorkspace === handle && (run.phase === "running" || run.phase === "cancelling"),
+    busy: (handle) => runWorkspace?.handle === handle && (run.phase === "running" || run.phase === "cancelling"),
     mark: () => ownLock.mark(),
     overlapped: (handle, since) => ownLock.overlapped(handle, since),
   });
@@ -105,7 +105,7 @@ async function start(): Promise<void> {
   };
   const run = new RunModel();
   // U-68: this window's own run in the open workspace holds its lock; that is not another run's.
-  const ownRunHere = (): boolean => runWorkspace !== null && runWorkspace === current?.handle && run.phase !== "idle" && run.phase !== "done";
+  const ownRunHere = (): boolean => runWorkspace !== null && runWorkspace.handle === current?.handle && run.phase !== "idle" && run.phase !== "done";
   // U-247, Codex V-27 L-1: held until an answer says free (a check going on or failed keeps it).
   const lockedByOther = (): boolean => heldFor(openCheck.state, current?.handle) && !ownRunHere();
   const runGoing = (): boolean => run.phase !== "idle" && run.phase !== "done";
@@ -141,7 +141,11 @@ async function start(): Promise<void> {
     shell = frame;
     frame.mount(root);
     // U-174 (DR-72, 3.14): the read-only text view of a tree or changes entry, by the main process's id.
-    const text = textScreen({ texts, api, current: () => current, back: (id) => shell?.show(id), running: runGoing, watchRun: (listener) => run.subscribe(listener) });
+    let openTaskFile = (): void => undefined;
+    const text = textScreen({ texts, api, current: () => current, back: (id) => {
+      if (id === "newtask-file") openTaskFile();
+      else shell?.show(id);
+    }, running: runGoing, watchRun: (listener) => run.subscribe(listener) });
     const openText = (node: string, name: string, from: string): void => {
       // U-184: with an unsaved edit the view asks first, and opens the file once the edit is let go.
       if (text.choose({ node, name }, from)) shell?.show("text");
@@ -154,8 +158,7 @@ async function start(): Promise<void> {
     frame.add(
       homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace, takeOpenError, openCheck: { check: openCheck, ownRun: ownRunHere, showChecks: () => shell?.show("checks") } }),
     );
-    frame.add(
-      newTaskScreen({
+    const newTask = newTaskScreen({
         texts,
         api,
         run,
@@ -175,8 +178,14 @@ async function start(): Promise<void> {
           recheck: () => void openCheck.run(current),
           watch: (watcher) => openCheck.watch("newtask", watcher),
         },
-      }),
-    );
+      });
+    frame.add(newTask);
+    openTaskFile = (): void => {
+      // The text screen keeps or discards its edit before continuing this explicit action.
+      if (shell?.currentScreen === "text" && !text.leave("newtask-file")) return;
+      shell?.show("newtask");
+      if (shell?.currentScreen === "newtask") newTask.chooseTaskFile();
+    };
     const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run"), showScreen: (id) => shell?.show(id) });
     /** `formKnown` false: the run's form is unknown (started elsewhere); its plan is shown, not applied. */
     const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true, recordsChanged = false): void => {
@@ -202,7 +211,14 @@ async function start(): Promise<void> {
       shell?.show("runs");
     };
     const openSettings = (): void => shell?.show("settings");
-    frame.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport, openRevert, openSettings, showScreen: (id) => shell?.show(id) }));
+    const resultWorkspace = (): Workspace | null => run.last?.taskFile === true ? current : runWorkspace ?? current;
+    const fromResult = <Args extends unknown[]>(action: (...args: Args) => void) => (...args: Args): void => {
+      const workspace = resultWorkspace();
+      if (workspace !== null && workspace.handle !== current?.handle) setWorkspace(workspace);
+      action(...args);
+    };
+    frame.add(runScreen({ texts, api, run, newTask: fromResult(() => shell?.show("newtask")), announce: (text) => shell?.announce(text), current: resultWorkspace,
+      activateWorkspace: fromResult(() => undefined), openPlan: fromResult(openPlan), openChanges: fromResult(openChanges), openReport: fromResult(openReport), openRevert: fromResult(openRevert), openSettings, showScreen: (id) => shell?.show(id) }));
     frame.add(plan);
     frame.add(changes);
     frame.add(report);
@@ -219,10 +235,7 @@ async function start(): Promise<void> {
         id: "taskfile",
         label: texts.format("cmd.taskFile"),
         keys: null,
-        run: () => {
-          shell?.show("newtask");
-          document.getElementById("task-run-file")?.click();
-        },
+        run: openTaskFile,
       },
       { id: "open", label: texts.format("cmd.openWorkspace"), keys: "Ctrl+O", run: openWorkspace },
       { id: "recent", label: texts.format("cmd.recent"), keys: null, run: () => shell?.show("home") },
@@ -306,9 +319,8 @@ async function start(): Promise<void> {
     run.finished(done);
     // U-65 (3.3): the tree is read again, and marks what this run did when it ran in the open workspace
     // with a form the window knows (a task file's run names its own workspace); else the old marks go.
-    const here = runWorkspace !== null && runWorkspace === current?.handle && run.last !== null && run.last.taskFile !== true;
-    const applyHere = runWorkspace !== null && runWorkspace === current?.handle;
-    runWorkspace = null;
+    const here = runWorkspace !== null && runWorkspace.handle === current?.handle && run.last !== null && run.last.taskFile !== true;
+    const applyHere = runWorkspace !== null && runWorkspace.handle === current?.handle;
     if (done.ok && done.result.kind === "run" && here) tree?.markRun({ runId: done.runId, profile: run.last?.profile ?? null, workflow: run.last?.workflow ?? null }, done.result.changes);
     // U-271 (3.3): an apply of moves in the open workspace: what it moved, and how many it discarded.
     else if (done.ok && done.result.kind === "apply" && applyHere) tree?.markApply({ runId: done.runId, profile: null, workflow: null }, done.result.applied);
@@ -318,11 +330,13 @@ async function start(): Promise<void> {
     void openCheck.run(current);
     shell?.announce(done.ok ? texts.format("run.ended", { status: done.labels.status }) : texts.format("run.endedError", { code: done.code }));
   });
+  let previousPhase = run.phase;
   run.subscribe(() => {
     // U-65: the workspace a run started in (the open one then).
     // A start that was refused (back to idle) forgets it.
     if (run.phase === "idle") runWorkspace = null;
-    if (run.phase !== "idle" && run.phase !== "done" && runWorkspace === null) runWorkspace = current?.handle ?? null;
+    if ((run.phase === "starting" && previousPhase !== "starting") || (run.phase !== "idle" && run.phase !== "done" && runWorkspace === null)) runWorkspace = current;
+    previousPhase = run.phase;
     updateRunStatus();
   });
 

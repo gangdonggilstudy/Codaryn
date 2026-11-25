@@ -790,6 +790,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - 메인의 검사
   - 보낸 쪽: 요청이 앱 창의 주 프레임이고 그 프레임의 주소가 `app://codaryn/`인지 본다. 아니면 거부한다.
   - 인자: 함수마다 손으로 쓴 검사기(형식, 길이 상한, 허용 값 목록)로 본다. 목표 길이 상한은 CLI와 같다. 모르는 필드가 있으면 거부한다. 검사 라이브러리를 새로 들이지 않는다(7절).
+  - [결정] 검사기의 자리(현재 상태 2026-11-26, main `46b1e3c1`; IR-26 IPC 분할). 검사기는 `gui/src/shared/ipc/`의 열 모듈에 있고, 주 프로세스·엔진 호스트·화면은 facade `gui/src/shared/ipc.ts`로만 쓴다. 분야 모듈끼리는 import하지 않는다(분야 → `core` → `primitives`). 같은 보안 문자 집합(LF·TAB 밖의 제어 문자, 줄·문단 구분자, 방향 문자)은 `primitives`의 `UNSAFE_IN_MESSAGE` 한 선언만 두고, 텍스트 보기·마지막 답·계획 요약 행·계획 파일 경로가 함께 쓴다. 지킴 시험 `gui/tests/unit/ipc-guards.test.ts`가 `shared/` 밖의 직접 import 0, 이 방향, 텍스트 보기와 마지막 답이 같은 문자를 거부함을 고정한다. 이유: 검사기가 복제되거나 깊은 경로로 우회되면 한쪽만 고쳐져 경계가 어긋난다.
   - 실패하면 엔진을 부르지 않고 `invalid_arguments` 성격의 어댑터 오류를 돌려준다.
 - 이벤트는 위 표의 다섯 구독(`onRunEvents`, `onRunDone`, `onWorkspaceOpened`, `onEngineState`, `onTreeReset`)으로만 받는다. preload가 콜백에 넘기는 값은 복사본이다.
 
@@ -927,9 +928,20 @@ gui/                          (U-60에서 실제에 맞추고 U-271에서 다시
                               check-lock.mjs(7절), smoke.mjs(연기 시험 실행과 판정, 가짜 API)
     package/                  plan.mjs(입력 확인, 허용 목록, 엔진 목록, fuse 값), package.mjs(npm run package: packager, 복사, 시작 확인, fuses, zip, 기록) (GU-9)
   src/
-    shared/                   protocol.ts(엔진 호스트 통로), ipc.ts(IPC 채널, 인자 검사, 보기),
+    shared/                   protocol.ts(엔진 호스트 통로), ipc.ts(IPC facade: 채널·이벤트 이름과 아래 모듈의 공개 이름 재수출),
                               cleanup.ts(정리 보기), settings-edit.ts(설정 편집 하나)
                               (DOM·Electron·Node API 없음)
+      ipc/                    인자 검사·보기의 본문(IR-26 IPC 분할, main 46b1e3c1). 밖에서는 facade로만 쓴다(6.4, 8.3)
+        primitives.ts         잎 검사(객체·키·핸들·실행 id·짧은 글·개수, host 실패 코드, 공통 정규식, UNSAFE_IN_MESSAGE)
+        core.ts               공통 인자·보기(doctor·트리·복사·실행 폼, 마지막 답·계획 행동·실행 결과·가림 개수의 형과 변환)
+        settings.ts           설정 보기, 변경 제안·쓰기 응답, 모델 목록과 선택
+        setup.ts              설정 만들기와 고정 제안(첫 실행 안내)
+        run.ts                실행 시작 인자, 실행 끝 결과·확인 집계, 적용 전 점검 응답
+        runs.ts               실행 목록과 되돌리기 인자·보기
+        text.ts               텍스트 열기·저장(DR-72)
+        plan.ts               실행 기록 페이지, 계획 보기·승인, 변경 비교, 사람의 검토
+        report.ts             보고서 보기와 Markdown
+        cleanup-replies.ts    정리 인자와 응답(shared/cleanup.ts를 쓰는 유일한 IPC 모듈)
     main/                     main.ts(진입), app.ts(수명, 창, 알림, 작업 표시줄), security.ts·security-policy.ts,
                               protocol.ts·app-url.ts, ipc.ts, handles.ts, tree-ids.ts, engine-client.ts,
                               environment.ts, node-path.ts, cli-args.ts, workspaces.ts, gui-state.ts,
@@ -973,7 +985,7 @@ gui/                          (U-60에서 실제에 맞추고 U-271에서 다시
 
 | 층 | 무엇 | 실행 |
 | --- | --- | --- |
-| 유닛 | `shared`(통로, 인자 검사, 보기), `main`의 순수 부분(환경 걸러내기, Node 찾기, 핸들, 앱 URL, 보안 값), 엔진 호스트(가짜 앱), 실제 Node 26 호스트와 실제 엔진, 가짜 엔진·가짜 호스트의 실패, preload 채널 일치, 화면의 `*.model.ts` | `gui`에서 `npm test`(빌드, lock 검사, `node --test build/tests/unit/**/*.test.js`). Electron 없이 루트 Node 26 |
+| 유닛 | `shared`(통로, 인자 검사, 보기, IPC 구조 지킴 `ipc-guards.test.ts`: `shared/` 밖 직접 import 0·의존 방향·같은 보안 문자 집합), `main`의 순수 부분(환경 걸러내기, Node 찾기, 핸들, 앱 URL, 보안 값), 엔진 호스트(가짜 앱), 실제 Node 26 호스트와 실제 엔진, 가짜 엔진·가짜 호스트의 실패, preload 채널 일치, 화면의 `*.model.ts` | `gui`에서 `npm test`(빌드, lock 검사, `node --test build/tests/unit/**/*.test.js`). Electron 없이 루트 Node 26 |
 | 연기(smoke) | 실제 Electron과 실제 엔진 호스트로 창의 점검 표시, 핸들로 다시 점검, 경로·모르는 핸들 거부, 화면에 Node 객체 없음, 바깥 요청·`file://`·새 창·탐색 막힘, 앱 프로세스의 TCP 대기 소켓과 UDP 끝점 0, 맞춤법 사전 받지 않음 | `npm run test:smoke`: `scripts/build/smoke.mjs`가 키 없는 환경, 없는 설정 파일, 새 Chromium 프로필로 `build/tests/smoke/smoke.js`를 Electron에서 실행하고 판정한다. 제품 진입(`main.ts`)에는 들어가지 않는다 |
 | 계약 | 같은 대본 사례를 CLI와 엔진 호스트로 각각 실행해 `EngineResult`와 기록 사건이 같은지 | Node 기본 러너, 대본 제공자(GU-3 뒤) |
 | 보안 | 6.10 GS-1~GS-17 | 연기 시험 안(PM 결정, 8.1). 보강은 구현자가 아닌 세션(G-sec) |

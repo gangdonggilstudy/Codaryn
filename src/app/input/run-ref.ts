@@ -13,12 +13,12 @@
  * - N-23: the caller shows the chosen run (id and start time) before it acts.
  * - U-22 (R-51 M-2): this is the one rule for `latest`. Every command and the app layer resolve it
  *   here (STORE_RUN_REFERENCE_DEPS gives the store's functions), not with a rule of their own.
- * - U-22 (DR-48, AXM-8): `latest` is the newest run. When a run with no usable result (checked
- *   without a result, or damaged before its first journal line) is
- *   newer than the finished run `latestRun` would choose (or there is none) and holds the workspace lock
- *   with a live holder, the answer is `run_in_progress` (try again when it ends), not that older
- *   run and not `run_not_found` (PM decision). A newer run that stopped without a result (no live
- *   lock) is passed over as before. A run id given as it is shows that run.
+ * - U-22 (DR-48, AXM-8), LW-1..4: a listed run with no usable result (checked without a result,
+ *   or damaged) that holds the live workspace lock is current, regardless of id or recorded time.
+ *   The answer is `run_in_progress`, not a completed run or `run_not_found`. One lock snapshot
+ *   is taken here; listRuns keeps its own existing phase inspection. Otherwise latestRun applies.
+ *   A holder not yet listed is skipped: before its run folder exists it cannot be distinguished
+ *   from a revert, apply or cleanup lock id. An explicit run id is used as before.
  */
 
 import { lstat } from "node:fs/promises";
@@ -39,7 +39,9 @@ export interface RunReferenceDeps {
   readonly inspect?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
   /**
    * U-22: whether that run holds the workspace lock with a live holder. Absent: the store's
-   * `inspectLock` (reads only). Asked only for runs without a result newer than the latest finished one.
+   * `inspectLock` (reads only). Candidates are checked runs without a result and damaged runs.
+   * This existing boolean injection is asked per candidate until true; the default reads one lock
+   * snapshot for all candidates. Both ignore id/startedAt order and skip completed runs.
    */
   readonly runInProgress?: (workspaceRoot: string, runId: string) => Promise<boolean>;
 }
@@ -60,12 +62,6 @@ async function pathExists(target: string): Promise<boolean> {
  * a caller that checks the id's exact form (N-27 a) adds the store's `inspectRun`.
  */
 export const STORE_RUN_REFERENCE_DEPS: RunReferenceDeps = { exists: pathExists, listRuns };
-
-async function holdsLock(workspaceRoot: string, runId: string, minimumStartedAt?: string): Promise<boolean> {
-  const lock = await inspectLock(workspaceRoot);
-  return lock.state === "held" && lock.holder.runId === runId &&
-    (minimumStartedAt === undefined || Date.parse(lock.holder.startedAt) >= Date.parse(minimumStartedAt));
-}
 
 export type RunReferenceOutcome =
   | { readonly ok: true; readonly runId: string; readonly latest: CheckedRun | null }
@@ -103,33 +99,29 @@ export async function resolveRunReference(workspaceRoot: string, runId: string, 
   } catch {
     return { ok: false, code: "invalid_run_record", message: "the workspace's run records cannot be listed; nothing was changed" };
   }
-  const latest = latestRun(listing.runs);
-  // U-22: listRuns puts checked entries first and damaged entries last. Keep checking that tail
-  // after the finished run; the empty journal may belong to the run that just took the lock.
-  const inProgress = deps.runInProgress ?? holdsLock;
-  let beforeLatest = true;
-  for (const run of listing.runs) {
-    if (latest !== null && run.runId === latest.runId) { beforeLatest = false; continue; }
-    if (run.state === "checked" && (!beforeLatest || run.status !== null)) continue;
-    // A damaged entry has only its id's second. The live lock's full time resolves same-second ties,
-    // without treating the random id suffix as a chronological order.
-    if (run.state === "damaged" && latest !== null && run.runId.slice(0, 16) < latest.runId.slice(0, 16)) continue;
-    let going: boolean;
+  const candidates = listing.runs.filter(run => run.state === "damaged" || run.status === null);
+  let activeRunId: string | null = null;
+  if (deps.runInProgress !== undefined) {
+    // The legacy injection answers one id at a time; the candidate rule is the same as below.
+    for (const run of candidates) {
+      try {
+        if (await deps.runInProgress(workspaceRoot, run.runId)) { activeRunId = run.runId; break; }
+      } catch { /* An unknown probe is not evidence of a live holder. */ }
+    }
+  } else {
     try {
-      going = run.state === "damaged" && deps.runInProgress === undefined
-        ? await holdsLock(workspaceRoot, run.runId, latest?.startedAt)
-        : await inProgress(workspaceRoot, run.runId);
-    } catch {
-      going = false;
-    }
-    if (going) {
-      return {
-        ok: false,
-        code: "run_in_progress",
-        message: `the latest run (${run.runId}) is still going and has no result yet; nothing was changed. Try again when it ends, or give a run id`,
-      };
-    }
+      const lock = await inspectLock(workspaceRoot);
+      if (lock.state === "held" && candidates.some(run => run.runId === lock.holder.runId)) activeRunId = lock.holder.runId;
+    } catch { /* As with the injected probe, an unknown lock is not a live holder. */ }
   }
+  if (activeRunId !== null) {
+    return {
+      ok: false,
+      code: "run_in_progress",
+      message: `the latest run (${activeRunId}) is still going and has no result yet; nothing was changed. Try again when it ends, or give a run id`,
+    };
+  }
+  const latest = latestRun(listing.runs);
   if (latest === null) {
     return { ok: false, code: "run_not_found", message: "the workspace has no finished run whose records could be checked; nothing was changed" };
   }

@@ -6,7 +6,7 @@ import type { CopyReply, OpenFolderReply, OpenReply, RecentView, TreeReply } fro
 import { SETTINGS_TIMEOUT_MS, TREE_TIMEOUT_MS } from "./ipc-context.js";
 import type { IpcHandlerContext } from "./ipc-context.js";
 
-export function createWorkspaceHandlers(context: IpcHandlerContext) {
+export function createWorkspaceHandlers(context: IpcHandlerContext, treeEpoch: () => number) {
   const { deps, workspaces } = context;
 
   const openFolder = async (args: unknown[]): Promise<OpenFolderReply> => {
@@ -38,9 +38,11 @@ export function createWorkspaceHandlers(context: IpcHandlerContext) {
     if (root === null) return { ok: false, code: "unknown_workspace" };
     const dir = workspaces.treeDir(parsed.workspace, parsed.node);
     if (dir === null) return { ok: false, code: "unknown_entry" };
+    const epoch = treeEpoch();
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
     const response = await state.host.call("tree", { workspace: root, dir, offset: parsed.offset }, TREE_TIMEOUT_MS);
+    if (treeEpoch() !== epoch || workspaces.path(parsed.workspace) !== root) return { ok: false, code: "unknown_entry" };
     if (!response.ok) return { ok: false, code: response.error.code };
     return workspaces.treeReply(parsed.workspace, dir, response.value);
   };

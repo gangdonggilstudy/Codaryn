@@ -42,8 +42,7 @@ export class Workspaces {
   readonly treeIds: TreeIds;
   private state: GuiState | null = null;
   private readonly recentIds = new Map<string, string>();
-  private writing: Promise<void> = Promise.resolve();
-  private remembering: Promise<void> = Promise.resolve();
+  private mutating: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: WorkspacesDeps) {
     this.handles = new WorkspaceHandles(deps.randomBytes);
@@ -51,8 +50,19 @@ export class Workspaces {
   }
 
   private async load(): Promise<GuiState> {
-    if (this.state === null) this.state = this.deps.stateFile === null ? EMPTY_STATE : await readGuiState(this.deps.stateFile, this.deps.platform);
+    if (this.state === null) {
+      const loaded = this.deps.stateFile === null ? EMPTY_STATE : await readGuiState(this.deps.stateFile, this.deps.platform);
+      // A read begun before a mutation must not overwrite the newer cached state when it ends.
+      this.state ??= loaded;
+    }
     return this.state;
+  }
+
+  /** Read, change and save as one operation; one rejected job cannot block later operations. */
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const job = this.mutating.then(operation);
+    this.mutating = job.then(() => undefined, () => undefined);
+    return job;
   }
 
   /** U-70 (4.5): how the window was left (the empty memory when nothing fits). */
@@ -62,27 +72,22 @@ export class Workspaces {
 
   /** U-70: keeps a change to the window's memory, in order; what does not fit is dropped (windowOf). */
   rememberWindow(change: Partial<WindowMemory>): Promise<void> {
-    const job = this.remembering.then(async () => {
+    return this.mutate(async () => {
       const state = await this.load();
       await this.save({ ...state, window: windowOf({ ...(state.window ?? EMPTY_WINDOW), ...change }) });
     });
-    this.remembering = job.catch(() => undefined);
-    return job;
   }
 
   /** U-70: waits for the window changes asked for and the saves under way (before the app quits). */
   async flush(): Promise<void> {
-    await this.remembering;
-    await this.writing;
+    await this.mutating;
   }
 
-  /** Saves in order; a failed save keeps the list in memory and is not an error for the window. */
-  private save(state: GuiState): Promise<void> {
+  /** Called inside mutate; a failed save keeps the list in memory and is not a window error. */
+  private async save(state: GuiState): Promise<void> {
     this.state = state;
     const file = this.deps.stateFile;
-    if (file === null) return Promise.resolve();
-    this.writing = this.writing.then(() => writeGuiState(file, state)).catch(() => undefined);
-    return this.writing;
+    if (file !== null) await writeGuiState(file, state).catch(() => undefined);
   }
 
   /**
@@ -95,16 +100,20 @@ export class Workspaces {
     if (!isLocalPathSyntax(path, this.deps.platform)) return { ok: false, code: "workspace_not_local" };
     if (!(await this.deps.isDirectory(path))) return { ok: false, code: "workspace_missing" };
     const handle = this.handles.issue(path);
-    const state = withOpened(await this.load(), path, this.deps.now(), this.deps.platform);
-    await this.save(state);
-    return { ok: true, handle, name: folderName(path), lastForm: memoryFor(state, path, this.deps.platform)?.lastForm ?? null };
+    return this.mutate<OpenReply>(async () => {
+      const state = withOpened(await this.load(), path, this.deps.now(), this.deps.platform);
+      await this.save(state);
+      return { ok: true, handle, name: folderName(path), lastForm: memoryFor(state, path, this.deps.platform)?.lastForm ?? null };
+    });
   }
 
   /** R21b-L-1: run `runId` was started in the workspace of `handle` with `form`. */
   async rememberRun(handle: string, runId: string, form: RunForm): Promise<void> {
     const path = this.path(handle);
     if (path === null) return;
-    await this.save(withRunForm(await this.load(), path, runId, form, this.deps.platform));
+    await this.mutate(async () => {
+      await this.save(withRunForm(await this.load(), path, runId, form, this.deps.platform));
+    });
   }
 
   /** The remembered form of each run of the workspace of `handle` (runs started elsewhere are absent). */
@@ -136,7 +145,9 @@ export class Workspaces {
     const path = isHandle(id) ? this.recentIds.get(id) : undefined;
     if (path === undefined) return false;
     this.recentIds.delete(id as string);
-    await this.save(withoutPath(await this.load(), path, this.deps.platform));
+    await this.mutate(async () => {
+      await this.save(withoutPath(await this.load(), path, this.deps.platform));
+    });
     return true;
   }
 

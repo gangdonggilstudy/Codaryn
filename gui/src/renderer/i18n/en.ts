@@ -652,7 +652,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "report.saved": "The report was saved: {name}",
   "report.notSaved": "It was not saved.",
   "error.save_failed": "The report file could not be written. Choose another place and save again.",
-  "error.save_state_dir": "A report cannot be saved inside a Codaryn records folder (.codaryn). Choose another place.",
+  "error.save_state_dir": "A report cannot be saved inside the run record folder (.codaryn). Choose another place.",
   "report.none": "There is no report to show. Open one from a run's result or from the run list.",
   "report.tab.summary": "Summary",
   "report.tab.checks": "Checks",

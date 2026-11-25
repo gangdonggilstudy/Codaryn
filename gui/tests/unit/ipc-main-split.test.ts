@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import type { IpcDeps } from "../../src/main/ipc.js";
+import type { ModelsReply } from "../../src/shared/ipc.js";
 import { IPC_CHANNELS, createIpc } from "./gsec-ipc-harness.js";
 
 // The harness installs the Electron substitute before these runtime imports.
@@ -178,6 +179,44 @@ test("main IPC split: settings creation and writes reset root tokens only after 
       ...(scenario.reset ? ["tree clear", "text clear", "window"] : [])]);
     assert.deepEqual(ipc.sent.map(event => event.channel), scenario.reset ? ["codaryn:event:treereset"] : []);
   }
+});
+
+test("main IPC split: model listing success validates before issuing into the replacement entries", { timeout: 5000 }, async t => {
+  const ipc = await createIpc(), available = await ipc.deps.host();
+  assert.ok("host" in available);
+  const events: string[] = [], called = Promise.withResolvers<void>(), waiting = Promise.withResolvers<void>();
+  const limit = new ModelListLimit(() => 0);
+  const cleared = new ModelEntries(size => new Uint8Array(size).fill(10));
+  const issued = new ModelEntries(size => new Uint8Array(size).fill(11));
+  const begin = limit.begin.bind(limit), end = limit.end.bind(limit), clear = cleared.clear.bind(cleared), issue = issued.issue.bind(issued);
+  t.mock.method(limit, "begin", () => { events.push("begin"); return begin(); });
+  t.mock.method(limit, "end", () => { events.push("end"); end(); });
+  t.mock.method(cleared, "clear", () => { events.push("clear"); clear(); });
+  t.mock.method(issued, "issue", (provider: string, models: Parameters<IpcDeps["modelEntries"]["issue"]>[1]) => {
+    events.push("issue"); return issue(provider, models);
+  });
+  const value = { ok: true, get provider() { events.push("validate"); return "anthropic"; },
+    models: [{ number: 1, id: "synthetic-success", shown: "Synthetic model", name: "Synthetic" }], current: null };
+  Object.assign(ipc.deps, { modelListLimit: limit, modelEntries: cleared, host: async () => {
+    events.push("host");
+    return { host: { ...available.host, call: async () => {
+      events.push("call"); called.resolve(); await waiting.promise;
+      return { v: 1, id: 0, ok: true, value };
+    } } };
+  } });
+  const pending = ipc.call(IPC_CHANNELS.listModels, [{ provider: "anthropic" }]);
+  try {
+    await called.promise;
+    Object.assign(ipc.deps, { modelEntries: issued });
+  } finally {
+    waiting.resolve();
+  }
+  const reply = await pending as ModelsReply;
+  assert.ok(reply.ok);
+  const [model] = reply.models; assert.ok(model);
+  assert.deepEqual(events, ["host", "begin", "clear", "call", "end", "validate", "issue"]);
+  assert.deepEqual(issued.resolve(model.entry), { provider: "anthropic", id: "synthetic-success" });
+  assert.equal(cleared.resolve(model.entry), null);
 });
 
 test("main IPC split: model listing reads current limiter and entries after host await and releases on exception", { timeout: 5000 }, async t => {
@@ -428,7 +467,7 @@ function calculatedLoads(source: string): CalculatedLoad[] {
   return loads;
 }
 
-const MAIN_DOMAINS = ["ipc-context.ts", "ipc-workspace.ts", "ipc-settings.ts", "ipc-history.ts"] as const;
+const MAIN_DOMAIN_FILE = /^ipc-[^/]+\.ts$/;
 
 function readMainIpcSources(root: string): SourceFile[] {
   return readdirSync(root, { withFileTypes: true }).flatMap(entry => {
@@ -440,18 +479,35 @@ function readMainIpcSources(root: string): SourceFile[] {
 
 function mainIpcBoundaryViolations(root: string, sources: readonly SourceFile[]): string[] {
   const failures: string[] = [];
-  for (const name of ["ipc.ts", ...MAIN_DOMAINS]) if (!sources.some(source => path.relative(root, source.file) === name)) failures.push(`missing ${name}`);
+  const domains = new Set(sources.map(source => path.relative(root, source.file).replace(/\\/g, "/")).filter(name => MAIN_DOMAIN_FILE.test(name)));
+  if (!sources.some(source => path.relative(root, source.file) === "ipc.ts")) failures.push("missing ipc.ts");
+  if (domains.size === 0) failures.push("missing ipc-*.ts domains");
   for (const source of sources) {
     const from = path.relative(root, source.file).replace(/\\/g, "/"), ts = tokens(source.text);
-    const domain = MAIN_DOMAINS.some(name => name === from);
+    const domain = domains.has(from);
     const fail = (at: number, what: string) => failures.push(`${from}:${source.text.slice(0, at).split("\n").length}: ${what}`);
     if (from !== "ipc.ts") for (let i = 0; i < ts.length; i++) {
       const t = ts[i]!;
       if (t.value === "ipcMain" && (t.kind === "word" || t.kind === "string" && ts[i - 1]?.value === "[" && ts[i + 1]?.value === "]")) fail(t.at, "ipcMain belongs to root");
     }
     if (from === "ipc.ts") {
-      const registrations = ts.filter((t, i) => t.kind === "word" && t.value === "ipcMain" && ts[i + 1]?.value === "." && ts[i + 2]?.value === "handle" && ts[i + 3]?.value === "(");
-      if (registrations.length !== 1) fail(0, "root needs one ipcMain.handle wrapper");
+      const wrappers = ts.flatMap((t, i) => t.kind === "word" && t.value === "const" && ts[i + 1]?.value === "handle" && ts[i + 2]?.value === "=" ? [i] : []);
+      const body = wrappers.length === 1 ? ts.findIndex((t, i) => i > wrappers[0]! && t.kind === "punct" && t.value === "{") : -1;
+      let bodyEnd = -1, depth = 0;
+      if (body >= 0) for (let i = body; i < ts.length; i++) {
+        if (ts[i]!.kind !== "punct") continue;
+        if (ts[i]!.value === "{") depth++;
+        if (ts[i]!.value === "}" && --depth === 0) { bodyEnd = i; break; }
+      }
+      let registrations = 0;
+      for (let i = 0; i < ts.length; i++) {
+        const t = ts[i]!;
+        if (t.kind !== "word" || t.value !== "ipcMain" || ![".", "[", "?"].includes(ts[i + 1]?.value ?? "")) continue;
+        const allowed = i > body && i < bodyEnd && ts[i + 1]?.value === "." && ts[i + 2]?.value === "handle" && ts[i + 3]?.value === "(";
+        if (allowed) registrations++;
+        else fail(t.at, "unreviewed ipcMain member");
+      }
+      if (body < 0 || bodyEnd < 0 || registrations !== 1) fail(0, "root needs one ipcMain.handle wrapper");
     }
     if (!domain) continue;
     for (const load of calculatedLoads(source.text)) fail(load.at, "calculated loader needs review");
@@ -461,7 +517,7 @@ function mainIpcBoundaryViolations(root: string, sources: readonly SourceFile[])
       const to = target === null ? null : path.relative(root, target).replace(/\\/g, "/").replace(/\.(?:[cm]?js|ts)$/, "");
       if (ref.calculated) fail(ref.at, "calculated module address");
       if (to === "ipc") fail(ref.at, "domain imports root");
-      if (to !== null && ["ipc-workspace", "ipc-settings", "ipc-history"].includes(to)) fail(ref.at, "domain imports sibling");
+      if (to !== null && to !== "ipc-context" && domains.has(`${to}.ts`)) fail(ref.at, "domain imports sibling");
       if (spec === "electron") {
         const start = ts.findIndex(t => t.at === ref.at), end = ts.findIndex((t, i) => i >= start && t.value === ";");
         const statement = ts.slice(start, end < 0 ? undefined : end + 1).map(t => t.value);
@@ -495,6 +551,16 @@ test("main IPC split: source guard rejects broken copies and ignores quoted or c
     ['import * as electron from "electron";', "unreviewed Electron import"],
     ['electron["ipcMain"].handle("bad", async () => null);', "ipcMain belongs to root"],
   ] as const) assert.ok(mainIpcBoundaryViolations(root, injected(suffix)).some(failure => failure.includes(why)), suffix);
+  for (const suffix of ['ipcMain.on("bad", () => {});', 'ipcMain.handleOnce("bad", async () => null);',
+    'ipcMain["handle"]("bad", async () => null);', 'const alias = ipcMain.handle;', 'ipcMain?.handle("bad", async () => null);']) {
+    const broken = sources.map(source => path.basename(source.file) === "ipc.ts" ? { ...source, text: source.text + "\n" + suffix } : source);
+    assert.ok(mainIpcBoundaryViolations(root, broken).some(failure => failure.includes("unreviewed ipcMain member")), suffix);
+  }
+  const extra = { file: path.join(root, "ipc-extra.ts"), text: 'import type { IpcDeps } from "./ipc.js";' };
+  assert.ok(mainIpcBoundaryViolations(root, [...sources, extra]).some(failure => failure.includes("ipc-extra.ts") && failure.includes("domain imports root")));
+  const sibling = injected('import type { X } from "./ipc-extra.js";');
+  assert.ok(mainIpcBoundaryViolations(root, [...sibling, { ...extra, text: "export {};" }]).some(failure => failure.includes("domain imports sibling")));
+  assert.deepEqual(mainIpcBoundaryViolations(root, [...sources, { ...extra, text: 'import type { IpcDeps } from "./ipc-context.js";' }]), []);
   const harmless = '// import type { X } from "./ipc.js"; ipcMain.handle("bad", f);\nconst example = "ipcMain"; const pattern = /ipcMain/;';
   assert.deepEqual(mainIpcBoundaryViolations(root, injected(harmless)), []);
 });

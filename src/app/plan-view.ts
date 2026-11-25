@@ -526,7 +526,7 @@ export async function recordReview(
   } finally {
     // IR-F3, U-220: release failure must not replace a saved verdict or the write's own error.
     try {
-      await releaseLock({ workspaceRoot, runId: lockId });
+      lockLeft = (await releaseLock({ workspaceRoot, runId: lockId })) !== true;
     } catch {
       lockLeft = true;
     }

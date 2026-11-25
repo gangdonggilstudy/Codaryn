@@ -10,7 +10,7 @@ import { runReview } from "../../../src/cli/plan-commands.js";
 import { runGuardedCommand } from "../../../src/cli/guard.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/cli/security/index.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
-import { writeReviewRecord } from "../../../src/store/index.js";
+import { releaseLock, writeReviewRecord } from "../../../src/store/index.js";
 import type { ReviewOutput } from "../../../src/contracts/index.js";
 import { WRITE_NOTES, appEnvironment, exists, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
@@ -106,3 +106,60 @@ for (const owner of ["app", "cli"] as const) test(`IR-F3 ${owner}: a pre-save fa
   }
   assert.equal(await fs.readFile(f.file, "utf8"), before); assert.equal(await exists(f.lock), true);
 });
+
+/** Change only the synthetic lock, after the real review rename; releaseLock itself stays real. */
+function displaceLock(t: TestContext, f: Fixture, mode: "other-run" | "unreadable") {
+  const rename = fs.rename, remove = fs.rm;
+  let originalRunId: string | null = null, changes = 0, removals = 0;
+  let replacement = "";
+  t.mock.method(fs, "rename", async (...args: Parameters<typeof fs.rename>) => {
+    await rename(...args);
+    if (path.resolve(String(args[1])) !== f.file) return;
+    const held = JSON.parse(await fs.readFile(f.lock, "utf8")) as { runId: string };
+    originalRunId = held.runId;
+    replacement = `${JSON.stringify(mode === "other-run" ? { ...held, runId: "synthetic-other-review" } : {})}\n`;
+    await fs.writeFile(f.lock, replacement, "utf8");
+    changes++;
+  });
+  t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
+    if (path.resolve(String(args[0])) === f.lock) removals++;
+    return remove(...args);
+  });
+  syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  return async () => {
+    assert.equal(changes, 1, "the lock changed only after the review was stored");
+    assert.ok(originalRunId !== null);
+    assert.equal(await fs.readFile(f.lock, "utf8"), replacement, "the changed lock was not removed or rewritten");
+    assert.equal(removals, 0, "the real release refused to delete the changed lock");
+    assert.equal(await releaseLock({ workspaceRoot: path.join(f.base, "work"), runId: originalRunId }), false);
+    assert.equal(await exists(f.lock), true);
+  };
+}
+
+for (const mode of ["other-run", "unreadable"] as const) {
+  for (const channel of ["app", "cli-json", "cli-text"] as const) {
+    test(`F3R-1 ${channel} ${mode}: a false release keeps the saved verdict and reports lockLeft`, async t => {
+      const f = await fixture(), verifyLock = displaceLock(t, f, mode);
+      const language = mode === "other-run" ? "en" : "ko";
+      const outcome = channel === "app"
+        ? await f.app.review({ settings: taskForm(f.base), runId: f.runId, decision: "accept", note: null })
+        : await runGuardedCommand(() => runReview(cli(f, "accept", channel === "cli-json", language)));
+      const seen = await state(f);
+      await verifyLock();
+      assert.equal(seen.stored.verdict, "accepted");
+      assert.equal(Object.hasOwn(seen.stored, "lockLeft"), false, "lockLeft belongs to the result, not review.json");
+      assert.equal(seen.resultUnchanged, true); assert.equal(seen.left, true);
+      t.diagnostic(JSON.stringify({ mode, channel, stored: seen.stored.verdict, recordHasLockLeft: Object.hasOwn(seen.stored, "lockLeft"), lockRemains: seen.left, realRelease: false }));
+      if ("text" in outcome) {
+        assert.equal(outcome.exitCode, 0);
+        const line = createMessageCatalog(language).format("lock.release_failed");
+        assert.equal(outcome.text.split("\n").filter(part => part === line).length, 1);
+      } else {
+        if ("ok" in outcome) assert.ok(outcome.ok);
+        assert.ok("output" in outcome && outcome.output.kind === "review");
+        assert.equal(outcome.output.exitCode, 0);
+        assert.equal((outcome.output as ReviewOutput).lockLeft, true);
+      }
+    });
+  }
+}

@@ -15,6 +15,16 @@ import { IPC_EVENTS } from "../../src/shared/ipc.js";
 import { FakeElement, installFakeDom, settle } from "./fake-dom.js";
 
 const tick = async () => { await settle(); await settle(); };
+async function waitFor<T>(promise: Promise<T>, description: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<T>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`${description} was not observed within 10 seconds`)), 10000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const FORM = { profile: "remembered", workflow: "organize" };
 const RUN = "20261127T010203Z-00000001";
 let boots = 0;
@@ -29,8 +39,12 @@ async function main(t: TestContext) {
   const listeners = new Map<string, (...args: unknown[]) => void>(), sent: { channel: string; payload: Workspace }[] = [];
   let deps: IpcDeps | null = null;
   const loaded = Promise.withResolvers<void>();
+  const workspaceOpened = Promise.withResolvers<void>();
   class Window {
-    webContents = { send: (channel: string, payload: Workspace) => sent.push({ channel, payload }) };
+    webContents = { send: (channel: string, payload: Workspace) => {
+      sent.push({ channel, payload });
+      if (channel === IPC_EVENTS.workspaceOpened) workspaceOpened.resolve();
+    } };
     isDestroyed() { return false; } isMinimized() { return false; } focus() {} on() {} once() {}
     async loadURL() { loaded.resolve(); }
   }
@@ -38,7 +52,7 @@ async function main(t: TestContext) {
     screen: { getAllDisplays: () => [] }, session: { defaultSession: {}, fromPartition: () => ({}) },
     app: { isPackaged: false, commandLine: { hasSwitch: () => false }, enableSandbox() {}, setPath() {}, requestSingleInstanceLock: () => true,
       on: (name: string, listener: (...args: unknown[]) => void) => listeners.set(name, listener), whenReady: () => Promise.resolve(), getPath: () => root } };
-  return { root, folder, stateFile, electron, listeners, sent, loaded, capture: (value: IpcDeps) => { deps = value; }, deps: () => { assert.ok(deps); return deps; } };
+  return { root, folder, stateFile, electron, listeners, sent, loaded, workspaceOpened, capture: (value: IpcDeps) => { deps = value; }, deps: () => { assert.ok(deps); return deps; } };
 }
 
 function preload() {
@@ -119,7 +133,7 @@ for (const route of ["initial", "second-instance"] as const) test(`RR-1 ${route}
   if (route === "initial") payload = app.deps().initialWorkspace();
   else {
     app.listeners.get("second-instance")!({}, ["synthetic-electron", "synthetic-app", app.folder], app.root);
-    await tick(); await tick();
+    await waitFor(app.workspaceOpened.promise, "RR-1 second-instance workspaceOpened");
     assert.equal(app.sent.at(-1)?.channel, IPC_EVENTS.workspaceOpened);
     payload = preload().copy(app.sent.at(-1)?.payload);
   }

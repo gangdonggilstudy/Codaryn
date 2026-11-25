@@ -92,13 +92,17 @@ test("IR-D7: a failed state write still keeps memory and does not block later mu
 test("IR-D7: an old initial read cannot replace state changed while that read was pending", { timeout: 10_000 }, async t => {
   const f = await fixture(t);
   await writeGuiState(f.stateFile, EMPTY_STATE);
-  const workspaces = f.create(), actual = fs.readFile;
+  const workspaces = f.create(), actual = fs.open;
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   let first = true;
-  const mock = t.mock.method(fs, "readFile", async (...args: unknown[]) => {
-    const text = await Reflect.apply(actual, fs, args);
-    if (args[0] === f.stateFile && first) { first = false; entered.resolve(); await release.promise; }
-    return text;
+  const mock = t.mock.method(fs, "open", async (...args: unknown[]) => {
+    const handle = await Reflect.apply(actual, fs, args);
+    if (args[0] === f.stateFile && first) {
+      first = false;
+      const close = handle.close.bind(handle);
+      handle.close = async () => { await close(); entered.resolve(); await release.promise; };
+    }
+    return handle;
   });
   syncBuiltinESMExports();
   t.after(() => { release.resolve(); mock.mock.restore(); syncBuiltinESMExports(); });

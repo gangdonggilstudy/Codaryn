@@ -18,10 +18,7 @@ import "node:fs/promises"; // Preserve module evaluation order.
 import path from "node:path";
 import type {
   ApplyPlan,
-  AnyPlanOutput,
-  ChangesPlanOutput,
   PlanOutput,
-  ReviewOutput,
   DefaultConfigLocation,
   ResolvedTaskSpec,
   RevertOutput,
@@ -32,7 +29,7 @@ import { workflowSettingsOf } from "../contracts/index.js";
 import { applyPlan as engineApplyPlan } from "../engine/index.js";
 import "../i18n/index.js"; // Preserve module evaluation order.
 import { createPrivacyGateway } from "../privacy/index.js";
-import { listRuns as storeListRuns } from "../store/index.js";
+import "../store/index.js"; // Preserve module evaluation order.
 import "./revert-command.js"; // Preserve module evaluation order.
 import { findDefaultConfigLocation } from "./input/config-file.js";
 import "./doctor.js"; // Preserve module evaluation order.
@@ -44,20 +41,19 @@ import type { ApplyLifeEnd } from "./apply-life.js";
 import "./provider.js"; // Preserve module evaluation order.
 import "../presentation/report-localized.js"; // Preserve module evaluation order.
 import "../presentation/json.js"; // Preserve module evaluation order.
-import { parseApplyArgs, parseArgs, parsePlanArgs, parseReviewArgs } from "./input/args.js";
+import { parseApplyArgs, parseArgs } from "./input/args.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, cliError, prepareTask } from "./prepare.js";
 import "./report-read.js"; // Preserve module evaluation order.
 import "./input/text-safety.js"; // Preserve module evaluation order.
-import { prepareFor, recordReview, showPlan } from "./plan-view.js";
-import type { PlanViewEnvironment } from "./plan-view.js";
+import { prepareFor } from "./plan-view.js";
 import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
 import { runLife } from "./run-life.js";
 import type { RunLifeEnd, RunLifeEnvironment } from "./run-life.js";
 import { tallyOf } from "./tally.js";
 import { knownKeyValues } from "./input/settings.js";
 import { applyArguments, deliverApply } from "./apply.js";
-import { planArguments, reviewArguments } from "./plans.js";
+import "./plans.js"; // Preserve module evaluation order.
 import { unsafeMoveConsentOf } from "./consent.js";
 import "./changes.js"; // Preserve module evaluation order.
 import "./workspace-dir.js"; // Preserve module evaluation order.
@@ -69,7 +65,7 @@ import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { appRunHooks } from "./run-hooks.js";
 import "./models.js"; // Preserve module evaluation order.
-import { runIdOf, workspaceRootOf } from "./runs.js";
+import { workspaceRootOf } from "./runs.js";
 import { applyCleanupIn, previewCleanupIn, stateSummaryIn } from "./cleanup.js";
 import "./settings.js"; // Preserve module evaluation order.
 import "./init.js"; // Preserve module evaluation order.
@@ -84,8 +80,6 @@ import type {
   ApplyPlanRequest,
   CheckApplyRequest,
   PlanCheck,
-  PlanRequest,
-  ReviewRequest,
   CodarynApp,
   ApplyCleanupRequest,
   CleanupPreviewRequest,
@@ -102,6 +96,7 @@ import { createReadingCommands } from "./reading-commands.js";
 import type { AppHooks } from "./app-hooks.js";
 import { createReportCommands } from "./report-commands.js";
 import { createSettingsCommands } from "./settings-commands.js";
+import { createPlanCommands } from "./plan-commands.js";
 
 export type { AppHooks } from "./app-hooks.js";
 
@@ -173,6 +168,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const { changes, listWorkspaceDir, readWorkspaceText, writeWorkspaceText, listRunEvents } = createReadingCommands(readingSecrets, workspaceTextSource, environment, hooks);
   const { report, reportMarkdown, revert, listRuns, resolveRun } = createReportCommands(environment, platform, jsonOutcome, commandError);
   const { doctor, listModels, selectModel, readSettings, createSettings, settingsSuggestions, proposeSettingsChange, applySettingsChange } = createSettingsCommands(environment, platform, hooks, locate, relate, defaultConfigOf, jsonOutcome);
+  const { plan, review, planCommandEnvironment } = createPlanCommands(environment, platform, locate, relate, defaultConfigOf, readingSecrets, commandError);
 
   /**
    * The CLI's run environment with this environment's parts. `env` is the call's own copy; the
@@ -280,68 +276,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const stateSummary = (request: StateSummaryRequest) => stateSummaryIn(environment, request);
   const previewCleanup = (request: CleanupPreviewRequest) => previewCleanupIn(environment, request);
   const applyCleanup = (request: ApplyCleanupRequest) => applyCleanupIn(environment, request, hooks.cleanupOperations);
-
-  /**
-   * The task form's environment for `plan`, `apply` and `review` (G-F), as main.ts builds it, with
-   * this call's own environment copy: the variables file is loaded into it, never into the
-   * caller's object or `process.env`.
-   */
-  function planCommandEnvironment(argv: readonly string[]): PlanViewEnvironment & { readonly argv: readonly string[]; readonly env: Record<string, string | undefined> } {
-    const env = copyEnvironment(environment.env, platform);
-    return {
-      argv,
-      env,
-      cwd: environment.cwd,
-      readFile: environment.readFile,
-      isDirectory: environment.isDirectory,
-      loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
-      locateInWorkspace: locate,
-      relatePaths: relate,
-      installDir: environment.installDir,
-      defaultConfig: defaultConfigOf(),
-      clock: environment.clock,
-      randomBytes: environment.randomBytes,
-      listRuns: storeListRuns,
-    };
-  }
-
-  /** DR-5, DR-17: `codaryn plan --json`: the stored plan masked again with this task form's secrets. Reads only. */
-  async function plan(request: PlanRequest): Promise<AppCallOutcome<AnyPlanOutput>> {
-    try {
-      // U-196: a run plan is shown by the app until the CLI's plan view chooses by kind (U-195).
-      const changes = await runPlanView(request);
-      if (changes !== null) return changes;
-      // U-308 (C-7a's app side): the plan view's rules are the app layer's (showPlan, plan-view.ts), no
-      // longer the CLI's runPlan around them; the request is still judged by the CLI's parser, as before.
-      const argv = planArguments(request);
-      const parsed = parsePlanArgs(argv);
-      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
-      const shown = await showPlan(planCommandEnvironment(argv), parsed.args.form, parsed.args.runId);
-      if (!shown.ok) return { ok: false, error: commandError(shown.outcome) };
-      // As jsonOutcome judged runPlan's JSON line: only a plan of mode apply is this call's output here.
-      return shown.kind === "plan" ? { ok: true, output: shown.output } : { ok: false, error: INTERNAL_ERROR };
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
-
-  /** GT-D6, R-4 L-4: `codaryn review --json`: the person's verdict, the note masked before it is stored. */
-  async function review(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>> {
-    const args = reviewArguments(request);
-    if (!args.ok) return args;
-    try {
-      // U-308 (C-7a's app side): the review's rules are the app layer's (recordReview, plan-view.ts), no
-      // longer the CLI's runReview around them; the request is still judged by the CLI's parser, as before.
-      const parsed = parseReviewArgs(args.argv);
-      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
-      const review = parsed.args;
-      const recorded = await recordReview(planCommandEnvironment(args.argv), { form: review.form, run: review.runId, verdict: review.verdict, note: review.note, revertLine: !review.json });
-      if (!recorded.ok) return { ok: false, error: commandError(recorded.outcome) };
-      return { ok: true, output: recorded.output };
-    } catch {
-      return { ok: false, error: INTERNAL_ERROR };
-    }
-  }
 
   /**
    * DR-1, DR-2, DR-21, U-323: applyLife as an adapter: approval is recorded as `adapter`, consent
@@ -563,22 +497,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         lockLeft: false,
       },
     };
-  }
-
-  /** U-196: a run plan's view (changes-plan.ts), or null for any other request (the CLI's plan view then). */
-  async function runPlanView(request: PlanRequest): Promise<AppCallOutcome<ChangesPlanOutput> | null> {
-    if (typeof request !== "object" || request === null || typeof request.runId !== "string") return null;
-    const probe = await readingSecrets(request.settings);
-    if (!probe.ok) return null;
-    const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
-    if (!root.ok) return null;
-    const runId = await runIdOf(root.value, request.runId);
-    if (!runId.ok) return null;
-    const stored = await storedPlanKindOf(root.value, runId.value);
-    // Not a run plan, or none that can be read: the CLI's plan view, which gives the store's code.
-    if (!stored.ok || stored.kind !== "changes") return null;
-    const view = await changesPlanViewIn({ workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys }, runId.value);
-    return view.ok ? { ok: true, output: view.output.output } : view;
   }
 
   return {

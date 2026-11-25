@@ -254,6 +254,8 @@ Next: codaryn doctor
 
 `--config` → `CODARYN_CONFIG` → 기본 위치. 앞의 것이 있으면 뒤의 것은 보지 않는다. 기본 위치에 파일이 없으면 설정 파일 없이 실행한다. 기본 위치의 설정을 쓴 실행은 진행 줄과 끝 요약에 그 사실을 한 줄씩 남긴다(3절). 기본 위치의 파일도 작업 공간 안이면 거부한다(5절).
 
+실행은 시작할 때 설정 파일, 변수 파일, 모델·키·주소 변수를 한 번 읽고 끝날 때까지 다시 읽지 않는다(현재 상태 2026-11-26, main `ec3b7d06`). 실행 중에 설정 파일을 고치거나 다른 터미널에서 `models --use`를 해도 도는 실행은 그대로이고, **다음 실행부터** 쓰인다. 설정 쓰기는 작업 공간 잠금을 보지 않으므로 실행 중에도 막히지 않는다. `apply`는 적용을 시작할 때 읽는다(18.3 "적용 때의 정책"). GUI도 같다([독립 GUI 설계](design/standalone-gui.md) 3.10).
+
 ### 키
 
 - 키는 제공자마다 정해진 환경 변수로만 받는다: Anthropic은 `ANTHROPIC_API_KEY`, OpenAI는 `OPENAI_API_KEY`(아래 "두 번째 제공자: OpenAI"). 한 제공자의 키는 그 제공자의 주소로만 간다. Windows 사용자 환경 변수에 등록하는 것이 기본이다: `rundll32 sysdm.cpl,EditEnvironmentVariables`로 창을 열어 사용자 변수 `ANTHROPIC_API_KEY`를 더하고 새 터미널을 연다(`init`이 같은 안내를 한다. `init`은 Anthropic 키만 안내한다). 키 파일을 자동으로 읽는 기능은 없다.

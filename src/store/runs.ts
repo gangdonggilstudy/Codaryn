@@ -11,7 +11,7 @@
  */
 
 import { realpath as realpathCallback } from "node:fs";
-import { lstat, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, open, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -51,6 +51,7 @@ import type {
 import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
 import { recordsChangedMarkIn } from "./marks.js";
 import { reviewRecordIn } from "./review.js";
+import { readBounded } from "./read-bounded.js";
 import { inspectLock } from "./lock.js";
 
 const realpathNative = promisify(realpathCallback.native);
@@ -129,13 +130,13 @@ async function checkedFile(file: string, max: number): Promise<"file" | "missing
 }
 
 async function readText(file: string, max: number): Promise<string> {
-  let bytes: Buffer;
+  let bytes: Buffer | "too_large";
   try {
-    bytes = await readFile(file);
+    bytes = await readBounded(file, max);
   } catch {
     return unreadable();
   }
-  if (bytes.length > max) unreadable();
+  if (bytes === "too_large") unreadable();
   return bytes.toString("utf8");
 }
 

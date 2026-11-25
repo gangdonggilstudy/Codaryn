@@ -83,7 +83,8 @@ import { argumentsError, cliError } from "../app/prepare.js";
 import { knownKeyValues } from "../app/input/settings.js";
 import type { SettingsEnvironment } from "../app/input/settings.js";
 import { hideKeys } from "../app/input/text-safety.js";
-import { cleanupConfirmed, cleanupPlanOf, summaryOf } from "../app/cleanup.js";
+import { cleanupConfirmed, cleanupPlanOf, isStateDirNotPlain, summaryOf } from "../app/cleanup.js";
+import { STATE_DIR_NOT_PLAIN_MESSAGE } from "../store/index.js";
 import { resolveWorkspaceRoot } from "../app/workspace-root.js";
 
 export const CLEANUP_USAGE =
@@ -247,13 +248,17 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
         if (done.code === "workspace_locked") {
           return cliError("workspace_locked", "another Codaryn process holds the workspace lock; nothing was removed");
         }
+        // IR-E1: `.codaryn` or its `runs` is a link or not a plain directory.
+        if (done.code === "state_dir_not_plain") return cliError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE);
         return cliError("cleanup_plan_changed", PLAN_CHANGED_MESSAGE);
       } else {
         // U-22 (DR-48, AXM-3): the status and ok are the one copy's (the contract's one rule).
         output = { schemaVersion: 1, kind: "cleanup", status: done.status, exitCode: CLEANUP_EXIT_CODES[done.status], outcome: done.outcome };
       }
     }
-  } catch {
+  } catch (error) {
+    // IR-E1: the summary and the preview refuse a linked `.codaryn` or `runs` (the store throws it).
+    if (isStateDirNotPlain(error)) return cliError("state_dir_not_plain", STATE_DIR_NOT_PLAIN_MESSAGE);
     return cliError("internal_error", "the cleanup stopped because of an internal error; nothing more was removed");
   }
 

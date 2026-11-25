@@ -38,7 +38,7 @@ async function unchanged(f: Awaited<ReturnType<typeof fixture>>) {
 test("U321: prepared state junction is refused before gitignore, lock or log writes", async (t) => {
   const f = await fixture(t, false);
   await symlink(f.outside, f.state, process.platform === "win32" ? "junction" : "dir");
-  await assert.rejects(applyCleanupWith(f.request));
+  assert.deepEqual(await applyCleanupWith(f.request), { ok: false, code: "state_dir_not_plain" });
   await unchanged(f);
 });
 for (const kind of ["hardlink", "directory", "symlink"] as const) {

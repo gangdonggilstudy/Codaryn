@@ -55,7 +55,8 @@ export interface IntegrityFileSystem {
   readlink(link: string): Promise<string>;
   /**
    * SHA-256 of the file's bytes, or "too_large" as soon as more than `maxBytes` bytes were read
-   * (the file may have grown after `lstat`).
+   * (the file may have grown after `lstat`). When the opened file's size (fstat) already exceeds
+   * `maxBytes`, it is "too_large" before anything is read.
    */
   hashFile(file: string, maxBytes: number): Promise<{ readonly sha256: ContentHash; readonly bytes: number } | "too_large">;
 }

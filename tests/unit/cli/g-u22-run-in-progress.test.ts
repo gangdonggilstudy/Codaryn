@@ -160,7 +160,7 @@ describe("U-22 (AXM-8): --run latest while the run is still going", () => {
     assert.equal(output.runId, earlier);
   });
 
-  test("the lock is asked for runs without a result newer than the latest finished one only; another run holding it is not this run going", async () => {
+  test("all no-result runs are probed regardless of time; another run holding the lock is not this run going", async () => {
     const runId = "20260102T030405Z-0a0b0c0d";
     const entry = { state: "checked", runId, status: null } as unknown as RunListEntry;
     const finished = { state: "checked", runId: "20260102T030400Z-0a0b0c0c", status: "done" } as unknown as RunListEntry;
@@ -178,6 +178,6 @@ describe("U-22 (AXM-8): --run latest while the run is still going", () => {
     assert.deepEqual([going.ok, going.ok ? null : going.code, asked], [false, "run_in_progress", [`root:${runId}`]]);
     const askedOther: string[] = [];
     const other = await resolveRunReference("root", "latest", deps("20260102T030405Z-ffffffff", askedOther));
-    assert.deepEqual([other.ok, other.ok ? other.runId : null, askedOther], [true, "20260102T030400Z-0a0b0c0c", [`root:${runId}`]]);
+    assert.deepEqual([other.ok, other.ok ? other.runId : null, askedOther], [true, "20260102T030400Z-0a0b0c0c", [`root:${runId}`, `root:${older.runId}`]]);
   });
 });

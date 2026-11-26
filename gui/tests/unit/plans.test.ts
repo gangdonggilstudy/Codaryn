@@ -24,10 +24,18 @@ const APPLY_RUN = "20261112T020304Z-0000beef";
 const DIGEST = "d".repeat(64);
 const HANDLE = "1".repeat(32);
 const TOKEN = "ab".repeat(16);
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+async function within<T>(pending: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([pending, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("test setup: the fake host did not write done")), 15_000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
 
 function host(app: Parameters<typeof fakeApp>[0]) {
   const written: HostMessage[] = [];
+  const done = Promise.withResolvers<HostRunMessage & { type: "done" }>();
   const handler = createHostHandler({
     app: fakeApp(app),
     messages: { texts: () => ({ language: "en", texts: {} }) },
@@ -36,7 +44,11 @@ function host(app: Parameters<typeof fakeApp>[0]) {
     providers: [],
     itemsIn: () => () => null,
     token: () => TOKEN,
-    write: (line) => written.push(parseHostMessage(line.trimEnd()) as HostMessage),
+    write: (line) => {
+      const message = parseHostMessage(line.trimEnd()) as HostMessage;
+      written.push(message);
+      if ("type" in message && message.type === "done") done.resolve(message);
+    },
     log: () => undefined,
   });
   const call = async (id: number, name: string, args: unknown): Promise<unknown> => {
@@ -44,7 +56,7 @@ function host(app: Parameters<typeof fakeApp>[0]) {
     const message = written.find((m) => "id" in m && m.id === id) as { ok: boolean; value?: unknown; error?: { code: string } };
     return message.ok ? message.value : message.error?.code;
   };
-  return { call, written };
+  return { call, written, done: done.promise };
 }
 
 const FORM = (profile: string | null, workflowRef: string | null = null) => ({ input: { kind: "workspace", workspace: WS }, configPath: null, varsFile: null, profile, workflowRef });
@@ -106,7 +118,7 @@ test("plans (GU-5): the plan view takes a plan run id and a profile, cleans path
 test("plans (GU-5, DR-21): the app gets a consent only when the main process says so, and then for this plan's digest", async () => {
   const requests: HostApplyRequest[] = [];
   let finish: () => void = () => undefined;
-  const { call, written } = host({
+  const { call, done: writtenDone } = host({
     applyPlan: async (request, observer) => {
       requests.push(request);
       observer.onEvent({ kind: "record", record: { seq: 1, at: "2026-11-12T01:02:03.000Z", runId: APPLY_RUN, type: "apply_started" } });
@@ -148,8 +160,7 @@ test("plans (GU-5, DR-21): the app gets a consent only when the main process say
   assert.deepEqual(await call(5, "applyPlan", good), { ok: true, run: TOKEN, runId: APPLY_RUN });
   assert.deepEqual(requests[0], { settings: FORM(null, "organize"), planRunId: PLAN_RUN, digest: DIGEST, cancelFile: null, unsafeMoveConsent: null });
   finish();
-  await sleep(150);
-  const done = written.find((m): m is HostRunMessage & { type: "done" } => "type" in m && m.type === "done");
+  const done = await within(writtenDone);
   const view = toRunResultView(done?.outcome);
   assert.equal(view.ok, true);
   if (view.ok) {

@@ -184,7 +184,7 @@
   - main과 합친 트리에서 typecheck, 유닛, 통합을 모두 실행한다.
   - 시험은 review-branch가 돌리지 않으므로 따로 실행한다.
 - **비밀 검사 훅**
-  - 공용 `.git/hooks/pre-commit`이 `scripts/check-secrets.mjs --staged`와 같은 사본을 돌린다. 모든 worktree에 적용된다.
+  - 공용 `.git/hooks/pre-commit`을 설치하면 `scripts/check-secrets.mjs --staged`와 같은 사본을 실행하고 모든 worktree에 적용된다. [PM 상태](pm-status.md) CP-60의 2026-11-23 PM 확인 당시에는 공용 hooks 폴더에 샘플만 있어 미설치로 기록했다. 훅이 없는 환경에서는 커밋하는 PM이 [개발 절차 7절](development-workflow.md#7-커밋)의 별도 staging 검사를 수행한다.
   - 잡는 것: 키 형식, 개인 키 블록, 토큰, 키 대입 형태, 금지 파일(`.env` 등), 현재 키 값.
   - 출력은 파일·줄·규칙 이름뿐이다.
   - 훅은 Git이 추적하지 않는다. 새로 복제하면 다시 설치해야 한다. `--no-verify`는 금지다.

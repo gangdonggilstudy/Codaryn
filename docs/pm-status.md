@@ -40,6 +40,12 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-80, 2026-11-27) — 추가 Codex 교육과 주기 감시 구성 착수
+
+- **사용자 추가 지시:** 스케줄러 같은 기능으로 세션 상태를 확인하고 후속 배정이 멈추지 않게 하며, 같은 workspace에 늘린 Codex 세션은 교육 후 배정한다. Herdr에서 실제 Codaryn cwd·workspace w3·정상 Codex 입력 화면인 `w3:pM`·`w3:pN`를 확인하고 이름을 codex-worker-3·codex-worker-4로 정했다. 기존 codex-worker-2는 유지하며 Claude에게 새 일을 주지 않는다.
+- **교육:** 기존 clean claude-adapter·claude-store를 재사용할 예정이며 새 worktree는 만들지 않는다. 새 작업자의 교육 보고를 PM이 전부 읽고 이해 확인을 ACK하기 전에는 제품·시험·후속 작업을 시작시키지 않는다. 현재 임시 PM·금지·수동/자동 검증 구분·Git 소유·READY/ACK를 최신 문서로 교육한다.
+- **감시:** 현재 연결 도구에 이 로컬 세션을 깨우는 예약 API가 없어, 로컬 Herdr/READY 감시와 정상 idle PM의 후속 처리 알림을 구성한다. 아직 감시기 실행/교육 통과/작업 완료로 기록하지 않는다. 신원·위임 확인, 선택 화면 무입력, 모호한 전송 재시도 금지, 중복 감시 방지·종료/회수 조건을 포함해 검토한다. PC/Herdr 종료 뒤 무인 재기동까지 보장하지 않는다.
+
 ## 진행 요약 (CP-79, 2026-11-27) — G12·G13 채택, 인수 묶음 완료
 
 - **G12·G13 채택:** Codex 작업자의 최종 READY 보고 `8d5a4129…422893e6`를 끝까지 읽고 해시 확인·ACK했다. PM이 제품을 바꾸지 않은 시험 3파일 전체, baseline·diff·계측 코드·원시 기록과 110개 근거 해시를 독립 검토했다. 새 발견 0, 작업 branch `e5601f82`를 main `9ae6c8cc`에 합쳤다. 검토 patch `b0c871f3…b148e79`와 main staged patch·검증 트리가 일치하며 review-branch PASS·별도 비밀 검사 뒤 지정 작성자·trailer 없이 커밋했다.

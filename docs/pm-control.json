@@ -13,7 +13,7 @@
   "former_pm_pane": "w3:pG",
   "former_delegation_id": "pm-20261115-claude-01",
   "former_pm_role": "stopped",
-  "implementation_workers": "codex-only: codex-worker-2 (w3:pK); claude-worker (w3:pH) gets no new work",
+  "implementation_workers": "codex-only: codex-worker-2 (w3:pK), codex-worker-3 (w3:pM), codex-worker-4 (w3:pN); new workers require PM onboarding ACK before work; claude-worker (w3:pH) gets no new work",
   "no_git_trailers": true,
   "excluded": "Real API/key reads/model runs, GU9/DR67 installers/signing/publishing/costs remain unapproved or unexecuted; no new worktrees or history rewriting."
 }

@@ -1,6 +1,6 @@
 # PM 상태
 
-현재 운영자: 2026-11-27 사용자 임시 위임(CP-73)의 codex-worker(w3:pJ). canonical main pm-control.json의 pm-20261127-codex-01·active·owner_pane=w3:pJ를 기준으로 한다. 작업자는 Codex인 codex-worker-2(w3:pK)만 쓰며 claude-worker(w3:pH)에게 새 일을 주지 않는다. 아래 Claude 위임과 이전 세션 표는 당시 이력이며, 현재 운영은 [2026-11-27 인계](operations/pm-handoff-2026-11-27.md)를 따른다.
+현재 운영자는 2026-11-27 사용자 임시 위임(CP-73)의 codex-worker(w3:pJ)다. canonical main pm-control.json의 pm-20261127-codex-01·active·owner_pane=w3:pJ를 기준으로 한다. 현재 작업자는 Codex인 codex-worker-2(w3:pK), codex-worker-3(w3:pM), codex-worker-4(w3:pN)다. 현재 운영은 [2026-11-27 인계](operations/pm-handoff-2026-11-27.md)와 CP-81의 작업자 추가 기록을 따른다.
 
 PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로 codex-review(w3:p3)가 PM과 통합을 회수했다. 아래 임시 위임 기록과 active 조건은 Claude 임시 PM에게 적용되며, 회수 후 Codex의 원래 관리 권한을 중단시키지 않는다. 작업별 상세는 [개발 진행 현황](progress.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 둔다.
 
@@ -39,6 +39,13 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
+
+## 진행 요약 (CP-82, 2026-11-27) — 주기 알림으로 문서 후속 처리 완료
+
+- 감시기가 worker-3 READY를 관측해 PM 세션으로 알림을 전달했다. outbox의 ACCEPTED 기록과 실제 수신을 확인하고 보고 `bc3cafa7…fc9aa6d`를 전체 읽고 SHA 확인·ACK했다. 이전 교육과 완료된 배정은 기존 기록을 사용했다.
+- worker-2에게 불변 사본의 독립 검토를 배정했다. 보고 `a8394d29…1aa64b9` 전체와 SHA를 확인해 ACK했다. CD-2·3·4 해소, 새 지적 0건이다. OpenAI 검증 스크립트와 실제 미실행, 비밀 검사 훅과 미설치 시 절차, 실제 API 검증 담당을 명확히 했다.
+- 문서 후보 `0eb45591`을 main `4dff21ac`에 합쳤다. 검토 패치 SHA `3e758532…f80536a`가 main에 들어간 변경과 일치했다. 새 상대 링크 5개와 앵커 3개를 대조했고 기존 깨진 링크 49개 목록은 동일했다. review-branch·공백·별도 스테이징 비밀 검사를 통과했다. 변경 범위는 문서 세 줄이며 제품 시험은 미실행이다.
+- 이 문서 후속 큐를 완료 처리하고 위임 기간의 30초 감시를 유지한다.
 
 ## 진행 요약 (CP-81, 2026-11-27) — 새 두 Codex 교육·배정, PM 주기 감시 활성화
 

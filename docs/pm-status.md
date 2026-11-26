@@ -40,6 +40,13 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-78, 2026-11-27) — G11 채택, G12·G13 진행
+
+- **G11 채택:** codex-worker-2의 최종 독립 검토 `747b84e9…715a36a`에서 새 발견 0을 확인하고 작업 branch `b24fdaef`를 main `97d2b4e3`에 합쳤다. GUI 계획 시험 한 파일의 150ms 추정을 실제 write 콜백의 done 대기로 바꿨으며 원래 assert 48문장은 동일하다. 검토한 patch `ef77e89b…e6443612`와 main staged patch 및 보드 트리가 일치한다.
+- **합친 보드:** 타입 검사와 root build exit 0. unit 4,673건(4,662 통과·10 건너뜀·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), GUI 780건(778 통과·2 건너뜀), Electron 연기 227/227, 실패·취소 0. 연기의 바깥 소켓은 0이다. 별도 check-secrets 결과를 읽고 커밋했으며 지정 작성자·trailer 없음이다.
+- **G12·G13 배정:** Codex 작업자만 기존 codex-verify의 `test/flake-g12g13`(기준 `60185c7f`)에서 시험 3파일을 맡는다. 합성 환경의 기존 값 충돌과 자식 준비 지연을 먼저 대조하며, 제품 변경 없이 환경 비교 격리·모든 자식 ready 뒤 출발·명시적 종료 대기를 구현한다. 원 제품의 경합으로 과장하지 않으며 PM 독립 검토와 합친 보드 뒤 채택한다.
+- **인수 작업 상태:** latest·F1/F2/F4·G5/G6/G9·G7/G8·G11은 채택했다. G10과 인계의 정보 의견은 기록으로 유지한다. 실제 API·키 조회·미승인 설치/서명/게시·사용자 몫 수동 확인은 수행하지 않았다.
+
 ## 진행 요약 (CP-77, 2026-11-27) — G7·G8 채택, G11 독립 검토 통과
 
 - **G7·G8 채택:** Codex 보고 `678028e8…a5f2a93`를 PM이 읽고 독립 검토·ACK했다. 작업 branch `fecdb088`, main `60185c7f`. 합친 판에서 타입 검사 0, unit 4,673건(4,662 통과·10 건너뜀·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), 실패 0. 검토 도구·트리/패치 일치·별도 비밀 검사 뒤 커밋했다.

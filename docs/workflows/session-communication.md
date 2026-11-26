@@ -1,6 +1,23 @@
 # Codaryn 세션 통신
 
-## 2026-11-15 Claude PM 인계 시 운영
+## 2026-11-27 현재 운영과 Codex 작업자 3·4 추가
+
+현재 PM은 main `docs/pm-control.json`의 `pm-20261127-codex-01`이 active인 동안 codex-worker(`w3:pJ`)다. 최신 인계는 [2026-11-27 인계](../operations/pm-handoff-2026-11-27.md)를 따른다. 새 작업은 Codex에만 배정하며 claude-worker에게 새 일을 주지 않는다.
+
+| 현재 역할 | 이름 | pane | agent 종류 | 투입 조건 |
+| --- | --- | --- | --- | --- |
+| PM | codex-worker | w3:pJ | codex | 현재 active 위임의 PM·통합 담당 |
+| worker | codex-worker-2 | w3:pK | codex | 기존 작업자 |
+| worker | codex-worker-3 | w3:pM | codex | 사전 교육 보고를 PM이 읽고 ACK한 뒤 배정 |
+| worker | codex-worker-4 | w3:pN | codex | 사전 교육 보고를 PM이 읽고 ACK한 뒤 배정 |
+
+도구의 worker 이름·pane·agent 허용 목록에 3·4를 추가하지만 이 문서나 코드 추가가 교육 통과를 대신 선언하지 않는다. 기존 이름과 파일 흐름, 닫힌 기록 검증, schema는 유지한다. codex-worker와 claude-worker의 기존 도구 허용 여부를 현재 새 작업 배정 정책과 혼동하지 않는다.
+
+자동 보조 전송의 PM gate는 계속 codex-review/`w3:p3`/Codex에 고정된다. 현재 PM codex-worker/`w3:pJ`의 운영은 file-only 회수와 별도 명시 native 전달이며, 이름·pane·환경을 위장하거나 자동 전송 gate를 완화하지 않는다. 정상 Codex 입력 줄 확인과 선택·승인·한도 화면 무입력 규칙은 새 작업자에도 같다. 제품 기능이나 범용 agent 범위를 넓히는 변경이 아니다.
+
+아래 2026-11-15·22·25 절과 당시 작업자 표는 이전 운영 이력이다. 그 절의 ‘현재’·‘새 등록’은 당시를 가리키며 최신 배정은 위 표와 canonical main 위임을 우선한다. 파일/전송 계약의 보존 규칙은 계속 적용한다.
+
+## 2026-11-15 Claude PM 인계 시 운영 (이력)
 
 2026-11-15 인계 당시 사용자 지시로 `pm-20261115-claude-01` active 기간의 PM은 Claude w3:pG였고 codex-review w3:p3는 일반 작업자로 전환됐다. 당시 원래 도구의 이름·pane·전송 제한은 변경하지 않았다. 아래 항목은 그 인계 당시의 운영 기록이다.
 
@@ -9,7 +26,7 @@
 - 당시 worker 허용 목록은 기존 다섯 Codex 그대로였다. former PM codex-review는 register 허용 worker가 아니어서 검토된 도구 변경 전에는 별도 수동 task/report/receipt/READ/hash/ACK 기록을 구분해 사용하고 기존 canonical receipt를 위조하지 않기로 했다. 인계 당시 former PM의 활성 배정은 없었다.
 - 인계 시 기존 등록 보고는 모두 ACK CLOSED였다. 폐기/보존한 `comm-live-loop-01`의 예상 CHECKOUT_MISMATCH만 예외였으며 재전송하지 않기로 했다. task·registry·receipt·실패 증거는 불변으로 보존하고, 실제 API/키 조회/한도·크레딧 선택/승인 UI 응답은 계속 제외한 운영이었다.
 
-## 2026-11-22 작업자 변경
+## 2026-11-22 작업자 변경 (이력)
 
 사용자 결정으로 현재 작업자는 codex-worker(`w3:pJ`, Codex)와 claude-worker(`w3:pH`, Claude) 둘이다. codex-review를 포함한 옛 Codex 세션은 지금 없다. 전체 절차와 소유권은 [현재 인계](../operations/pm-handoff-2026-11-15.md)와 main `docs/pm-control.json`을 따른다.
 
@@ -17,13 +34,13 @@
 - PM 전송 경로의 고정 신원(codex-review/w3:p3)과 Codex 전용 입력 줄 판정은 변경하지 않았다. 현재 Claude PM은 file-only 운영과 별도 명시 native prompt를 사용하며 고정 신원이나 pane/환경을 위장하지 않는다.
 - Claude worker에게 `dispatch --send`를 사용하지 않는다. 현재 코드는 어느 경로에서도 Claude worker에게 prompt를 보내지 않는다. Codex 전용 입력 줄 검사까지 도달하면 화면 내용과 관계없이 `VISIBLE_UNCONFIRMED`로 보류하지만, 그 전에 PM 신원 확인에서 실패하거나 작업자 상태에 따라 먼저 보류될 수도 있다. Claude worker의 file-only dispatch와 STARTED/READY는 지원한다.
 
-## 2026-11-25 작업자 추가
+## 2026-11-25 작업자 추가 (이력)
 
 사용자 결정으로 Codex 세션 codex-worker-2(`w3:pK`, agent `codex`)를 추가한다. 현재 작업자는 codex-worker(`w3:pJ`)·claude-worker(`w3:pH`)·codex-worker-2(`w3:pK`) 세 명이다. 새 작업자에도 같은 이름·agent 종류·pane·terminal·cwd·session digest 확인 규칙을 적용하며, Codex 입력 줄 판정도 codex-worker와 같다. 옛 이름의 닫힌 기록 검증과 PM 전송 계약은 유지한다.
 
-## 현재 작업자와 원래 Codex PM 전송 계약
+## 2026-11-25 당시 작업자 표(이력)와 고정 PM 전송 계약
 
-현재 w3의 세 worker와 고정된 PM 전송 경로를 위한 운영 도구다. 제품 엔진이나 범용 agent framework가 아니다. PM은 canonical 관리 main cwd에서 `node scripts/pm-session-comms.mjs --help`로 안내를 보고, 시험은 `node --test scripts/pm-session-comms.test.mjs`로 실행한다. worker의 실행 경로는 아래 절대 main 스크립트 계약을 따른다. Node의 표준 모듈만 사용한다.
+아래 표는 2026-11-25 당시 세 worker의 이력이며 최신 현재 표는 문서 머리에 있다. 이 도구는 지정된 worker와 고정 PM 전송 계약을 위한 운영 도구다. 제품 엔진이나 범용 agent framework가 아니다. PM은 canonical 관리 main cwd에서 `node scripts/pm-session-comms.mjs --help`로 안내를 보고, 시험은 `node --test scripts/pm-session-comms.test.mjs`로 실행한다. worker의 실행 경로는 아래 절대 main 스크립트 계약을 따른다. Node의 표준 모듈만 사용한다.
 
 | 역할 | 허용 이름 | 고정 pane | agent 종류 |
 | --- | --- | --- | --- |

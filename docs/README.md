@@ -63,7 +63,7 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | [단계 3 작업 지시](work-orders/phase-3-self-development.md) | 자기 개발 준비와 `models`, 결정 U(단계 3), V, W, X, Y |
 | [사용성 개선 지시](work-orders/phase-4-usability.md) | 사용성 결정 N-1~N-28과 구현 배정 |
 | [단계 4·5 설계 지시](work-orders/phase-4-5-design.md) | 설계 배정, 설계 결정(AC, VX, GT, GUI), 교차 검토 뒤 결정(DR-1~DR-9, 앞의 채택보다 우선)과 1차 구현 배정 |
-| `reviews/` | 교차 검토·검증 원문 보관. 2026-11-15 정리에서 다른 파일이 이름이나 묶음 패턴으로 가리키지 않는 원문 126개와 옛 지침 사본 `guidelines.md`, 옛 인계 `session-handoff.md`를 지웠다. 날짜 와일드카드로 언급된 원문을 포함한 전문은 private 저장소 `Codaryn-archive`(main `5b7946cd`)의 같은 경로에 있다. 단계 4·5 설계 검토는 [R-1 검토 보고](reviews/2026-11-12-r1-review-stage-4-5-designs.md) |
+| `reviews/` | 교차 검토·검증 원문 보관. 2026-11-15 정리에서 다른 파일이 이름이나 묶음 패턴으로 가리키지 않는 원문 126개와 옛 지침 사본 `guidelines.md`, 옛 인계 `session-handoff.md`를 지웠다. 날짜 와일드카드로 언급된 원문과 후속 정리한 병합 검토 R-13·R-15·R-21의 전문은 private 저장소 `Codaryn-archive`의 `5b7946cd`에서 같은 경로로 찾을 수 있다. 단계 4·5 설계 검토는 [R-1 검토 보고](reviews/2026-11-12-r1-review-stage-4-5-designs.md) |
 
 ## 문서 적용 원칙
 

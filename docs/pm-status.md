@@ -40,6 +40,14 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-81, 2026-11-27) — 새 두 Codex 교육·배정, PM 주기 감시 활성화
+
+- **교육·실제 배정:** codex-worker-3(w3:pM)·4(w3:pN)의 보고 전체와 SHA(`69f0c7d1…e7a8c4f0`, `2ed9bee5…239d90ec0`) 및 14답을 확인해 각각 14/14 수동 ACK·통과했다. worker-3는 현재 운영자 문서 정리, worker-4는 PM 자신이 만든 감시기 보안 검토를 맡았다. 기존 작업 공간만 재사용했고 Claude 새 배정은 없다.
+- **통신 변경 채택:** worker-2가 새3/4 이름·pane·Codex 종류만 추가했다. PM 독립 검토, 전용 fake 시험 164/164와 합친 타입 검사 exit0·unit 4,673(4,662 통과·10 skip·1 TODO)·integration 686(684 통과·1 skip·1 TODO), 실패·취소0 뒤 branch `566190ff`/main `a56a83b3`로 채택했다. 옛 닫힌 기록·schema·고정 옛 PM 자동 전송 gate는 보존하며 현재 PM은 명시 native 운영이다.
+- **첫 문서 채택:** worker-3 보고 `0fa2568d…eaf0eef` 전체 읽기·수동 ACK·문장/이력/출처 검토·raw/patch 일치·링크 baseline49와 별도 비밀 검사 뒤 README/personas 두 문서를 branch `c27a0ca3`/main `7ebb0231`로 채택했다. 교육 통과와 현재 PM/세 Codex를 분명히 하며 과거 위임은 이력으로 보존한다.
+- **주기 감시 활성화:** [운영 절차](operations/pm-monitor-2026-11-27.md). 로컬 감시기는 30초마다 세 worker/READY/ACK를 확인하고 정상 idle/done PM에게만 알린다(반복 최소 5분). owner/claim 배타 생성, 위임 회수·선택 UI 무입력, 전송 불명확 자동 재시도 금지다. 첫 독립 검토 PWR-1/2/3을 모두 보완했고 재검토 `83991adc…b2130cd`의 닫힘·새 발견0을 전체 읽고 ACK한 뒤 정확한 실행 소스/owner를 확인해 notify를 켰다. 최종 모의·합성 디스크 22/22이며 실제 PM_WORKING·READY/ACK 관측과 알림 보류를 확인했다. 실제 알림 접수/장기 운영과 PC 종료 뒤 자동 재기동까지 입증한 수치가 아니다.
+- **후속 진행:** worker-2의 한정 조사 `469a4ee2…de1f84a6` 전체 읽기·ACK로 확인한 낡은 세 문장(CD-2~4)을 worker-3의 current-implementation-wording-codex3-01에 배정했다. worker-2는 뒤의 독립 대조에 쓸 수 있다. 감시기의 continuation/후속 큐가 READY 회수·검토·채택·다음 승인 단위를 이어 준다. 실제 API·수동 확인·미승인 설치/서명/게시를 완료나 승인으로 바꾸지 않는다.
+
 ## 진행 요약 (CP-80, 2026-11-27) — 추가 Codex 교육과 주기 감시 구성 착수
 
 - **사용자 추가 지시:** 스케줄러 같은 기능으로 세션 상태를 확인하고 후속 배정이 멈추지 않게 하며, 같은 workspace에 늘린 Codex 세션은 교육 후 배정한다. Herdr에서 실제 Codaryn cwd·workspace w3·정상 Codex 입력 화면인 `w3:pM`·`w3:pN`를 확인하고 이름을 codex-worker-3·codex-worker-4로 정했다. 기존 codex-worker-2는 유지하며 Claude에게 새 일을 주지 않는다.

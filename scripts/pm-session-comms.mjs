@@ -10,8 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const execute = promisify(execFile);
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const PANES = Object.freeze({ 'codex-review': 'w3:p3', 'codex-worker': 'w3:pJ', 'claude-worker': 'w3:pH', 'codex-worker-2': 'w3:pK' });
-const WORKER_AGENTS = Object.freeze({ 'codex-worker': 'codex', 'claude-worker': 'claude', 'codex-worker-2': 'codex' });
+export const PANES = Object.freeze({ 'codex-review': 'w3:p3', 'codex-worker': 'w3:pJ', 'claude-worker': 'w3:pH', 'codex-worker-2': 'w3:pK', 'codex-worker-3': 'w3:pM', 'codex-worker-4': 'w3:pN' });
+const WORKER_AGENTS = Object.freeze({ 'codex-worker': 'codex', 'claude-worker': 'claude', 'codex-worker-2': 'codex', 'codex-worker-3': 'codex', 'codex-worker-4': 'codex' });
 // Historical names validate immutable records only; they cannot register or resume work.
 const RECORD_PANES = Object.freeze({ 'codex-check': 'w3:pD', 'codex-loop': 'w3:p8',
   'codex-sec': 'w3:pC', 'codex-audit': 'w3:pE', 'codex-probe': 'w3:pF', ...PANES });

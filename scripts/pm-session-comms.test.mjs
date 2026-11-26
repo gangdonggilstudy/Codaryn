@@ -75,7 +75,10 @@ async function historicalRecord(f, name, { id = 'archived-job', closed = true, c
   return { id, reportSHA, snapshots };
 }
 
-for (const [worker, pane, kind] of [['codex-worker', 'w3:pJ', 'codex'], ['claude-worker', 'w3:pH', 'claude'], ['codex-worker-2', 'w3:pK', 'codex']]) {
+const addedCodexWorkers = [['codex-worker-2', 'w3:pK'], ['codex-worker-3', 'w3:pM'], ['codex-worker-4', 'w3:pN']];
+
+for (const [worker, pane, kind] of [['codex-worker', 'w3:pJ', 'codex'], ['claude-worker', 'w3:pH', 'claude'],
+  ...addedCodexWorkers.map(([worker, pane]) => [worker, pane, 'codex'])]) {
   test('current worker ' + worker + ' completes file-only STARTED/READY/ACK with its expected agent kind', async t => {
     const f = await fixture(t); assert.equal(f.agents[worker].agent, kind);
     await f.register('job', { worker, pane }); await f.dispatch();
@@ -182,7 +185,9 @@ for (const location of ['outside', 'missing', 'linked']) test('L1 regression: hi
 });
 
 for (const [worker, pane] of [['claude-worker', 'w3:pJ'], ['codex-worker', 'w3:pH'],
-  ['codex-worker-2', 'w3:pJ'], ['codex-worker-2', 'w3:pH'], ['codex-worker', 'w3:pK']]) {
+  ['codex-worker-2', 'w3:pJ'], ['codex-worker-2', 'w3:pH'], ['codex-worker', 'w3:pK'],
+  ['codex-worker-3', 'w3:pK'], ['codex-worker-3', 'w3:pN'], ['codex-worker-4', 'w3:pK'],
+  ['codex-worker-4', 'w3:pM'], ['codex-worker-2', 'w3:pM'], ['codex-worker-2', 'w3:pN']]) {
   test('I4 regression: ' + worker + ' cannot register with the other current worker pane ' + pane, async t => {
     const f = await fixture(t);
     await assert.rejects(f.register('job', { worker, pane }), failure('WORKER_NOT_ALLOWED'));
@@ -191,62 +196,72 @@ for (const [worker, pane] of [['claude-worker', 'w3:pJ'], ['codex-worker', 'w3:p
   });
 }
 
-for (const screen of ['› Ask Codex to do anything\n? for shortcuts', '› Ask\n Codex to do anything\n? for shortcuts']) {
-  test('codex-worker-2 dispatch and full lifecycle accept the normal Codex footer ' + JSON.stringify(screen), async t => {
-    const f = await fixture(t);
-    f.agents['codex-worker-2'].agent_session = { agent: 'codex', kind: 'id', source: 'herdr:codex', value: 'new-worker-session-one' };
-    f.config.visibleText = screen;
-    await f.register('job', { worker: 'codex-worker-2', pane: 'w3:pK' });
-    const job = await f.read(f.pm, '.codaryn/pm-comms/registry/job.json');
-    assert.deepEqual([job.identity.name, job.identity.pane, job.identity.terminal, job.identity.cwd],
-      ['codex-worker-2', 'w3:pK', 'terminal-codex-worker-2', await fs.realpath(f.pm)]);
-    assert.match(job.identity.sessionSHA, /^[a-f0-9]{64}$/);
-    assert.equal((await f.dispatch('job', { send: true })).delivery, 'accepted');
-    assert(f.calls.some(call => call[0] === 'visible' && call[1] === 'codex-worker-2'));
-    assert.deepEqual(f.calls.filter(call => call[0] === 'prompt').map(call => call[1]), ['codex-worker-2']);
-    await f.author.worker('STARTED', f.pm, f.worker, 'job', 'codex-worker-2');
-    const ready = await f.author.worker('READY', f.pm, f.worker, 'job', 'codex-worker-2', '# New Codex worker\n');
-    const row = (await f.api.poll(f.pm))[0];
-    assert.equal(row.state, 'READY'); assert.equal(row.acceptanceReady, true); assert.equal(row.sessionBound, true);
-    assert.equal((await f.api.ack(f.pm, 'job', ready.reportSHA, true)).state, 'ACK');
-    assert.equal((await f.api.poll(f.pm))[0].closed, true);
-  });
+for (const [worker, pane] of addedCodexWorkers) {
+  for (const screen of ['› Ask Codex to do anything\n? for shortcuts', '› Ask\n Codex to do anything\n? for shortcuts']) {
+    test(worker + ' dispatch and full lifecycle accept the normal Codex footer ' + JSON.stringify(screen), async t => {
+      const f = await fixture(t);
+      f.agents[worker].agent_session = { agent: 'codex', kind: 'id', source: 'herdr:codex', value: 'new-worker-session-one' };
+      f.config.visibleText = screen;
+      await f.register('job', { worker: worker, pane: pane });
+      const job = await f.read(f.pm, '.codaryn/pm-comms/registry/job.json');
+      assert.deepEqual([job.identity.name, job.identity.pane, job.identity.terminal, job.identity.cwd],
+        [worker, pane, 'terminal-' + worker, await fs.realpath(f.pm)]);
+      assert.match(job.identity.sessionSHA, /^[a-f0-9]{64}$/);
+      assert.equal((await f.dispatch('job', { send: true })).delivery, 'accepted');
+      assert(f.calls.some(call => call[0] === 'visible' && call[1] === worker));
+      assert.deepEqual(f.calls.filter(call => call[0] === 'prompt').map(call => call[1]), [worker]);
+      await f.author.worker('STARTED', f.pm, f.worker, 'job', worker);
+      const ready = await f.author.worker('READY', f.pm, f.worker, 'job', worker, '# New Codex worker\n');
+      const row = (await f.api.poll(f.pm))[0];
+      assert.equal(row.state, 'READY'); assert.equal(row.acceptanceReady, true); assert.equal(row.sessionBound, true);
+      assert.equal((await f.api.ack(f.pm, 'job', ready.reportSHA, true)).state, 'ACK');
+      assert.equal((await f.api.poll(f.pm))[0].closed, true);
+    });
+  }
+
+  for (const mode of ['unknown-dialog', 'approval-ui', 'quota-ui', 'read-failure']) {
+    test(worker + ' refuses dispatch on ' + mode + ' without a send claim or prompt', async t => {
+      const f = await fixture(t); await f.register('job', { worker: worker, pane: pane });
+      if (mode === 'read-failure') f.config.visibleError = Object.assign(new Error('not logged'), { code: 'EACCES' });
+      else f.config.visibleText = mode === 'approval-ui' ? '› Ask Codex to do anything\n  1. Allow once\n  2. No'
+        : mode === 'quota-ui' ? '› Ask Codex to do anything\nUsage limit reached' : 'Unrecognized dialog\nContinue?';
+      assert.deepEqual(await f.dispatch('job', { send: true }), { id: 'job', state: 'ASSIGNED', delivery: 'queued', error: 'VISIBLE_UNCONFIRMED' });
+      assert.equal(f.calls.filter(call => call[0] === 'prompt').length, 0);
+      await assert.rejects(fs.stat(path.join(f.pm, pmRel('job', 'dispatch.claim'))), error => error.code === 'ENOENT');
+    });
+  }
+
+  for (const field of ['name', 'terminal_id', 'cwd', 'changed-session', 'missing-session']) {
+    test(worker + ' pins ' + field + ' through READY and refuses changed identity at ACK', async t => {
+      const f = await fixture(t), agent = f.agents[worker];
+      agent.agent_session = { agent: 'codex', kind: 'id', source: 'herdr:codex', value: 'new-worker-session-one' };
+      await f.register('job', { worker: worker, pane: pane }); await f.dispatch();
+      await f.author.worker('STARTED', f.pm, f.worker, 'job', worker);
+      const ready = await f.author.worker('READY', f.pm, f.worker, 'job', worker, '# Pinned identity\n');
+      assert.equal((await f.api.poll(f.pm))[0].acceptanceReady, true);
+      if (field === 'name') agent.name = 'codex-worker';
+      else if (field === 'terminal_id') agent.terminal_id = 'different-terminal';
+      else if (field === 'cwd') agent.cwd = f.worker;
+      else if (field === 'changed-session') agent.agent_session.value = 'new-worker-session-two';
+      else delete agent.agent_session;
+      const code = field === 'cwd' ? 'IDENTITY_CWD_MISMATCH' : 'IDENTITY_MISMATCH';
+      await assert.rejects(f.dispatch('job', { send: true }), failure(code));
+      const row = (await f.api.poll(f.pm))[0];
+      assert.equal(row.state, 'REJECTED'); assert.equal(row.error, code);
+      await assert.rejects(f.api.ack(f.pm, 'job', ready.reportSHA, true), failure(code));
+      assert.equal(f.calls.filter(call => call[0] === 'prompt').length, 0);
+      await assert.rejects(fs.stat(path.join(f.pm, '.codaryn/pm-comms/ack/job.' + ready.reportSHA + '.json')), error => error.code === 'ENOENT');
+    });
+  }
 }
 
-for (const mode of ['unknown-dialog', 'approval-ui', 'quota-ui', 'read-failure']) {
-  test('codex-worker-2 refuses dispatch on ' + mode + ' without a send claim or prompt', async t => {
-    const f = await fixture(t); await f.register('job', { worker: 'codex-worker-2', pane: 'w3:pK' });
-    if (mode === 'read-failure') f.config.visibleError = Object.assign(new Error('not logged'), { code: 'EACCES' });
-    else f.config.visibleText = mode === 'approval-ui' ? '› Ask Codex to do anything\n  1. Allow once\n  2. No'
-      : mode === 'quota-ui' ? '› Ask Codex to do anything\nUsage limit reached' : 'Unrecognized dialog\nContinue?';
-    assert.deepEqual(await f.dispatch('job', { send: true }), { id: 'job', state: 'ASSIGNED', delivery: 'queued', error: 'VISIBLE_UNCONFIRMED' });
-    assert.equal(f.calls.filter(call => call[0] === 'prompt').length, 0);
-    await assert.rejects(fs.stat(path.join(f.pm, pmRel('job', 'dispatch.claim'))), error => error.code === 'ENOENT');
-  });
-}
-
-for (const field of ['name', 'terminal_id', 'cwd', 'changed-session', 'missing-session']) {
-  test('codex-worker-2 pins ' + field + ' through READY and refuses changed identity at ACK', async t => {
-    const f = await fixture(t), agent = f.agents['codex-worker-2'];
-    agent.agent_session = { agent: 'codex', kind: 'id', source: 'herdr:codex', value: 'new-worker-session-one' };
-    await f.register('job', { worker: 'codex-worker-2', pane: 'w3:pK' }); await f.dispatch();
-    await f.author.worker('STARTED', f.pm, f.worker, 'job', 'codex-worker-2');
-    const ready = await f.author.worker('READY', f.pm, f.worker, 'job', 'codex-worker-2', '# Pinned identity\n');
-    assert.equal((await f.api.poll(f.pm))[0].acceptanceReady, true);
-    if (field === 'name') agent.name = 'codex-worker';
-    else if (field === 'terminal_id') agent.terminal_id = 'different-terminal';
-    else if (field === 'cwd') agent.cwd = f.worker;
-    else if (field === 'changed-session') agent.agent_session.value = 'new-worker-session-two';
-    else delete agent.agent_session;
-    const code = field === 'cwd' ? 'IDENTITY_CWD_MISMATCH' : 'IDENTITY_MISMATCH';
-    await assert.rejects(f.dispatch('job', { send: true }), failure(code));
-    const row = (await f.api.poll(f.pm))[0];
-    assert.equal(row.state, 'REJECTED'); assert.equal(row.error, code);
-    await assert.rejects(f.api.ack(f.pm, 'job', ready.reportSHA, true), failure(code));
-    assert.equal(f.calls.filter(call => call[0] === 'prompt').length, 0);
-    await assert.rejects(fs.stat(path.join(f.pm, '.codaryn/pm-comms/ack/job.' + ready.reportSHA + '.json')), error => error.code === 'ENOENT');
-  });
-}
+for (const [worker, pane] of addedCodexWorkers.slice(1)) test(worker + ' does not widen the fixed PM send gate', async t => {
+  const f = await fixture(t, { context: { herdr: '1', pane: 'w3:pJ' } });
+  await f.register('job', { worker, pane }); await f.dispatch();
+  await assert.rejects(f.dispatch('job', { send: true }), failure('PM_CONTEXT'));
+  assert.equal(f.calls.filter(call => call[0] === 'prompt').length, 0);
+  await assert.rejects(fs.stat(path.join(f.pm, pmRel('job', 'dispatch.claim'))), error => error.code === 'ENOENT');
+});
 
 test('unclosed historical jobs cannot dispatch, STARTED, READY or acquire a new ACK', async t => {
   const f = await fixture(t), old = await historicalRecord(f, 'codex-loop', { closed: false });

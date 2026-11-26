@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { acquireLock, nodeLockFileSystem } from "../../../src/store/index.js";
@@ -48,6 +48,77 @@ async function withRoot(run: (root: string) => Promise<void>): Promise<void> {
 }
 
 const lockFile = (root: string): string => join(root, ".codaryn", "lock.json");
+
+type ContenderResult = { ok: boolean; code: string | null };
+
+/** Every contender is ready before go, and stays alive until the parent has checked every result. */
+async function withContenders(ids: readonly string[], script: string, root: string, check: (results: ContenderResult[]) => Promise<void>): Promise<void> {
+  const states: { child: ReturnType<typeof spawn>; ready: Promise<void>; result: Promise<ContenderResult>; closed: Promise<number | null> }[] = [];
+  const failed = Promise.withResolvers<never>();
+  let fault: Error | undefined, releasing = false, allResults = false;
+  const fail = (error: Error): void => { fault ??= error; failed.reject(fault); };
+  void failed.promise.catch(() => undefined);
+  const bounded = async <T>(pending: Promise<T>, ms = 120_000): Promise<T> => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([pending, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("owned contenders did not reach the next phase")), ms);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  const killOwned = (): void => {
+    for (const { child } of states) if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  };
+  try {
+    for (const runId of ids) {
+      const child = spawn(process.execPath, ["--input-type=module", "-e", script, runId], {
+        windowsHide: true, stdio: ["ignore", "ignore", "pipe", "ipc"],
+        env: {
+          SystemRoot: "C:/Windows", WINDIR: "C:/Windows", ComSpec: join("C:/Windows", "System32/cmd.exe"),
+          PATH: [dirname(process.execPath), "C:/Program Files/Git/cmd", "C:/Windows/System32", "C:/Windows/System32/WindowsPowerShell/v1.0"].join(delimiter),
+          HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root, TEMP: root, TMP: root,
+        },
+      });
+      const ready = Promise.withResolvers<void>(), result = Promise.withResolvers<ContenderResult>(), closed = Promise.withResolvers<number | null>();
+      states.push({ child, ready: ready.promise, result: result.promise, closed: closed.promise });
+      let readySeen = false, resultSeen = false, stderr = "";
+      child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+      child.once("error", fail);
+      child.once("close", (code) => {
+        closed.resolve(code);
+        if (!releasing) fail(new Error(`child ${runId} closed before release: ${stderr.slice(0, 300)}`));
+      });
+      child.on("message", (message) => {
+        const value = message as { type?: string; ok?: boolean; code?: string | null };
+        if (value.type === "ready" && !readySeen) { readySeen = true; ready.resolve(); }
+        else if (value.type === "result" && readySeen && !resultSeen && typeof value.ok === "boolean" && (value.code === null || typeof value.code === "string")) {
+          resultSeen = true; result.resolve({ ok: value.ok, code: value.code });
+        } else fail(new Error(`unexpected message from child ${runId}`));
+      });
+    }
+    await bounded(Promise.race([Promise.all(states.map((state) => state.ready)), failed.promise]));
+    for (const { child } of states) child.send("go", (error) => { if (error) fail(error); });
+    const results = await bounded(Promise.race([Promise.all(states.map((state) => state.result)), failed.promise]));
+    allResults = true;
+    assert.ok(states.every(({ child }) => child.exitCode === null && child.signalCode === null), "all contenders stay alive while the parent checks results");
+    await check(results);
+    if (fault) throw fault;
+  } finally {
+    releasing = true;
+    if (allResults) {
+      for (const { child } of states) if (child.connected) child.send("release", (error) => { if (error) child.kill("SIGKILL"); });
+    } else killOwned();
+    const closed = Promise.all(states.map((state) => state.closed));
+    try {
+      const codes = await bounded(closed, 10_000);
+      if (allResults) assert.ok(codes.every((code) => code === 0), `owned child exit codes: ${JSON.stringify(codes)}`);
+    } catch (error) {
+      killOwned();
+      await bounded(closed, 10_000);
+      throw error;
+    }
+  }
+}
 
 async function leaveDeadLock(root: string): Promise<string> {
   await mkdir(join(root, ".codaryn"), { recursive: true });
@@ -112,41 +183,28 @@ test("without hard links, separate processes reclaiming one dead lock at the sam
   for (let round = 0; round < 6; round += 1) {
     await withRoot(async (root) => {
       await leaveDeadLock(root);
-      const startAt = Date.now() + 400;
       const script = [
+        "const go = Promise.withResolvers(), release = Promise.withResolvers(); let released = false;",
+        "process.on(\"message\", (message) => { if (message === \"go\") go.resolve(); if (message === \"release\") { released = true; release.resolve(); } });",
+        "process.once(\"disconnect\", () => { if (!released) process.exit(2); });",
+        "const watchdog = setTimeout(() => process.exit(2), 120_000);",
         `const { acquireLock, nodeLockFileSystem } = await import(${JSON.stringify(storeUrl)});`,
         `const fileSystem = { ...nodeLockFileSystem, link: async () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); } };`,
-        `while (Date.now() < ${startAt}) {}`,
+        "process.send({ type: \"ready\" });",
+        "await go.promise;",
         `const outcome = await acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: process.argv[1], clock: { now: () => 0 }, fileSystem, retryForMs: ${ACQUIRE_BUDGET_MS}, isProcessAlive: (pid) => pid !== ${CRASHED_PID} });`,
-        "process.stdout.write(JSON.stringify({ ok: outcome.ok, code: outcome.code ?? null }));",
-        `await new Promise((resolve) => setTimeout(resolve, Math.max(0, ${startAt + 900} - Date.now())));`,
-      ].join("\n");
+        "process.send({ type: \"result\", ok: outcome.ok, code: outcome.code ?? null });",
+        "await release.promise;",
+        "clearTimeout(watchdog); process.disconnect();",
+      ].join(String.fromCharCode(10));
       const ids = ["proc-a", "proc-b", "proc-c"];
-      const results = await Promise.all(
-        ids.map(
-          (runId) =>
-            new Promise<{ ok: boolean; code: string | null }>((resolve, reject) => {
-              const child = spawn(process.execPath, ["--input-type=module", "-e", script, runId], { stdio: ["ignore", "pipe", "pipe"] });
-              let out = "";
-              let err = "";
-              child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString("utf8")));
-              child.stderr.on("data", (chunk: Buffer) => (err += chunk.toString("utf8")));
-              child.on("error", reject);
-              child.on("close", () => {
-                try {
-                  resolve(JSON.parse(out) as { ok: boolean; code: string | null });
-                } catch {
-                  reject(new Error(`child ${runId} printed no outcome: ${err.slice(0, 300)}`));
-                }
-              });
-            }),
-        ),
-      );
-      const winners = ids.filter((_, index) => results[index]?.ok === true);
-      assert.equal(winners.length, 1, `round ${round}: ${JSON.stringify(results)}`);
-      assert.ok(results.every((result) => result.ok || result.code === "workspace_locked"), JSON.stringify(results));
-      const holder = JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string };
-      assert.equal(holder.runId, winners[0]);
+      await withContenders(ids, script, root, async (results) => {
+        const winners = ids.filter((_, index) => results[index]?.ok === true);
+        assert.equal(winners.length, 1, `round ${round}: ${JSON.stringify(results)}`);
+        assert.ok(results.every((result) => result.ok || result.code === "workspace_locked"), JSON.stringify(results));
+        const holder = JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string };
+        assert.equal(holder.runId, winners[0]);
+      });
     });
   }
 });

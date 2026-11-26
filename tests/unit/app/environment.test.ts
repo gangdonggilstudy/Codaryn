@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
@@ -64,20 +65,48 @@ describe("variables file", () => {
   test("readVarsFileSync gives what process.loadEnvFile loads, and loadVarsInto keeps names already set as it does", async () => {
     const file = path.join(await tempDir(), "vars.env");
     await writeFile(file, CONTENT, "utf8");
-    const parsed = readVarsFileSync(file);
-    const names = Object.keys(parsed);
-    assert.deepEqual(names.sort(), ["APP_EQ_A", "APP_EQ_B", "APP_EQ_C", "APP_EQ_D", "APP_EQ_E", "APP_EQ_F", "APP_EQ_KEEP"]);
-    for (const name of names) assert.equal(process.env[name], undefined, `${name} must not be set before the test`);
-
-    process.env["APP_EQ_KEEP"] = "before";
-    try {
-      process.loadEnvFile(file);
-      const env: Record<string, string | undefined> = { APP_EQ_KEEP: "before" };
-      loadVarsInto(env, file, readVarsFileSync);
-      for (const name of names) assert.equal(env[name], process.env[name], name);
-      assert.equal(env["APP_EQ_KEEP"], "before");
-    } finally {
-      for (const name of names) delete process.env[name];
+    // Both the native loader and the app run inside a child with only synthetic inputs.
+    // The parent never reads, sets or removes the seven APP_EQ_* variables.
+    const appUrl = new URL("../../../src/app/index.js", import.meta.url).href;
+    const script = [
+      'import assert from "node:assert/strict";',
+      `const { readVarsFileSync, loadVarsInto } = await import(${JSON.stringify(appUrl)});`,
+      'const file = process.argv[1], initial = JSON.parse(process.argv[2]);',
+      'const parsed = readVarsFileSync(file), names = Object.keys(parsed);',
+      'assert.deepEqual(names.sort(), ["APP_EQ_A", "APP_EQ_B", "APP_EQ_C", "APP_EQ_D", "APP_EQ_E", "APP_EQ_F", "APP_EQ_KEEP"]);',
+      'for (const name of names) assert.equal(process.env[name], initial[name], name + " synthetic initial value");',
+      'process.env["APP_EQ_KEEP"] = "before";',
+      'process.loadEnvFile(file);',
+      'const env = { ...initial, APP_EQ_KEEP: "before" };',
+      'loadVarsInto(env, file, readVarsFileSync);',
+      'for (const name of names) assert.equal(env[name], process.env[name], name);',
+      'assert.equal(env["APP_EQ_KEEP"], "before");',
+    ].join(String.fromCharCode(10));
+    for (const initial of [{}, { APP_EQ_A: "synthetic-existing-A", APP_EQ_C: "synthetic-existing-C", APP_EQ_KEEP: "before" }]) {
+      const dir = path.dirname(file);
+      const child = spawn(process.execPath, ["--input-type=module", "-e", script, file, JSON.stringify(initial)], {
+        cwd: dir, windowsHide: true, stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          SystemRoot: "C:/Windows", WINDIR: "C:/Windows", ComSpec: path.join("C:/Windows", "System32/cmd.exe"),
+          PATH: [path.dirname(process.execPath), "C:/Program Files/Git/cmd", "C:/Windows/System32", "C:/Windows/System32/WindowsPowerShell/v1.0"].join(path.delimiter),
+          HOME: dir, USERPROFILE: dir, APPDATA: dir, LOCALAPPDATA: dir, TEMP: dir, TMP: dir, ...initial,
+        },
+      });
+      let stderr = "", spawnError: Error | undefined, timedOut = false;
+      const closed = new Promise<number | null>((resolve) => child.once("close", resolve));
+      child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+      child.once("error", (error) => { spawnError = error; });
+      const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, 15_000);
+      try {
+        const code = await closed;
+        assert.equal(spawnError, undefined);
+        assert.equal(timedOut, false, "the isolated environment comparison completed");
+        assert.equal(code, 0, stderr);
+      } finally {
+        clearTimeout(timer);
+        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await closed;
+      }
     }
   });
 

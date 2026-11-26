@@ -136,23 +136,77 @@ test("U-213: the run's signal ends the tries: aborted during a wait, or already 
   assert.deepEqual([once.tries(), early.slept], [1, []]);
 });
 
-test("U-213: a real wait ends as soon as the signal is aborted", async () => {
-  // Tries take no time: the 500 ms wait runs from about 250 ms to 750 ms; the abort at 400 ms cuts it.
+test("U-213: a real wait ends as soon as the signal is aborted", async (t) => {
+  // Keep retried's default clock and real AbortSignal; control only the host scheduler's callbacks.
+  // An abort scheduled at 400 ms does not prove that the 50 and 200 ms callbacks ran before it.
   const controller = new AbortController();
+  const nativeSetTimeout = globalThis.setTimeout;
+  const nativeClearTimeout = globalThis.clearTimeout;
+  type Timer = ReturnType<typeof setTimeout>;
+  const pending = new Set<Timer>();
+  const cleared: Timer[] = [];
+  const scheduled: { ms: number | undefined; timer: Timer; fire: () => void }[] = [];
+  let registered = (): void => {};
+  const nextRegistration = (): Promise<void> => new Promise((resolve) => { registered = resolve; });
+  let callbacks = 0;
   let tries = 0;
-  const started = performance.now();
-  setTimeout(() => controller.abort(), 400);
-  const outcome = await retried(
-    async () => {
-      tries += 1;
-      return "changed" as const;
-    },
-    { signal: controller.signal },
-  );
-  const took = performance.now() - started;
-  assert.equal(outcome, "changed");
-  assert.equal(tries, 5, "three tries at once, two after the 50 and 200 ms waits, then the 500 ms wait the abort cut");
-  assert.ok(took < 650, `ended ${Math.round(took)} ms after the start, not when the 500 ms wait would have ended`);
+  const addListener = t.mock.method(controller.signal, "addEventListener");
+  const removeListener = t.mock.method(controller.signal, "removeEventListener");
+  const setTimer = t.mock.method(globalThis, "setTimeout", (callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    const timer = {} as Timer;
+    pending.add(timer);
+    scheduled.push({ ms, timer, fire: () => {
+      assert.ok(pending.has(timer), "only a pending timer may fire");
+      callbacks += 1;
+      callback(...args);
+    } });
+    registered();
+    return timer;
+  });
+  const clearTimer = t.mock.method(globalThis, "clearTimeout", (timer: Parameters<typeof clearTimeout>[0]) => {
+    assert.ok(pending.delete(timer as Timer), "the wait clears its registered timer exactly once");
+    cleared.push(timer as Timer);
+  });
+  let watchdog: Timer | undefined;
+  const stalled = new Promise<never>((_, reject) => {
+    watchdog = nativeSetTimeout(() => reject(new Error("abort did not settle the registered wait (watchdog)")), 5_000);
+  });
+  try {
+    await Promise.race([(async () => {
+      const first = nextRegistration();
+      const outcome = retried(async () => { tries += 1; return "changed" as const; }, { signal: controller.signal });
+      await first;
+      assert.deepEqual([tries, scheduled.map((wait) => wait.ms)], [3, [50]], "the two immediate retries register no timer");
+      const second = nextRegistration();
+      scheduled[0]!.fire();
+      await second;
+      assert.deepEqual([tries, scheduled.map((wait) => wait.ms)], [4, [50, 200]]);
+      const last = nextRegistration();
+      scheduled[1]!.fire();
+      await last;
+      assert.deepEqual([tries, scheduled.map((wait) => wait.ms)], [5, [50, 200, 500]]);
+      assert.deepEqual([...pending], [scheduled[2]!.timer], "the final wait is registered before abort");
+      controller.abort();
+      assert.equal(await outcome, "changed", "abort settles without firing the 500 ms callback");
+      assert.equal(callbacks, 2, "only the 50 and 200 ms callbacks ran");
+      assert.equal(tries, 5, "no sixth attempt starts after abort");
+      assert.equal(pending.size, 0);
+      assert.deepEqual(cleared, scheduled.map((wait) => wait.timer), "all three timers were cleared");
+      const added = addListener.mock.calls.filter((call) => call.arguments[0] === "abort");
+      const removed = removeListener.mock.calls.filter((call) => call.arguments[0] === "abort");
+      assert.equal(added.length, 3);
+      assert.deepEqual(removed.map((call) => call.arguments[1]), added.map((call) => call.arguments[1]), "every wait removes its abort listener");
+    })(), stalled]);
+  } finally {
+    // The watchdog only fails a stalled test. It is never a successful completion condition.
+    nativeClearTimeout(watchdog);
+    controller.abort();
+    pending.clear();
+    setTimer.mock.restore();
+    clearTimer.mock.restore();
+    addListener.mock.restore();
+    removeListener.mock.restore();
+  }
 });
 
 let base = "";

@@ -1,6 +1,8 @@
 # Codaryn 개발 문서
 
-Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루프, 민감정보 처리, 검증과 협업 절차를 관리한다. 사용자가 제품 방향을 정하고 Codex가 최종 기술 판단과 개발 관리를 맡는다(위임 기간에는 임시 PM). 지금은 `pm-control.json`의 active 위임에 따라 Claude `w3:pG`가 PM이며, 작업은 전문 페르소나를 지정해 현재 작업자 codex-worker와 claude-worker에게 배정한다(2026-11-22 사용자 결정).
+Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루프, 민감정보 처리, 검증과 협업 절차를 관리한다. 사용자가 제품 방향을 정하고 Codex가 최종 기술 판단과 개발 관리를 맡는다(위임 기간에는 임시 PM).
+
+현재 PM은 codex-worker(`w3:pJ`)다. 권한 기준은 관리용 main의 [pm-control.json](pm-control.json)의 `pm-20261127-codex-01`·`active`·`owner_pane=w3:pJ`이며, 현재 배정과 운영 상태는 [PM 상태](pm-status.md)의 최신 체크포인트와 [2026-11-27 인계](operations/pm-handoff-2026-11-27.md)를 따른다. 작업자는 Codex인 codex-worker-2(`w3:pK`)·codex-worker-3(`w3:pM`)·codex-worker-4(`w3:pN`)다. 새 작업자 3·4는 PM이 사전 교육 보고를 읽고 수동 ACK하여 교육을 통과했다(2026-11-27 추가 배정 지시). 작업마다 전문 페르소나를 지정하며 Claude에는 새 일을 배정하지 않는다.
 
 현재 상태(CP-58 기준, GU-9는 CP-64로 보완. 판정은 [임시 PM 상태](pm-status.md)의 최신 체크포인트가 우선한다):
 - 2026-11-15 사용자 결정으로 새 저장소에서 다시 시작했다. 그 전의 커밋 해시는 private `Codaryn-archive`의 이력을 가리킨다.

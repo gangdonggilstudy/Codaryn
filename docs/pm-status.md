@@ -40,6 +40,15 @@ PM 인계와 작업 묶음의 체크포인트다. 2026-11-14 사용자 지시로
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-79, 2026-11-27) — G12·G13 채택, 인수 묶음 완료
+
+- **G12·G13 채택:** Codex 작업자의 최종 READY 보고 `8d5a4129…422893e6`를 끝까지 읽고 해시 확인·ACK했다. PM이 제품을 바꾸지 않은 시험 3파일 전체, baseline·diff·계측 코드·원시 기록과 110개 근거 해시를 독립 검토했다. 새 발견 0, 작업 branch `e5601f82`를 main `9ae6c8cc`에 합쳤다. 검토 patch `b0c871f3…b148e79`와 main staged patch·검증 트리가 일치하며 review-branch PASS·별도 비밀 검사 뒤 지정 작성자·trailer 없이 커밋했다.
+  - G12는 부모의 해당 환경값을 읽거나 바꾸지 않고 완전 합성 자식 안에서 native/앱 로더를 같은 초기 조건으로 비교한다. 기존 값 보존과 parsed 이름·값 단언을 유지했다. 가짜 상속 충돌 실패 5/5→0/5, 후보는 기본/기존 값 두 조건을 매번 확인했다.
+  - G13은 모든 자식 ready 뒤 go, 원 결과 단언 뒤 release, 실제 close 뒤 fixture 삭제로 바꿨다. 750ms 준비 지연에서 기능 실패는 전후 0/10이며 준비 누락 회전만 10/60→0/60이다. 고의 준비 실패 전후 각 10회는 계속 실패하되 삭제 시 생존 자식은 2→0이다. 실제 동시 CPU 실행이나 모든 interleaving의 보장으로 해석하지 않는다.
+- **최종 root 보드:** 타입 검사 exit 0. unit 4,673건(4,662 통과·10 건너뜀·1 TODO), integration 686건(684 통과·1 건너뜀·1 TODO), 실패·취소 0. 관련 파일은 작업자 19/19다. 이번 root 시험만의 변경에는 GUI를 반복하지 않았으며, 직전 G11 합친 GUI 보드(CP-78)의 GUI 780건·Electron 연기 227/227을 구분해 유지한다.
+- **임시 PM 인수 묶음 완료:** 자신의 G5/G6/G9는 Codex 독립 검토와 보완 재검토 뒤 채택했고, latest·미커밋 F1/F2/F4도 Codex 인수/독립 검토·전체 보드 뒤 채택했다. 뒤이은 G7/G8·G11·G12/G13도 완료했으며 새 작업자를 만들거나 Claude에게 새 일을 주지 않았다. Codex 작업자는 READY 뒤 대기한다. PM 위임은 active이며 사용자의 회수 권한은 그대로다.
+- **남은 기록/사용자 항목:** G10·U-213, MRR-2~4·SS-1/2·낮은 위험 읽기·POSIX FIFO·DR-73은 인계의 정보/환경 제약 기록으로 남긴다. 꾸러미 화면·키 없는 수동 12항목·실제 API 3.1·GUI-D9·E-5/E-6은 완료로 처리하지 않는다. 실제 API·키/개인 설정 조회·미승인 설치/서명/게시·질문/선택 화면 응답·새 worktree·이력 재작성은 수행하지 않았다.
+
 ## 진행 요약 (CP-78, 2026-11-27) — G11 채택, G12·G13 진행
 
 - **G11 채택:** codex-worker-2의 최종 독립 검토 `747b84e9…715a36a`에서 새 발견 0을 확인하고 작업 branch `b24fdaef`를 main `97d2b4e3`에 합쳤다. GUI 계획 시험 한 파일의 150ms 추정을 실제 write 콜백의 done 대기로 바꿨으며 원래 assert 48문장은 동일하다. 검토한 patch `ef77e89b…e6443612`와 main staged patch 및 보드 트리가 일치한다.

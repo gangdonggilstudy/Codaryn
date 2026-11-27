@@ -7,7 +7,7 @@
 import { basename, dirname } from "node:path";
 import { isHandle } from "../shared/ipc.js";
 import type { OpenReply, RecentView, TreeEntryView, TreeKind, TreeReply } from "../shared/ipc.js";
-import { EMPTY_STATE, EMPTY_WINDOW, fitGuiState, memoryFor, readGuiState, windowOf, withOpened, withoutPath, withRunForm, writeGuiState } from "./gui-state.js";
+import { EMPTY_STATE, EMPTY_WINDOW, memoryFor, prepareGuiState, readGuiState, windowOf, withOpened, withoutPath, withRunForm } from "./gui-state.js";
 import type { WindowMemory } from "./gui-state.js";
 import type { RunForm } from "./gui-state.js";
 import type { GuiState } from "./gui-state.js";
@@ -85,10 +85,10 @@ export class Workspaces {
 
   /** Called inside mutate; a failed save keeps the list in memory and is not a window error. */
   private async save(state: GuiState): Promise<void> {
-    const fitted = fitGuiState(state);
-    this.state = fitted;
+    const prepared = prepareGuiState(state);
+    this.state = prepared.state;
     const file = this.deps.stateFile;
-    if (file !== null) await writeGuiState(file, fitted).catch(() => undefined);
+    if (file !== null) await prepared.write(file).catch(() => undefined);
   }
 
   /**

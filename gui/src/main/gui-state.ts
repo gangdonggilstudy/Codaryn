@@ -239,9 +239,10 @@ function indentedLength(value: unknown, indent: number): number {
  * of the workspace-memory and recent lists. Whole-state serialization is done only at the
  * beginning and for the final check; removed elements are accounted for once each.
  */
-export function fitGuiState(state: GuiState): GuiState {
-  let length = stateText(state).length;
-  if (length <= MAX_FILE_BYTES) return state;
+function fittedStateText(state: GuiState): { readonly state: GuiState; readonly text: string } {
+  const text = stateText(state);
+  let length = text.length;
+  if (length <= MAX_FILE_BYTES) return { state, text };
   const removed = state.workspaceMemory.map(() => new Set<number>());
   const counts = state.workspaceMemory.map(memory => memory.runs.length);
   const oldest = state.workspaceMemory.flatMap((memory, workspace) => memory.runs.map((run, index) => ({ run, workspace, index })));
@@ -266,13 +267,27 @@ export function fitGuiState(state: GuiState): GuiState {
   const fitted: GuiState = { ...state, recentWorkspaces, workspaceMemory };
   // Valid window memory and the empty lists fit easily. Reject an unbounded invalid caller
   // value rather than ever writing a file above the limit or silently changing its window.
-  if (stateText(fitted).length > MAX_FILE_BYTES) throw new RangeError("GUI state cannot fit within its file limit");
-  return fitted;
+  const fittedText = stateText(fitted);
+  if (fittedText.length > MAX_FILE_BYTES) throw new RangeError("GUI state cannot fit within its file limit");
+  return { state: fitted, text: fittedText };
 }
 
-/** Writes the whole state through a temporary file and a rename, so a reader never sees half of it. */
-export async function writeGuiState(file: string, state: GuiState): Promise<void> {
-  const text = stateText(fitGuiState(state));
+/** The fitted state, preserving the input object when it is already within the limit. */
+export function fitGuiState(state: GuiState): GuiState {
+  return fittedStateText(state).state;
+}
+
+/**
+ * Fits once and binds the checked text to its writer. The text writer stays private so a caller
+ * cannot pass an unchecked string; memory and disk can use the same fitted snapshot.
+ */
+export function prepareGuiState(state: GuiState): { readonly state: GuiState; readonly write: (file: string) => Promise<void> } {
+  const fitted = fittedStateText(state);
+  return { state: fitted.state, write: file => writeStateText(file, fitted.text) };
+}
+
+/** Writes only text produced by the size fitter, through a temporary file and a rename. */
+async function writeStateText(file: string, text: string): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   const temporary = `${file}.${randomBytes(6).toString("hex")}.tmp`;
   try {
@@ -282,6 +297,11 @@ export async function writeGuiState(file: string, state: GuiState): Promise<void
     await rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/** Fits and writes the whole state, so existing callers keep the same size policy. */
+export async function writeGuiState(file: string, state: GuiState): Promise<void> {
+  await prepareGuiState(state).write(file);
 }
 
 /** The state with `path` opened now: first in the list, once, at most MAX_RECENT entries. */

@@ -116,6 +116,27 @@ test("IR-D5: memory, written file and restart agree after a mutation crosses the
   const again = await create().open(target.path); assert.ok(again.ok); assert.deepEqual(again.lastForm, form);
 });
 
+test("IR-D5: session-only Workspaces still drops the global oldest runs and keeps each last form", async () => {
+  const workspaces = new Workspaces({ stateFile: null, platform: "win32", randomBytes, now: () => new Date("2026-01-01T00:00:00Z"), isDirectory: async () => true });
+  const opened = [], all: string[] = [];
+  const form = { profile: "p".repeat(200), workflow: "w".repeat(200) };
+  for (let w = 0; w < 20; w += 1) {
+    const folder = `C:\\synthetic\\session${w}`, reply = await workspaces.open(folder); assert.ok(reply.ok);
+    opened.push({ folder, handle: reply.handle });
+    for (let r = 0; r < 30; r += 1) {
+      const id = runId(w * 30 + r); all.push(id);
+      await workspaces.rememberRun(reply.handle, id, form);
+    }
+  }
+  await workspaces.flush();
+  const kept = (await Promise.all(opened.map(async item => [...(await workspaces.runForms(item.handle)).keys()]))).flat().sort();
+  assert.ok(kept.length > 0 && kept.length < all.length, "no state file must not bypass the in-memory size policy");
+  assert.deepEqual(kept, all.sort().slice(all.length - kept.length));
+  for (const item of opened) {
+    const reply = await workspaces.open(item.folder); assert.ok(reply.ok); assert.deepEqual(reply.lastForm, form);
+  }
+});
+
 for (const growing of [false, true]) test(`IR-D6: ${growing ? "growing" : "large"} file has bounded actual reads on one closed handle`, async t => {
   const f = await fixture(t); await fs.writeFile(f.file, " ".repeat(growing ? 16 : CAP * 2));
   const actualRead = fs.readFile, actualOpen = fs.open;

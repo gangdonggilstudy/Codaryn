@@ -12,19 +12,56 @@ Codaryn은 로컬에서 실행하는 범용 작업 에이전트 CLI다. 코딩�
 
 ## 키 없이 체험하기 (PowerShell)
 
-API 키와 네트워크 없이 정해진 대본으로 실행 → 실행 목록 → 보고서 → 되돌리기를 본다. 출력 예시와 설명은 [사용 안내 3절](docs/usage.md#3-키-없이-체험하기). 파일 정리의 계획 확인 → 적용 → 되돌리기는 `examples\organize-demo`로 같은 방식으로 본다([18.2절](docs/usage.md#182-키-없이-체험하기-파일-정리)).
+소스 배포에는 **Node.js 26 이상**이 필요하다(`package.json`의 `engines`). 저장소 루트에서 아래 준비 블록을 통째로 실행한다. 설치는 빌드와 다르며, 어느 단계든 실패하거나 확인할 수 없으면 다음 블록으로 넘어가지 않는다. Windows PowerShell에서는 실행 정책을 바꾸지 않고 `npm.cmd`를 쓴다.
 
 ```powershell
-npm ci; npm run build
-$demo = "$HOME\codaryn-demo"                         # 저장소 밖의 새 폴더
-Copy-Item -Recurse examples\demo $demo
-node dist/src/cli/main.js doctor --task $demo\task.json
-node dist/src/cli/main.js run --task $demo\task.json
-node dist/src/cli/main.js runs --workspace $demo\workspace
-node dist/src/cli/main.js report --workspace $demo\workspace --run latest
-node dist/src/cli/main.js revert --workspace $demo\workspace --run latest --dry-run
-node dist/src/cli/main.js revert --workspace $demo\workspace --run latest
+& {
+    $ErrorActionPreference = 'Stop'  # 이 준비 블록 안에만 적용
+    $nodeVersion = node --version
+    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v([0-9]+)\.[0-9]+\.[0-9]+$' -or [int]$Matches[1] -lt 26) { throw 'Node.js 26 이상인지 확인하세요.' }
+    npm.cmd ci
+    if ($LASTEXITCODE -ne 0) { throw '의존성 설치 실패: 빌드로 넘어가지 않습니다.' }
+    npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw 'CLI 빌드 실패: 실행으로 넘어가지 않습니다.' }
+    if (-not (Test-Path -LiteralPath '.\dist\src\cli\main.js' -PathType Leaf)) { throw 'CLI 진입 파일이 없습니다.' }
+    node dist/src/cli/main.js --version
+    if ($LASTEXITCODE -ne 0) { throw 'CLI 실행을 확인하지 못했습니다.' }
+}
 ```
+
+파일 존재는 실행 성공이나 소스 판본 일치의 증거가 아니다. 준비 단계별 확인 범위와 선택적인 링크 설치는 [사용 안내 2절](docs/usage.md#2-설치와-빌드)에 있다.
+
+다음은 새 사본에서 **실행 → 같은 실행 ID의 보고 → 되돌리기 미리보기**까지 보는 예시다. scripted 모델은 제공자 API에 요청하지 않는다. 기존 대본은 허용되지 않은 명령을 요청해 거부되는 예시이며, 파일 검증 실패 뒤 재수정도 보여 준다. 아래 블록은 통째로 실행하고, 실패·불명 결과에서는 후속 단계로 넘어가지 않는다. `. { ... }`는 같은 PowerShell 세션에 사본 경로와 실행 ID를 남긴다.
+
+```powershell
+. {
+    $demoRunId = $null; $demoPreview = $null
+    $demo = Join-Path $HOME ('codaryn-demo-' + [Guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $demo) { throw '기존 사본은 쓰지 않습니다. 새 경로를 고르세요.' }
+    Copy-Item -LiteralPath '.\examples\demo' -Destination $demo -Recurse -ErrorAction Stop
+    $demoWorkspace = Join-Path $demo 'workspace'
+    $demoTask = Join-Path $demo 'task.json'
+    $demoConfig = Join-Path $demo 'demo-config.json'
+    '{"schemaVersion":1}' | Set-Content -LiteralPath $demoConfig -Encoding ascii -ErrorAction Stop
+    $demoRun = node dist/src/cli/main.js run --task $demoTask --config $demoConfig --json | ConvertFrom-Json -ErrorAction Stop
+    $demoRunExit = $LASTEXITCODE
+    $demoRun | ConvertTo-Json -Depth 20
+    if ($demoRunExit -ne 0 -or $demoRun -isnot [pscustomobject] -or $demoRun.schemaVersion -ne 1 -or $demoRun.kind -ne 'run' -or $demoRun.status -ne 'done' -or $demoRun.reason -ne 'verified' -or $demoRun.exitCode -ne 0 -or $demoRun.runId -notmatch '^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$') { throw '실행 결과를 확인하지 못했습니다. 후속 명령을 실행하지 않습니다.' }
+    $demoRunId = $demoRun.runId
+    $demoReport = node dist/src/cli/main.js report --workspace $demoWorkspace --run $demoRunId --json | ConvertFrom-Json -ErrorAction Stop
+    $demoReportExit = $LASTEXITCODE
+    $demoReport | ConvertTo-Json -Depth 20
+    if ($demoReportExit -ne 0 -or $demoReport -isnot [pscustomobject] -or $demoReport.schemaVersion -ne 1 -or $demoReport.kind -ne 'report' -or $demoReport.status -ne 'complete' -or $demoReport.exitCode -ne 0 -or $demoReport.runId -ne $demoRunId -or $demoReport.result.runId -ne $demoRunId -or $demoReport.result.status -ne 'done' -or $demoReport.result.reason -ne 'verified' -or $demoReport.recordsChanged -eq $true) { throw '보고서를 확인하지 못했습니다. 후속 명령을 실행하지 않습니다.' }
+    $demoPreview = node dist/src/cli/main.js revert --workspace $demoWorkspace --run $demoRunId --dry-run --json | ConvertFrom-Json -ErrorAction Stop
+    $demoPreviewExit = $LASTEXITCODE
+    $demoPreview | ConvertTo-Json -Depth 20
+    if ($demoPreviewExit -ne 0 -or $demoPreview -isnot [pscustomobject] -or $demoPreview.schemaVersion -ne 1 -or $demoPreview.kind -ne 'revert' -or $demoPreview.runId -ne $demoRunId -or $demoPreview.status -ne 'complete' -or $demoPreview.exitCode -ne 0 -or $demoPreview.dryRun -ne $true -or $demoPreview.recordsChanged -eq $true) { throw '미리보기의 실패·불명 결과와 skipped를 확인하세요.' }
+}
+```
+
+`done/verified`는 지정 검증이 통과했다는 뜻이다. `no_verifier`·`usage_unknown`은 성공이 아니며, 미리보기의 `complete`·`dryRun=true`도 실제 복구 성공을 뜻하지 않는다. 다시 체험할 때는 위 블록으로 새 사본을 만들고 기존 사본은 덮거나 지우지 않는다. 실제 되돌리기는 [사용 안내 3절의 별도 단계](docs/usage.md#체험의-실제-되돌리기)에서 설명한다.
+
+체험은 새 사본에 만든 설정 파일을 사용한다. scripted도 입력 검사·가림 등록을 위해 알려진 키 환경값을 읽을 수 있다. 등록값을 가린 출력·저널과 로컬 원본 스냅샷은 다르다([가림](docs/usage.md#12-가릴-값-등록과-가려지는-범위), [되돌리기·원본 보관](docs/usage.md#11-되돌리기)). 일반 작업에서는 명령 도구와 명령 검증기를 모두 살핀다. OS 격리와 후손 수거 보장은 없으며, 로컬 토큰·시간 한도는 원격 요금 제한이 아니다([실행 경계와 결과 읽기](docs/usage.md#3-키-없이-체험하기), [알려진 한계](docs/usage.md#16-알려진-한계)).
 
 ## 실제 작업 시작 (PowerShell)
 

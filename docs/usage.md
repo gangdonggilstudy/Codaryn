@@ -4,9 +4,9 @@ Codaryn CLI를 실제 작업에 쓰는 방법이다. 설명은 현재 코드 동
 
 > 오프라인 검증(유닛, 프로세스 통합)과 로컬 가짜 서버를 쓴 모의 API 검증만 통과했다. 실제 Anthropic API와 실제 OpenAI API로는 아직 검증하지 않았다. 처음에는 [키 없이 체험하기](#3-키-없이-체험하기)로 흐름을 익히고, 실제 작업 전에 [실제 호출 점검](#14-실제-호출-점검)을 한다.
 
-처음 쓰는 순서: 설치(2절) → 기본 설정 만들기 `init`(4절) → 실행 전 점검 `doctor`(7절) → 키 없는 체험(3절) → 결과 읽기 `runs`·`report`(10절) → 되돌리기 `revert`(11절). 체험은 `init` 없이도 된다. 작업 종류를 고르는 범용 작업(파일 정리의 계획 확인 → 적용 → 되돌리기, 자료 분석의 사람 확인, 승인한 파일만 고치는 실행 계획)은 18절이다.
+처음 쓰는 순서: 요구 사항(1절) → 설치·빌드·진입점 확인(2절) → 새 사본의 scripted 체험·같은 실행 ID의 보고와 미리보기(3절)다. 체험은 `init` 없이도 된다. 실제 API 작업을 준비할 때 기본 설정 `init`(4절), 실행 전 점검 `doctor`(7절), 실제 호출 점검(14절)을 별도로 따른다. 결과 읽기는 10절, 실제 되돌리기는 11절이다. 작업 종류를 고르는 범용 작업은 18절이다.
 
-**출력 언어:** 사람이 읽는 글(오류 설명, 진행 줄, 끝 요약, 도움말, `doctor`)은 한국어와 영어로 나온다(8절 "언어"). 이 문서의 출력 예시는 `CODARYN_LANG=en`으로 실행한 실제 출력이다. 같은 글을 보려면 먼저 `$env:CODARYN_LANG = "en"`을 실행한다. 한국어 Windows에서 이 변수가 없으면 한국어로 나온다.
+**출력 언어:** 사람이 읽는 글(오류 설명, 진행 줄, 끝 요약, 도움말, `doctor`)은 한국어와 영어로 나온다(8절 "언어"). 이 문서의 기존 출력 예시는 각 항목에 기록한 판에서 `CODARYN_LANG=en`으로 실행한 측정 기록이다. 이번 안내 수정에서 다시 실행하거나 새로 계측한 결과가 아니다. 같은 언어를 고르려면 `$env:CODARYN_LANG = "en"`을 쓴다. 한국어 Windows에서 이 변수가 없으면 한국어로 나온다.
 
 ## 1. 요구 사항
 
@@ -17,14 +17,26 @@ Codaryn CLI를 실제 작업에 쓰는 방법이다. 설명은 현재 코드 동
 
 ## 2. 설치와 빌드
 
-저장소 루트에서 실행한다.
+소스 배포는 저장소 루트에서 아래 블록을 통째로 실행한다. Node 요구 확인, 의존성 설치, CLI 빌드, 진입 파일 존재, CLI 실행 확인은 각각 별개다. 한 단계라도 실패하거나 확인할 수 없으면 이 블록은 멈추며 다음 단계/체험으로 넘어가지 않는다. Windows PowerShell 예시의 `npm.cmd`는 `.ps1` 실행 정책 변경 없이 npm을 부르는 방법이다. 런타임·전역 PATH·설정을 바꾸도록 요구하지 않는다.
 
 ```powershell
-npm ci
-npm run build                       # dist/ 에 컴파일
-node dist/src/cli/main.js --help    # 명령 목록. 명령별 도움말은 help <명령> 또는 <명령> --help
-node dist/src/cli/main.js --version
+& {
+    $ErrorActionPreference = 'Stop'  # 이 준비 블록 안에만 적용
+    $nodeVersion = node --version
+    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v([0-9]+)\.[0-9]+\.[0-9]+$' -or [int]$Matches[1] -lt 26) { throw 'Node.js 26 이상인지 확인하세요.' }
+    npm.cmd ci
+    if ($LASTEXITCODE -ne 0) { throw '의존성 설치 실패: 빌드로 넘어가지 않습니다.' }
+    npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw 'CLI 빌드 실패: 실행으로 넘어가지 않습니다.' }
+    if (-not (Test-Path -LiteralPath '.\dist\src\cli\main.js' -PathType Leaf)) { throw 'CLI 진입 파일이 없습니다.' }
+    node dist/src/cli/main.js --version
+    if ($LASTEXITCODE -ne 0) { throw 'CLI 실행을 확인하지 못했습니다.' }
+}
 ```
+
+- `npm ci` 성공은 의존성 설치 단계의 성공이며 `dist/src/cli/main.js`가 만들어졌다는 뜻이 아니다. 소스 배포의 CLI는 별도 `npm run build`로 만든다. 설치가 실패하면 오류를 확인하고 그 단계부터 다시 판단한다.
+- `node_modules` 디렉터리나 예전 빌드 파일의 존재만으로 준비 완료라 하지 않는다. 파일 존재와 `--version` 실행 성공도 그 파일이 현재 소스 판과 같거나 모든 환경에서 호환된다는 증명은 아니다. 위 준비 블록은 같은 소스 위치에서 빌드한 뒤 실행 여부를 확인한다.
+- `doctor`는 빌드된 CLI 안의 점검이다. CLI 진입 파일이 없으면 먼저 소스 준비/빌드를 확인한다. 실행 가능한 뒤에 설정·작업 공간·정책을 점검한다(7절). 명령 목록은 `node dist/src/cli/main.js --help`로 본다.
 
 **`codaryn` 명령으로 쓰기(`npm link`, 선택):**
 
@@ -64,27 +76,58 @@ npm run package -- --electron-zip-dir <폴더> --node-exe <node.exe> --node-lice
 
 ## 3. 키 없이 체험하기
 
-[`examples/demo/`](../examples/demo)는 API 키와 네트워크 없이 실행 → 실행 목록 → 보고서 → 되돌리기를 보는 예시다. 모델 대신 정해진 대본(scripted 모델)이 응답하고, 그 도구 호출은 실제 모델과 같은 정책, 가림, 검증, 기록 경로를 지난다.
+[`examples/demo/`](../examples/demo)는 정해진 대본(scripted 모델)으로 실행 → 같은 실행 ID의 보고서 → 되돌리기 미리보기를 보는 예시다. scripted 모델은 제공자 API에 요청하지 않으며 제공자 키·모델 ID가 필요 없다. 도구 호출은 실제 모델과 같은 정책, 가림, 검증, 기록 경로를 지난다.
 
 과제: 회의 메모 `notes.md`를 읽어 `summary.md`에 요약을 만든다. 대본은 허용되지 않은 명령(`node --version`)을 한 번 요청해 거부되고, 처음 만든 요약에 '## 할 일' 절을 빠뜨려 검증에 실패한 뒤 재수정 1회로 고친다. `notes.md`는 보호 경로다.
 
+**실행 전에:** 이 task의 명령 허용 목록은 비어 있고 검증기는 파일 규칙뿐이다. 명령 요청 자체가 없는 대본은 아니며, 거부 사례를 성공시키려고 허용 목록을 넓힐 필요는 없다. 일반 작업에서는 도구의 명령 정책과 명령 검증기를 모두 확인한다. `run_command`를 허용하지 않아도 `command` 검증기는 실행될 수 있고, 사용자 권한의 자식에 OS 파일·네트워크 격리는 없다. 분리된 후손은 남을 수 있으며 수거는 최선 노력이다([13절](#13-권한-정책), [16절](#16-알려진-한계)).
+
+**키와 원본:** 체험은 새 사본에 만든 최소 설정을 `--config`로 지정한다. scripted도 상속 환경에서 알려진 키 값을 입력 검사·가림 등록에 사용할 수 있다. 가림은 등록값과 지원 변형에 적용하며 복구용 원본 스냅샷은 로컬 평문으로 남는다. 실행이 거부되거나 한도에 닿으면 멈추고 원인을 확인한다. 기존 설정과 키 값은 그대로 둔다([12절](#12-가릴-값-등록과-가려지는-범위), [원본 보관·정리](#11-되돌리기), [민감정보 처리](privacy.md)).
+
+2절 준비가 끝났을 때 저장소 루트에서 아래 블록 전체를 실행한다. 매번 새 경로에 사본을 만들며 기존 사본을 덮거나 지우지 않는다. `. { ... }`는 같은 PowerShell 세션에 `$demoWorkspace`·`$demoRunId`·`$demoPreview`를 남긴다. stdout을 JSON으로 읽고 프로세스 종료 코드·종류·상태·대상을 함께 확인한다. 실패·불명·기록 변경 표시에서는 후속 명령을 실행하지 않는다.
+
 ```powershell
-# 저장소 루트에서, 2절의 빌드를 마친 뒤
-$demo = "$HOME\codaryn-demo"                          # 아직 없는 폴더. 저장소 밖이어야 한다
-Copy-Item -Recurse examples\demo $demo
-node dist/src/cli/main.js doctor --task $demo\task.json
-node dist/src/cli/main.js run --task $demo\task.json
-node dist/src/cli/main.js runs --workspace $demo\workspace
-node dist/src/cli/main.js report --workspace $demo\workspace --run latest
-node dist/src/cli/main.js revert --workspace $demo\workspace --run latest --dry-run
-node dist/src/cli/main.js revert --workspace $demo\workspace --run latest
+. {
+    $demoRunId = $null; $demoPreview = $null
+    $demo = Join-Path $HOME ('codaryn-demo-' + [Guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $demo) { throw '기존 사본은 쓰지 않습니다. 새 경로를 고르세요.' }
+    Copy-Item -LiteralPath '.\examples\demo' -Destination $demo -Recurse -ErrorAction Stop
+    $demoWorkspace = Join-Path $demo 'workspace'
+    $demoTask = Join-Path $demo 'task.json'
+    $demoConfig = Join-Path $demo 'demo-config.json'
+    '{"schemaVersion":1}' | Set-Content -LiteralPath $demoConfig -Encoding ascii -ErrorAction Stop
+    $demoRun = node dist/src/cli/main.js run --task $demoTask --config $demoConfig --json | ConvertFrom-Json -ErrorAction Stop
+    $demoRunExit = $LASTEXITCODE
+    $demoRun | ConvertTo-Json -Depth 20
+    if ($demoRunExit -ne 0 -or $demoRun -isnot [pscustomobject] -or $demoRun.schemaVersion -ne 1 -or $demoRun.kind -ne 'run' -or $demoRun.status -ne 'done' -or $demoRun.reason -ne 'verified' -or $demoRun.exitCode -ne 0 -or $demoRun.runId -notmatch '^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$') { throw '실행 결과를 확인하지 못했습니다. 후속 명령을 실행하지 않습니다.' }
+    $demoRunId = $demoRun.runId
+    $demoReport = node dist/src/cli/main.js report --workspace $demoWorkspace --run $demoRunId --json | ConvertFrom-Json -ErrorAction Stop
+    $demoReportExit = $LASTEXITCODE
+    $demoReport | ConvertTo-Json -Depth 20
+    if ($demoReportExit -ne 0 -or $demoReport -isnot [pscustomobject] -or $demoReport.schemaVersion -ne 1 -or $demoReport.kind -ne 'report' -or $demoReport.status -ne 'complete' -or $demoReport.exitCode -ne 0 -or $demoReport.runId -ne $demoRunId -or $demoReport.result.runId -ne $demoRunId -or $demoReport.result.status -ne 'done' -or $demoReport.result.reason -ne 'verified' -or $demoReport.recordsChanged -eq $true) { throw '보고서를 확인하지 못했습니다. 후속 명령을 실행하지 않습니다.' }
+    $demoPreview = node dist/src/cli/main.js revert --workspace $demoWorkspace --run $demoRunId --dry-run --json | ConvertFrom-Json -ErrorAction Stop
+    $demoPreviewExit = $LASTEXITCODE
+    $demoPreview | ConvertTo-Json -Depth 20
+    if ($demoPreviewExit -ne 0 -or $demoPreview -isnot [pscustomobject] -or $demoPreview.schemaVersion -ne 1 -or $demoPreview.kind -ne 'revert' -or $demoPreview.runId -ne $demoRunId -or $demoPreview.status -ne 'complete' -or $demoPreview.exitCode -ne 0 -or $demoPreview.dryRun -ne $true -or $demoPreview.recordsChanged -eq $true) { throw '미리보기의 실패·불명 결과와 skipped를 확인하세요.' }
+}
 ```
+
+| 결과 | 뜻과 다음 행동 |
+| --- | --- |
+| `run`: `done/verified`, 종료 0 | 지정 검증이 통과했다. 이번 변경 여부는 `changes`도 읽는다. |
+| `needs-input/no_verifier`, 종료 3 | 검증기가 없어 성공으로 취급하지 않는다. 후속을 멈추고 검증 지정을 확인한다. |
+| `budget-exhausted/usage_unknown`, 종료 4 | 유한 토큰 한도인데 응답 사용량이 불명이다. 후속을 멈춘다. scripted의 `usage`는 아래에서 설명한다. |
+| `report`: `complete`, 종료 0 | 기록을 읽었다는 뜻이다. 실행 성공은 `result.status/reason`을 따로 본다. `incomplete`(종료 3)는 미완료·불명으로 멈춘다. |
+| `revert`: `complete`, `dryRun=true`, 종료 0 | 미리보기가 끝났다. `deleted`도 예정 처리이며 실제 삭제·복구는 하지 않았다. |
+| `revert`: `partial`, 종료 3 | 실제 처리나 미리보기에서 일부 대상을 다루지 못했다. `skipped[].reason`을 확인하고 전체 성공으로 바꾸어 읽지 않는다. |
+
+로컬 한도는 원격 요금 한도가 아니다. turn·tool은 다음 시작을 제한하고, 토큰은 응답 사용량을 집계한 뒤 다음 모델 호출을 막는다. HTTP 재시도는 별개이고, 시간 초과·취소 뒤에도 이미 보낸 요청의 원격 처리·청구가 남을 수 있다. 상세는 [6절](#6-설정-파일과-task-파일)·[9절](#9-재수정-반복)·[16절](#16-알려진-한계), 상태·종료 코드 전체 표는 [10절](#10-결과-읽기)을 본다.
 
 **왜 복사하나:** 실행이 작업 공간의 파일을 실제로 바꾸고 `.codaryn/`를 만든다. 또 작업 공간이 CLI 설치 위치(이 저장소) 안이면 실행 전에 `workspace_is_install_dir`(종료 2)로 거부된다. 저장소의 `examples\demo`를 그대로 실행해도 이 오류다.
 
-**doctor:** 모든 항목이 `ok`이거나 `skipped`이고 종료 0이다. `API key` 항목은 "the task uses the scripted model; no key is needed"로 건너뛴다. 기본 설정 파일이 없으면 `config file` 항목도 건너뛴다(4절).
+**doctor(선택 점검):** 별도로 준비한 사본에서 실행 전에 설정과 정책을 살피는 방법은 [7절](#7-실행-전-점검-doctor)에 있다. 사본 전용 설정을 만들었다면 `doctor`에도 `--config`로 같은 파일을 준다. 기존 체험의 점검에서는 모든 항목이 `ok`이거나 `skipped`였고 종료 코드는 0이었다. `API key` 항목의 "the task uses the scripted model; no key is needed"는 제공자 키 없이 대본이 응답할 수 있다는 뜻이다. 당시 기본 설정 파일이 없어서 `config file`도 건너뛰었다(4절).
 
-**run:** stdout에는 결과 JSON 한 줄, stderr에는 진행 줄과 끝 요약이 나온다(8절). 결과 JSON 줄은 stdout이 파이프나 파일일 때 나온다. 콘솔에서 그대로 치면 stdout과 stderr가 둘 다 터미널이라, 그 줄은 없고 stderr의 글만 보인다(10절 "터미널에서"). 아래는 stderr의 실제 출력이다. 실행 id와 시간은 실행마다 다르다.
+**run:** 위 명령은 `--json`을 명시하고 stdout의 결과를 포착한다. stderr에는 진행 줄과 끝 요약이 따로 나온다(8절). `--json`이 없고 stdout·stderr가 모두 터미널이면 JSON 줄은 보이지 않는다(10절 "터미널에서"). 아래 출력과 이어지는 목록·보고·되돌리기 출력은 기존에 보관한 측정 기록이다. 이번 문서 수정에서 재실행하지 않았으며, 기록의 시간·ID·수치를 위 명령의 새 실행 결과로 쓰지 않는다.
 
 ```
 codaryn: run started — provider scripted
@@ -126,7 +169,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261113T021512Z-b4fd29f4
 - `check #1 — not passed (fail)` → `repair 1`: 검증 실패 근거를 모델에 돌려보내 다시 고치게 했다(9절). 검증기는 id가 아니라 순번으로 나온다.
 - 끝 요약의 `Files changed`는 바뀐 파일 수다. `summary.md`를 두 번 썼어도 파일은 하나다.
 - `The agent's last message (…)` 아래의 `|` 줄은 모델이 마지막에 한 답이다(대본의 마지막 단계). 에이전트의 말이며 검증된 사실이 아니다. 무엇이 확인됐는지는 위의 `Checks passed`가 말한다(8절 "에이전트의 마지막 답").
-- stdout의 JSON은 `status` `done`, `reason` `verified`, `exitCode` 0이다. `changes`에는 `summary.md`의 생성과 변경 두 건, `usage.repairAttempts`는 1이다. JSON의 한글은 `\uXXXX`로 나오므로 PowerShell에서 `$r = node dist/src/cli/main.js run --task $demo\task.json | ConvertFrom-Json`처럼 바로 변수로 받을 수 있다. 이때 stdout은 파이프이므로 콘솔에서도 JSON 줄이 온다.
+- 이 기록의 stdout JSON은 `status` `done`, `reason` `verified`, `exitCode` 0이었다. `changes`에는 `summary.md`의 생성과 변경 두 건, `usage.repairAttempts`는 1이었다. JSON의 한글은 `\uXXXX`로 나오며 파싱하면 원래 문자열이다. 새 실행에서는 위 블록의 `$demoRun`과 그 실행 ID를 읽는다.
 - `init`으로 기본 설정을 만든 뒤라면(4절) 두 줄이 더 나온다: 진행 줄 `codaryn: using the config file in the default location: %APPDATA%\Codaryn\config.json`과 요약 줄 `Used the config file in the default location: %APPDATA%\Codaryn\config.json`. `init`의 기본 한도는 이 예시의 한도보다 크므로 실행 결과는 같다.
 
 **runs:** 작업 공간의 실행 목록이다(10절). 실제 출력:
@@ -138,15 +181,15 @@ run id (UTC)               started (local)      changes  result
 
 시작 시각은 지역 시간이다. `changes`는 실행이 바꾼 서로 다른 파일 수다. 이 체험은 `summary.md`를 두 번 썼으므로 결과 JSON의 `changes`에는 두 건이 있지만 목록에는 1로 나온다(끝 요약의 `Files changed`와 같다).
 
-**report:** `--run latest`는 가장 최근 실행을 고른다. 고른 실행은 stderr에 먼저 나온다.
+**report:** 위 흐름은 `$demoRunId`를 명시하고 `--json`으로 같은 실행을 읽는다. `latest`도 계속 지원하지만 새 실행이 끼면 대상이 달라질 수 있다. 다음은 예전에 `--run latest`를 사용한 측정 기록의 stderr다. 이 문자열을 위 명시 ID 명령의 예상 출력으로 사용하지 않는다.
 
 ```
 codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:15:12)
 ```
 
-stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 대상 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나온다. 보고서도 검증기를 순번(`verifier 1`)으로 쓴다. id는 `--json`에만 있다. 변경과 사용량 사이에는 `## The agent's last message` 절이 있다. 머리말 `The agent's last message. These are the agent's own words, not a verified fact.` 아래에 끝 요약과 같은 `|` 줄이 코드 블록으로 나온다(8절 "에이전트의 마지막 답").
+`--json`의 stdout은 `kind:"report"` 객체이며 `result`에 실행 결과가 있다. `--json`이 없을 때는 사람이 읽는 Markdown 요약이다(10절). 기존 Markdown 기록에는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 대상 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나왔다. 보고서도 검증기를 순번(`verifier 1`)으로 쓰고 id는 `--json`에만 있다. `## The agent's last message` 절의 답은 검증된 사실과 구분한다(8절 "에이전트의 마지막 답").
 
-**revert --dry-run:** 아무것도 바꾸지 않고 무엇을 되돌릴지 보인다. stdout은 `"dryRun":true`가 붙은 결과 JSON 한 줄이고 종료 코드는 실제 되돌리기와 같다(0). 이 JSON 줄도 파이프나 파일일 때만 나오고, 콘솔에서는 stderr의 글만 보인다. stderr:
+**revert --dry-run:** 위 명령은 `--workspace`와 포착한 `$demoRunId`, `--dry-run --json`을 준다. 아무것도 바꾸지 않고 무엇을 되돌릴지 보이며, `dryRun:true`가 있어야 미리보기로 읽는다. `complete`(0)와 `partial`(3) 모두 미리보기에서도 나올 수 있다. `complete`도 실제 복구 성공의 증거가 아니다. 다음은 예전에 `latest`를 사용한 미리보기의 stderr 측정 기록이다.
 
 ```
 codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:15:12)
@@ -155,7 +198,21 @@ codaryn: Files to revert: 1 (preview, nothing changed) (complete)
 Run again without --dry-run to revert.
 ```
 
-**revert:** 실행이 만든 `summary.md`를 지운다. 결과는 `"status":"complete"`, `"reverted":[{"path":"summary.md","action":"deleted"}]`, 종료 0이다. `.codaryn/`의 기록은 남는다. stderr:
+### 체험의 실제 되돌리기
+
+README의 시범은 미리보기에서 끝난다. 같은 세션의 `$demoWorkspace`·`$demoRunId`·미리보기 결과와 파일을 읽고 **실제 되돌리기를 하기로 했을 때만** 아래 블록을 별도로 실행한다. `--dry-run`을 뺐으므로 이 체험에서 생성한 `summary.md`를 실제로 지울 수 있다. 미리보기 뒤 파일이 바뀌면 실제 결과는 달라질 수 있으며 `partial`·`skipped`를 확인한다. 스냅샷·경로·잠금 검사나 파일 정리의 digest 확인을 생략하는 방법이 아니다([11절](#11-되돌리기), [18.3절](#183-계획-확인과-적용-plan-apply)).
+
+```powershell
+. {
+    if ([string]::IsNullOrWhiteSpace($demoRunId) -or [string]::IsNullOrWhiteSpace($demoWorkspace) -or $demoPreviewExit -ne 0 -or $demoPreview -isnot [pscustomobject] -or $demoPreview.schemaVersion -ne 1 -or $demoPreview.kind -ne 'revert' -or $demoPreview.runId -ne $demoRunId -or $demoPreview.status -ne 'complete' -or $demoPreview.exitCode -ne 0 -or $demoPreview.dryRun -ne $true -or $demoPreview.recordsChanged -eq $true) { throw '먼저 같은 사본·실행 ID의 미리보기를 확인하세요.' }
+    $demoRevert = node dist/src/cli/main.js revert --workspace $demoWorkspace --run $demoRunId --json | ConvertFrom-Json -ErrorAction Stop
+    $demoRevertExit = $LASTEXITCODE
+    $demoRevert | ConvertTo-Json -Depth 20
+    if ($demoRevertExit -ne 0 -or $demoRevert -isnot [pscustomobject] -or $demoRevert.schemaVersion -ne 1 -or $demoRevert.kind -ne 'revert' -or $demoRevert.runId -ne $demoRunId -or $demoRevert.status -ne 'complete' -or $demoRevert.exitCode -ne 0 -or $demoRevert.dryRun -eq $true -or $demoRevert.recordsChanged -eq $true) { throw '되돌리기 결과와 skipped를 확인하세요. 자동 재시도하지 않습니다.' }
+}
+```
+
+**과거 실제 되돌리기 기록:** 실행이 만든 `summary.md`를 지웠고 결과는 `"status":"complete"`, `"reverted":[{"path":"summary.md","action":"deleted"}]`, 종료 0이었다. `.codaryn/`의 기록은 남았다. 다음은 그때의 stderr이며 위 블록을 이번에 실행해 얻은 결과가 아니다.
 
 ```
 codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:15:12)
@@ -173,9 +230,9 @@ Files skipped: 1
 Files already as before the run are skipped; it was reverted before (complete, 2026-11-13 11:15:13)
 ```
 
-**다시 체험하기:** 되돌린 뒤 같은 사본에서 `run`부터 다시 하거나 새로 복사한다. 되돌리지 않고 다시 실행하면 `summary.md`가 이미 있어 첫 `write_file`이 `conflict`로 거부되고, 이전 실행이 만든 파일로 검증이 통과해 `changes`가 빈 `done`이 된다. **검증 통과는 이번 실행이 파일을 바꿨다는 뜻이 아니다.** 끝 요약의 `Files changed`와 `changes`를 함께 본다.
+**다시 체험하기:** 3절의 사본 생성 블록 전체로 새 경로에서 다시 시작한다. 기존 사본은 덮거나 지우지 않는다. 과거에 같은 사본을 되돌리지 않고 재실행했을 때에는 `summary.md`가 이미 있어 첫 쓰기가 `conflict`로 거부되고, 이전 파일로 검증이 통과해 `changes`가 빈 `done`이 된 기록이 있다. **검증 통과는 이번 실행이 파일을 바꿨다는 뜻이 아니다.** 끝 요약의 `Files changed`와 `changes`를 함께 본다.
 
-**정리:** `Remove-Item -Recurse -Force $demo`.
+**보관과 정리:** 재실행을 위해 기존 사본을 지울 필요는 없다. 원문 스냅샷과 기록이 남으므로 보관 위치를 확인한다. 실행 기록 정리는 [11절](#11-되돌리기)·[18.8절](#188-기록-폴더와-폐기-보관함-정리-cleanup)의 미리보기와 명시 확인 절차를 따른다. 기록을 지우면 복구 가능성도 사라질 수 있다.
 
 **대본을 직접 쓸 때:** 형식은 [CLI·공통 계약 4절](cli-contract.md#4-scripted-모델-파일-scriptedmodelscript)이다. 대본과 task 파일은 작업 공간 밖에 둔다.
 
@@ -917,14 +974,21 @@ changes of run 20261112T081531Z-dfd155bd, masked with the secrets registered now
 
 ## 11. 되돌리기
 
+`<runId>`는 결과에서 읽은 실행 ID로 바꿔 넣는 설명용 표기다. 작업 공간과 그 ID를 명시해 먼저 미리보기만 실행한다.
+
 ```powershell
 # 무엇을 되돌릴지 먼저 본다(아무것도 바꾸지 않음)
-node dist/src/cli/main.js revert --workspace D:\work\notes --run latest --dry-run
-node dist/src/cli/main.js revert --workspace D:\work\notes --run latest
+node dist/src/cli/main.js revert --workspace D:\work\notes --run <runId> --dry-run --json
+```
+
+미리보기의 대상·결과를 확인하고 실제로 되돌리기로 했을 때만 별도로 실행한다. 3절 체험은 [같은 세션의 확인 블록](#체험의-실제-되돌리기)을 쓴다.
+
+```powershell
+node dist/src/cli/main.js revert --workspace D:\work\notes --run <runId> --json
 node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500Z-9f2c41ab --quiet
 ```
 
-- `--workspace`와 `--run`(실행 id 또는 `latest`, 10절)이 필요하다. 선택 옵션은 `--dry-run`, `--quiet`, 그리고 하드 링크가 없는 드라이브에서 파일 정리를 되돌릴 때의 동의 `--allow-unsafe-move`(18.5절)다.
+- `--workspace`와 `--run`(실행 id 또는 `latest`, 10절)이 필요하다. 선택 옵션은 `--dry-run`, `--json`, `--quiet`, 그리고 하드 링크가 없는 드라이브에서 파일 정리를 되돌릴 때의 동의 `--allow-unsafe-move`(18.5절)다. `revert`는 `--config`를 받지 않는다.
 - 파일 정리의 적용 실행을 되돌리는 규칙은 18.4절에 있다. 이 절은 모델 실행(파일 도구의 변경)을 다룬다.
 - **`--dry-run`:** 실제 되돌리기와 같은 판정을 하고 아무것도 바꾸지 않는다. 잠금을 잡지 않고 되돌리기 기록도 쓰지 않는다. 결과는 `"dryRun":true`가 붙고 상태·종료 코드는 실제와 같다. 미리보기 뒤에 파일이 바뀌면 실제 되돌리기는 그 파일을 건너뛴다.
 - **대상:** 그 실행이 파일 도구(`write_file`)로 바꾼 파일. 현재 파일이 실행이 남긴 상태와 같을 때만 원래 바이트로 복원하고(`restored`), 실행이 새로 만든 파일은 지운다(`deleted`).
@@ -935,10 +999,10 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - `missing_snapshot`: 원문이 없다. 경로에 등록된 가릴 값이 든 파일도 여기에 해당한다.
   - `missing_record`: 원문은 있는데 기록에 변경이 없다(실행이 그 사이에 멈춤). 이 경로는 가리지 않은 경로이므로 사람용 요약에는 `?`로 나온다.
   - `io_error`: 그 파일을 읽거나 쓰지 못했다.
-- **결과:** 할 일이 남은 파일이 없으면 `complete`(종료 0), 하나라도 건너뛰면 `partial`(종료 3). 같은 실행을 다시 되돌리면 `already_reverted`로 `complete`다(3절).
+- **결과:** 할 일이 남은 파일이 없으면 `complete`(종료 0), `already_reverted` 이외의 이유로 건너뛴 파일이 있으면 `partial`(종료 3)이다. 같은 실행을 다시 되돌리면 `already_reverted`로 `complete`다(3절). `dryRun:true`의 결과는 예정 처리이며 실제 파일 복구를 증명하지 않는다.
 - **되돌리기 기록:** 실제 되돌리기는 끝난 뒤 `runs/<runId>/revert.json`에 시각과 상태를 쓴다. 다음 되돌리기의 결과에 `revertedBefore`로 붙고, `runs` 목록에 `reverted`로 나온다. 이 기록을 읽지 못하면 그 기록 없이 진행한다.
 - **오류:** 그 runId의 기록이 없으면 `run_not_found`, 기록을 읽을 수 없으면 `invalid_run_record`, 실행 중이면 `workspace_locked`다. 이때는 아무것도 바꾸지 않는다.
-- **되돌리지 않는 것:** 명령(`run_command`, 명령형 검증기)이 바꾼 파일. 그래서 작업 공간은 Git 커밋이나 사본으로도 보존한다.
+- **로컬 되돌리기의 범위:** 명령(`run_command`, 명령형 검증기)이 바꾼 파일과 원격 서비스에서 이미 처리한 요청·청구는 되돌릴 수 없다. 작업 공간은 Git 커밋이나 사본으로도 보존한다.
 - **스냅샷:** `<작업 공간>\.codaryn\runs\<runId>\snapshots\`에 변경 전 원문 그대로 남아 비밀이 들어 있을 수 있다. 파일 도구로는 닿지 않지만 허용한 명령은 읽을 수 있고, 자동으로 지우지 않는다.
 - **실행 폴더 정리:** `codaryn cleanup`으로 미리 본 뒤 지운다(18.8절). 손으로 지우지 않는다. 지운 실행은 되돌릴 수 없다.
   - 되돌리지 않았거나 일부만 되돌린 실행, 기록을 확인할 수 없는 실행의 기록은 `--include-not-reverted`를 따로 줘야 지워진다.
